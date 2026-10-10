@@ -1,0 +1,62 @@
+
+> mockup-studio@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.27
+   - Local:        http://localhost:3000
+   - Network:      http://10.146.173.105:3000
+
+ ✓ Starting...
+ ✓ Ready in 23s
+ ○ Compiling / ...
+Request timed out after 3000ms
+
+Retrying 1/3...
+Request timed out after 3000ms
+
+Retrying 2/3...
+Request timed out after 3000ms
+
+Retrying 3/3...
+[Error: Request timed out after 3000ms]
+ ⨯ Failed to download `Inter` from Google Fonts. Using fallback font instead.
+
+Failed to fetch `Inter` from Google Fonts.}
+ ✓ Compiled / in 47.8s (914 modules)
+ GET / 200 in 131ms
+ ○ Compiling /designs ...
+ ✓ Compiled /designs in 1616ms (960 modules)
+ GET /designs 200 in 2445ms
+ ○ Compiling /mockups ...
+ ✓ Compiled /mockups in 999ms (959 modules)
+ GET /mockups 200 in 1437ms
+ ○ Compiling /editor ...
+ ✓ Compiled /editor in 3.7s (1170 modules)
+ GET /editor 200 in 4582ms
+ ○ Compiling /batch ...
+ ✓ Compiled /batch in 1149ms (1192 modules)
+ GET /batch 200 in 1650ms
+ ○ Compiling /templates ...
+ ✓ Compiled /templates in 676ms (1196 modules)
+ GET /templates 200 in 1120ms
+ ○ Compiling /products ...
+ ✓ Compiled /products in 733ms (1200 modules)
+ GET /products 200 in 1049ms
+ ○ Compiling /listings ...
+ ✓ Compiled /listings in 723ms (1204 modules)
+ GET /listings 200 in 1095ms
+ ○ Compiling /export ...
+ ✓ Compiled /export in 824ms (1208 modules)
+ GET /export 200 in 1150ms
+ ○ Compiling /seo ...
+ ✓ Compiled /seo in 879ms (1212 modules)
+ GET /seo 200 in 1180ms
+ ○ Compiling /activity ...
+ ✓ Compiled /activity in 2.2s (1221 modules)
+ GET /activity 200 in 2517ms
+ ○ Compiling /settings ...
+ ✓ Compiled /settings in 893ms (1236 modules)
+ GET /settings 200 in 1233ms
+ ○ Compiling /api/integrations/status ...
+ ✓ Compiled /api/integrations/status in 965ms (1256 modules)
+ GET /api/integrations/status 200 in 1355ms
