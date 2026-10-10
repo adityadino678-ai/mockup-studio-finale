@@ -43,3 +43,8 @@ next-env.d.ts
 # local env secrets
 .env*.local
 
+
+# dev logs
+dev-server.log
+*.png
+!src/**
