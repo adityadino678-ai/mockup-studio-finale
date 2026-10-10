@@ -237,9 +237,15 @@ export async function deleteDesign(designId: string): Promise<void> {
 }
 
 export function designAssetIdFor(design: Design, variant: InkVariant): string {
+  const mainAsset = design.processedAssetId ?? design.originalAssetId;
   if (variant === "white" && design.whiteInkAssetId) return design.whiteInkAssetId;
   if (variant === "black" && design.blackInkAssetId) return design.blackInkAssetId;
-  return design.originalAssetId;
+  return mainAsset;
+}
+
+/** The asset shown/placed as the design's main artwork. */
+export function designMainAssetId(design: Design): string {
+  return design.processedAssetId ?? design.originalAssetId;
 }
 
 export async function setInkVariantAsset(

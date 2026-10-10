@@ -38,6 +38,8 @@ export interface Design {
   name: string;
   tags: string[];
   originalAssetId: string;
+  /** Background-removed version, if processed. Placements use this when present. */
+  processedAssetId?: string;
   whiteInkAssetId?: string;
   blackInkAssetId?: string;
   /** Which variant is used by default in editor/batch outputs. */
@@ -136,8 +138,14 @@ export interface BatchJob {
   status: JobStatus;
   /** Max items processed concurrently. */
   concurrency: number;
-  /** Ink variant applied to all designs in the job, unless overridden per item. */
+  /** Ink variant applied to all designs in the job, unless overridden per design. */
   variantRule: InkVariant;
+  /** Per-design variant overrides (designId → variant). */
+  variantOverrides?: Record<string, InkVariant>;
+  /** Optional placement template applied to all pairs without a saved placement. */
+  placementTemplateId?: string;
+  /** Skip combinations that already have a generated render. */
+  skipExisting: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -149,9 +157,13 @@ export interface BatchItem {
   designId: string;
   mockupId: string;
   designAssetId: string;
+  /** Transform snapshot used for this render (reproducibility/retry). */
+  transform: Transform;
   status: ItemStatus;
   outputAssetId?: string;
   error?: string;
+  /** Human note, e.g. "Reused existing render". */
+  note?: string;
   startedAt?: number;
   finishedAt?: number;
 }

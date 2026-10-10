@@ -14,6 +14,8 @@ import {
   updateDesign,
 } from "@/lib/db/repo";
 import { useDesignSelection } from "@/lib/store/selection";
+import { BgRemovalDialog } from "@/components/designs/bg-removal-dialog";
+import { InkVariantsDialog } from "@/components/designs/ink-variants-dialog";
 import { PageHeader } from "@/components/layout/page-header";
 import { AssetThumb } from "@/components/asset-thumb";
 import { UploadDropzone } from "@/components/upload-dropzone";
@@ -45,12 +47,13 @@ import {
   Images,
   Layers,
   MoreHorizontal,
+  Palette,
   Pencil,
   PenTool,
   Search,
   Tag,
   Trash2,
-  Upload,
+  Wand2,
 } from "lucide-react";
 
 interface DesignRow {
@@ -58,6 +61,8 @@ interface DesignRow {
   name: string;
   tags: string[];
   originalAssetId: string;
+  mainAssetId: string;
+  hasCutout: boolean;
   hasWhite: boolean;
   hasBlack: boolean;
   activeVariant: "main" | "white" | "black";
@@ -79,6 +84,40 @@ export default function DesignsPage() {
   const [editing, setEditing] = React.useState<DesignRow | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<DesignRow[] | null>(null);
   const [downloadUrl, setDownloadUrl] = React.useState<{ url: string; name: string } | null>(null);
+  const [bgDialogIds, setBgDialogIds] = React.useState<string[] | null>(null);
+  const [inkDialogId, setInkDialogId] = React.useState<string | null>(null);
+  const [designRecords, setDesignRecords] = React.useState<import("@/types/domain").Design[] | null>(null);
+  const [inkRecord, setInkRecord] = React.useState<import("@/types/domain").Design | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!bgDialogIds) {
+      setDesignRecords(null);
+      return;
+    }
+    (async () => {
+      const recs = await db.designs.bulkGet(bgDialogIds);
+      if (!cancelled) setDesignRecords(recs.filter(Boolean) as import("@/types/domain").Design[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bgDialogIds]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!inkDialogId) {
+      setInkRecord(null);
+      return;
+    }
+    (async () => {
+      const rec = await db.designs.get(inkDialogId);
+      if (!cancelled) setInkRecord(rec ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [inkDialogId]);
 
   const designs = useLiveQuery(async () => {
     const all = await db.designs.toArray();
@@ -92,6 +131,8 @@ export default function DesignsPage() {
         name: d.name,
         tags: d.tags,
         originalAssetId: d.originalAssetId,
+        mainAssetId: d.processedAssetId ?? d.originalAssetId,
+        hasCutout: !!d.processedAssetId,
         hasWhite: !!d.whiteInkAssetId,
         hasBlack: !!d.blackInkAssetId,
         activeVariant: d.activeVariant,
@@ -273,7 +314,7 @@ export default function DesignsPage() {
                     title="Click to select/deselect"
                   >
                     <AssetThumb
-                      assetId={d.originalAssetId}
+                      assetId={d.mainAssetId}
                       className="aspect-square w-full"
                     />
                     <div className="absolute left-2 top-2">
@@ -286,8 +327,9 @@ export default function DesignsPage() {
                         className="bg-white/80"
                       />
                     </div>
-                    {(d.hasWhite || d.hasBlack) && (
+                    {(d.hasWhite || d.hasBlack || d.hasCutout) && (
                       <div className="absolute right-2 top-2 flex gap-1">
+                        {d.hasCutout && <Badge>cutout</Badge>}
                         {d.hasWhite && <Badge>white ink</Badge>}
                         {d.hasBlack && <Badge>black ink</Badge>}
                       </div>
@@ -311,6 +353,12 @@ export default function DesignsPage() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => setEditing(d)}>
                           <Pencil /> Rename / tag
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setInkDialogId(d.id)}>
+                          <Palette /> Ink variants
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setBgDialogIds([d.id])}>
+                          <Wand2 /> Remove background
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openEditor(d.id)}>
                           <PenTool /> Open in editor
@@ -337,11 +385,14 @@ export default function DesignsPage() {
           </div>
 
           {selected.length > 1 && (
-            <div className="mt-4 flex items-center justify-between rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
               <span className="text-[13px] text-ink-muted">
                 {selected.length} designs selected
               </span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" onClick={() => setBgDialogIds(selected)}>
+                  <Wand2 className="h-3.5 w-3.5" /> Remove backgrounds
+                </Button>
                 <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(filtered.filter((d) => selected.includes(d.id)))}>
                   <Trash2 className="h-3.5 w-3.5" /> Delete selected
                 </Button>
@@ -365,6 +416,17 @@ export default function DesignsPage() {
           setEditing(null);
         }}
       />
+
+      {/* Background removal dialog */}
+      {bgDialogIds && designRecords && designRecords.length > 0 && (
+        <BgRemovalDialog
+          designs={designRecords}
+          onClose={() => setBgDialogIds(null)}
+        />
+      )}
+
+      {/* Ink variants dialog */}
+      {inkRecord && <InkVariantsDialog design={inkRecord} onClose={() => setInkDialogId(null)} />}
 
       {/* Delete confirm */}
       <Dialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>

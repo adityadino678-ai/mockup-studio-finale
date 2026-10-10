@@ -65,13 +65,20 @@ export function drawPlacement(
   ctx.restore();
 }
 
+/** Structural type satisfied by both HTMLCanvasElement and OffscreenCanvas. */
+export interface Canvas2DSource {
+  width: number;
+  height: number;
+  getContext(type: "2d"): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+}
+
 export function composeToCanvas(
-  canvas: HTMLCanvasElement | OffscreenCanvas,
+  canvas: Canvas2DSource,
   mockupBmp: ImageBitmap,
   designBmp: ImageBitmap,
   t: Transform,
   opts: { drawDesignFirst?: boolean } = {},
-): (HTMLCanvasElement | OffscreenCanvas) | null {
+): Canvas2DSource | null {
   const w = mockupBmp.width;
   const h = mockupBmp.height;
   if (w <= 0 || h <= 0) return null;

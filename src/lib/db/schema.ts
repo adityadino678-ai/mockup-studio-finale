@@ -70,6 +70,10 @@ export class MockupStudioDB extends Dexie {
       activity: "id, createdAt, type",
       settings: "key",
     });
+    // v2: add render provenance indexes for batch dedupe and export queries.
+    this.version(2).stores({
+      assets: "id, kind, parentId, sourceDesignId, sourceMockupId, createdAt",
+    });
   }
 }
 
