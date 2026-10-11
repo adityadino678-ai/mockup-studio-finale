@@ -305,12 +305,13 @@ function ListingEditor({
         <div className="space-y-3">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label>Title</Label>
+              <Label htmlFor="listing-title">Title</Label>
               <span className={`text-[11px] ${draft.title.length > ETSY_TITLE_MAX ? "text-danger" : "text-ink-subtle"}`}>
                 {draft.title.length}/{ETSY_TITLE_MAX}
               </span>
             </div>
             <Input
+              id="listing-title"
               value={draft.title}
               onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
               placeholder="e.g. Funny Cat T-Shirt, Gifts for Cat Lovers"
@@ -329,12 +330,13 @@ function ListingEditor({
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <Label>Tags (comma separated)</Label>
+              <Label htmlFor="listing-tags">Tags (comma separated)</Label>
               <span className={`text-[11px] ${tags.length > ETSY_TAG_MAX_COUNT ? "text-danger" : "text-ink-subtle"}`}>
                 {tags.length}/{ETSY_TAG_MAX_COUNT}
               </span>
             </div>
             <Input
+              id="listing-tags"
               value={tagsText}
               onChange={(e) => setTagsText(e.target.value)}
               placeholder="cat tshirt, funny cat shirt, cat lover gift"

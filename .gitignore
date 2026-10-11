@@ -52,3 +52,8 @@ dev-server.log
 # build logs
 build.log
 
+
+# e2e logs + results
+e2e*.log
+test-results/
+playwright-report/

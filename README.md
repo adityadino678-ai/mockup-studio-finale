@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mockup Studio
 
-## Getting Started
+A premium, local-first workspace for print-on-demand sellers: upload designs, place them on mockup photos in a real editor, batch-generate combinations, create ink variants, remove backgrounds, reuse templates, and export organized ZIP archives — all stored in your browser, no account required.
 
-First, run the development server:
+## Quick start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Optional integrations live in `.env.local` (copy `.env.example`):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+PRINTIFY_API_KEY=...      # live Printify catalog + product creation
+AI_API_KEY=...            # any OpenAI-compatible provider (AI SEO + assistant)
+AI_BASE_URL=...           # default: https://api.openai.com/v1
+AI_MODEL=...              # default: gpt-4o-mini
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**Everything in the core workflow works without any API key.**
 
-## Learn More
+## Commands
 
-To learn more about Next.js, take a look at the following resources:
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the dev server on port 3000 |
+| `npm run build` | Production build |
+| `npm run start` | Serve the production build |
+| `npm run lint` | ESLint |
+| `npx tsc --noEmit` | Strict type check |
+| `npx vitest run` | Unit/integration tests (27 tests) |
+| `npx playwright test` | End-to-end acceptance tests (14 tests, needs `npx playwright install chromium` once) |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## The workflow
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. **Designs** — upload one or many PNG/JPEG/WebP files (drag & drop, 40 MB limit). Everything persists in IndexedDB and survives refreshes. Tag, rename, duplicate, download, delete with confirmation.
+2. **Mockups** — upload product photos, organize by category, favorite, multi-select.
+3. **Mockup Editor** — place artwork with the same compositing math used for exports: move, resize, rotate, flip, stretch, opacity, center-align, numeric inputs, undo/redo, unsaved-changes indicator, zoom/fit. Optional "design behind mockup" mode for transparent garment PNGs. Save per design×mockup pair, save as template, export a full-resolution PNG.
+4. **Background removal** — two engines, both fully local: *flood-key* (instant, solid backgrounds) and *AI segmentation* (MODNet via transformers.js, MIT license, ~25 MB model downloaded once and cached). Before/after comparison with transparency readout, retries, download; the original is always preserved.
+5. **Ink variants** — white-ink and black-ink versions per design: auto-generated as alpha-preserving flat recolors (presented for review, replaceable with your own file), independently stored and selectable in the editor and batches.
+6. **Batch Studio** — pick N designs × M mockups, see the exact combination count, choose variant rule and placement template, run with live per-item status (real counts, never estimates), cancel, retry single items, and skip combinations that already have renders. Interrupted jobs recover as retryable failures.
+7. **Templates** — placement templates (from the editor or built manually), mockup collections, ink rules, listing and SEO templates. Create, rename, edit, duplicate, version, search, apply to many designs with a preview of the settings.
+8. **Product Builder** — local product drafts; with `PRINTIFY_API_KEY` the live Printify blueprint catalog loads (real variants, print areas, providers). Product creation requires an explicit confirm step; nothing is published automatically.
+9. **Listings** — Etsy-ready drafts with validation against Etsy's documented limits (title ≤ 140 chars, ≤ 13 tags of ≤ 20 chars, price rules). Bulk-generate drafts from designs; duplicate; status-separated views.
+10. **AI SEO Studio** — with an AI key: keyword ideas by intent, product/audience/seasonal angles, title drafts, description, tags — all editable, never fabricating search volume or sales data; save as template or spin into a listing draft. Without a key: honest setup instructions.
+11. **Export Center** — real ZIP (fflate) with `MockupStudio_Export/<Design>/original.png`, ink variants, `mockups/`, `listing/`, and a `manifest.json`. The archive is re-read and verified before success is reported; missing assets are listed, not hidden.
+12. **Activity** — a log of what actually happened (uploads, saves, batches, exports, errors).
 
-## Deploy on Vercel
+## Architecture notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Next.js 15 (App Router) + TypeScript strict + Tailwind v4 + shadcn-style components.**
+- **One compositing engine** (`src/lib/canvas/compose.ts`): the Konva editor, the batch renderer and the export compositor all call the same `computeGeometry`/`drawPlacement` math, so the rendered output provably matches the editor preview — exports are full-resolution composites, never screenshots.
+- **Transforms are mockup-relative** (fractions of mockup dimensions), so placements survive canvas resize and transfer across mockups via templates.
+- **Storage**: Dexie (IndexedDB) with metadata and blobs in separate tables; a future server-side migration only needs to swap the repository layer. Schema is versioned (v2 added render-provenance indexes).
+- **Secrets never reach the browser**: Printify and AI calls go through server route handlers (`src/app/api/**`) reading env vars server-side; the client only ever receives `configured: true/false` plus results.
+- **Background removal** runs a Web Worker for the AI engine; the flood-key algorithm is a pure, unit-tested function.
+- **Batch rendering** is sequential on the main thread with event-loop yields — item statuses are the source of truth, and the UI stays responsive.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Verified during development
+
+- Uploads persist across reloads (manual browser QA + E2E).
+- Editor compositing verified at pixel level (render contains design pixels at the transformed position over the mockup background, at full mockup resolution).
+- Batch: 4/4 items done; re-run reuses renders (no duplicates); interrupted jobs recover.
+- Background removal verified at pixel level (corner alpha 0, artwork alpha 255, original untouched) for both engines.
+- Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
+- Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
+- Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
+- 27 unit/integration tests + 14 E2E acceptance tests, lint clean, `tsc --strict` clean, production build passing.
+
+## Known limitations (honest)
+
+- **OneDrive caveat (Windows)**: if the project lives inside an OneDrive-synced folder, OneDrive can turn `.next` build files into cloud placeholders and break `next dev`/`next build` with `EINVAL readlink`. Fix: exclude the project folder from OneDrive sync (OneDrive → Settings → Manage backup / "Always keep on this device"), or move the project outside the synced Documents directory. The E2E runner already wipes `.next` before starting for this reason.
+
+- **Printify / Etsy / AI** are fully wired server-side but were **not verified live** in this environment — no credentials. Their UIs show real, unconfigured setup states. Etsy listing *submission* is deliberately not implemented as a live call yet (drafts + validation only) because Etsy's v3 OAuth flow needs app registration; the workspace is ready for it.
+- The AI background-removal model (MODNet) is trained for **photos of people/products**; for flat artwork on solid backgrounds the flood-key engine is faster and usually better. `Xenova/u2net` was gated (HTTP 401) at build time, so MODNet is the shipped default.
+- Perspective/warp editing is **not** offered — Konva cannot do true perspective transforms, and fake controls are worse than none.
+- Batch rendering is single-threaded by design (reliability over throughput); very large jobs still complete with live status and can be cancelled.
+- Data lives in the browser profile that created it (IndexedDB is per-profile).
+
+## Security
+
+- API keys are server-side only (`.env.local`, git-ignored; verified no key material in client bundles — covered by an E2E test).
+- File uploads validated (type, size, emptiness); filenames sanitized against traversal (`sanitizeFilename`).
+- No network calls leave the machine in the core workflow; background-removal models load from jsDelivr/HuggingFace only when you use the AI engine.
