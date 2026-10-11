@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Sidebar />
             <main className="scroll-thin flex-1 overflow-y-auto">{children}</main>
           </div>
-          <AssistantPanel onClose={() => {}} />
+          <AssistantPanel />
           <Toaster />
         </TooltipProvider>
       </body>

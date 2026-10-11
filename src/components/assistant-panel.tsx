@@ -4,7 +4,6 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
-import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,7 +39,7 @@ interface Turn {
  * the panel never claims to perform work it cannot do. Free-text questions go
  * to the server-side AI provider and require explicit configuration.
  */
-export function AssistantPanel({ onClose }: { onClose: () => void }) {
+export function AssistantPanel() {
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
   const [question, setQuestion] = React.useState("");
@@ -176,7 +175,7 @@ export function AssistantPanel({ onClose }: { onClose: () => void }) {
                 {integrations.ai ? "AI provider connected" : "Quick actions only — no AI provider"}
               </div>
             </div>
-            <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close">
+            <Button variant="ghost" size="icon-sm" onClick={() => setOpen(false)} title="Close">
               <X className="h-4 w-4" />
             </Button>
           </div>

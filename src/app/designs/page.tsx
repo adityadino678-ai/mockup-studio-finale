@@ -76,7 +76,6 @@ export default function DesignsPage() {
   const selected = useDesignSelection((s) => s.selectedDesignIds);
   const toggleSelect = useDesignSelection((s) => s.toggle);
   const clearSelection = useDesignSelection((s) => s.clear);
-  const setSelection = useDesignSelection((s) => s.setSelection);
 
   const [query, setQuery] = React.useState("");
   const [tagFilter, setTagFilter] = React.useState<string | null>(null);

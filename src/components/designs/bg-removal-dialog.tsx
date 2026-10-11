@@ -13,8 +13,8 @@ import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
 import type { Design } from "@/types/domain";
 import { AssetThumb } from "@/components/asset-thumb";
 import { Button } from "@/components/ui/button";
-import { Badge, Separator } from "@/components/ui/card";
-import { Label, Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/card";
+import { Label } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Progress, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider } from "@/components/ui/primitives";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider } from "@/components/ui/primitives";
 import { Download, Loader2, RotateCcw, Wand2 } from "lucide-react";
 
 type ProcessingState = "idle" | "processing" | "done" | "failed";
@@ -145,7 +145,7 @@ export function BgRemovalDialog({
             Remove background — {single ? designs[0].name : `${designs.length} designs`}
           </DialogTitle>
           <DialogDescription>
-            The original file is always preserved. The processed cutout becomes the design's placed artwork.
+            The original file is always preserved. The processed cutout becomes the design&rsquo;s placed artwork.
           </DialogDescription>
         </DialogHeader>
 

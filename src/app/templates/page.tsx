@@ -32,7 +32,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Tabs,
-  TabsContent,
   TabsList,
   TabsTrigger,
 } from "@/components/ui/primitives";
@@ -255,7 +254,7 @@ export default function TemplatesPage() {
         <Dialog open onOpenChange={(o) => !o && setApplying(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Apply "{applying.name}"</DialogTitle>
+              <DialogTitle>Apply &ldquo;{applying.name}&rdquo;</DialogTitle>
               <DialogDescription>
                 {applying.payload.type === "placement"
                   ? `This sets ${describeTemplate(applying)} on the placements of the designs you select. Designs without a saved placement are skipped — open them in the editor first.`
@@ -290,7 +289,7 @@ export default function TemplatesPage() {
         <Dialog open onOpenChange={(o) => !o && setConfirmDelete(null)}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
-              <DialogTitle>Delete "{confirmDelete.name}"?</DialogTitle>
+              <DialogTitle>Delete &ldquo;{confirmDelete.name}&rdquo;?</DialogTitle>
               <DialogDescription>The template is removed permanently. Artwork and placements are not affected.</DialogDescription>
             </DialogHeader>
             <DialogFooter>

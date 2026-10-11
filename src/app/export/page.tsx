@@ -4,7 +4,7 @@ import * as React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
-import { designMainAssetId, getAssetBlob } from "@/lib/db/repo";
+import { designMainAssetId } from "@/lib/db/repo";
 import { buildExportArchive, pruneOldExports, recordExportJob } from "@/lib/export/zip-export";
 import { uid, logActivity } from "@/lib/db/repo";
 import type { ExportJob, ExportSelection } from "@/types/domain";
@@ -14,7 +14,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Separator } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Progress } from "@/components/ui/primitives";
-import { formatBytes, formatDateTime } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
 import { Download, FileArchive, Loader2, Trash2, TriangleAlert } from "lucide-react";
 
 type Phase = "idle" | "collecting" | "packing" | "verifying" | "done" | "error";

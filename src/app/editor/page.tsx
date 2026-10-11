@@ -11,7 +11,7 @@ import { getAssetBlob, getPlacement, savePlacement, storeAsset } from "@/lib/db/
 import { sanitizeFilename, decodeImage, canvasToBlob } from "@/lib/image/image";
 import { composeToCanvas } from "@/lib/canvas/compose";
 import { useEditorStore, selectDirty, selectCanUndo, selectCanRedo, type EditorSnapshot } from "@/lib/store/editor";
-import type { InkVariant, Mockup, Placement, Template } from "@/types/domain";
+import type { InkVariant, Template } from "@/types/domain";
 import { DEFAULT_TRANSFORM } from "@/types/domain";
 import { EditorPicker } from "@/components/editor/editor-picker";
 import { PropertiesPanel } from "@/components/editor/properties-panel";
@@ -31,7 +31,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Select,
   SelectContent,
@@ -51,7 +50,6 @@ import {
   MoveHorizontal,
   Redo2,
   Save,
-  Scaling,
   LayoutTemplate as TemplateIcon,
   Undo2,
   ZoomIn,
@@ -99,7 +97,6 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
   );
 
   const current = useEditorStore((s) => s.current);
-  const saved = useEditorStore((s) => s.saved);
   const isDirty = useEditorStore(selectDirty);
   const canUndo = useEditorStore(selectCanUndo);
   const canRedo = useEditorStore(selectCanRedo);

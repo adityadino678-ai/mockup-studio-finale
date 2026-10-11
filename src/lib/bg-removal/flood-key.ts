@@ -55,14 +55,6 @@ export function floodKeyRemoveBackground(
     return x < width / 2 ? 2 : 3;
   };
 
-  const isBackground = (idx: number): boolean => {
-    const p = idx * 4;
-    if (pixels[p + 3] === 0) return true; // already transparent
-    const s = nearestSeed(idx % width, Math.floor(idx / width));
-    const d = colorDist(pixels[p], pixels[p + 1], pixels[p + 2], seeds[s][0], seeds[s][1], seeds[s][2]);
-    return d <= tolerance;
-  };
-
   const push = (idx: number) => {
     if (visited[idx]) return;
     visited[idx] = 1;

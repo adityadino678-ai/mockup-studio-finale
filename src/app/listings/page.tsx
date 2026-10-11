@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { AssetThumb } from "@/components/asset-thumb";
 import { designMainAssetId } from "@/lib/db/repo";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Badge, Card, CardContent, CardHeader, CardTitle, Separator } from "@/components/ui/card";
+import { Badge, Card, CardContent, Separator } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import {
@@ -67,7 +67,7 @@ export default function ListingsPage() {
   const bulkGenerate = async () => {
     if (!designs || designs.length === 0) return;
     const now = Date.now();
-    const drafts: ListingDraft[] = designs.map((d, i) => ({
+    const drafts: ListingDraft[] = designs.map((d) => ({
       id: uid(),
       title: `${d.name} — custom design`.slice(0, ETSY_TITLE_MAX),
       description: `A custom ${d.name} design.\n\n• Print-on-demand\n• Ships in 2–4 business days\n\nAdd your own description in the listing editor.`,
@@ -377,10 +377,7 @@ function ListingEditor({
               <select
                 className="h-9 w-full rounded-md border border-border-strong bg-surface px-2 text-[13px]"
                 value={draft.designId ?? ""}
-                onChange={(e) => {
-                  const design = designs.find((d) => d.id === e.target.value);
-                  setDraft((d) => ({ ...d, designId: e.target.value || undefined }));
-                }}
+                onChange={(e) => setDraft((d) => ({ ...d, designId: e.target.value || undefined }))}
               >
                 <option value="">None</option>
                 {designs.map((d) => (

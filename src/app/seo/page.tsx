@@ -45,14 +45,6 @@ interface SeoResult {
   disclaimer?: string;
 }
 
-interface SavedResearch {
-  id: string;
-  niche: string;
-  researchedAt: string;
-  model?: string;
-  result: SeoResult;
-}
-
 const INTENTS = ["search", "discovery", "gifting", "seasonal", "problem-solution"];
 
 export default function SeoStudioPage() {

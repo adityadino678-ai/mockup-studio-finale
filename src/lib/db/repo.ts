@@ -1,6 +1,5 @@
 import { db } from "./schema";
 import {
-  decodeImage,
   getImageInfo,
   makeThumbnail,
   sanitizeFilename,

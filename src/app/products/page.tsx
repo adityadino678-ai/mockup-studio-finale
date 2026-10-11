@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
-import { Check, Cloud, KeyRound, Package, Plus, RefreshCw, Send, Trash2, TriangleAlert } from "lucide-react";
+import { Cloud, KeyRound, Package, Plus, RefreshCw, Send, Trash2, TriangleAlert } from "lucide-react";
 
 interface Blueprint {
   id: number;
@@ -74,7 +74,6 @@ export default function ProductBuilderPage() {
 
   React.useEffect(() => {
     void loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const startDraft = (design: Design) => {

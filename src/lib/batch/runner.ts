@@ -24,12 +24,6 @@ import {
 
 const yieldToUi = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-interface RenderContext {
-  mockupBmp: ImageBitmap;
-  designBmp: ImageBitmap;
-  drawDesignFirst: boolean;
-}
-
 interface RunState {
   cancelled: boolean;
 }

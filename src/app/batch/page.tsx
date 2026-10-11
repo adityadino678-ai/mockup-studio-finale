@@ -5,17 +5,16 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import { cancelBatchJob, createBatchJob, deleteBatchJob, recoverStaleJobs, retryBatchItem, runBatchJob } from "@/lib/batch/runner";
-import { designAssetIdFor, designMainAssetId, getAssetBlob } from "@/lib/db/repo";
-import { decodeImage } from "@/lib/image/image";
+import { designMainAssetId } from "@/lib/db/repo";
 import { useDesignSelection } from "@/lib/store/selection";
-import type { BatchItem, BatchJob, InkVariant, Template } from "@/types/domain";
+import type { BatchItem, BatchJob, InkVariant } from "@/types/domain";
 import { PageHeader } from "@/components/layout/page-header";
 import { AssetThumb } from "@/components/asset-thumb";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Separator } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Checkbox, Progress, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider } from "@/components/ui/primitives";
-import { cn, relativeTime } from "@/lib/utils";
+import { Checkbox, Progress, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
+import { relativeTime } from "@/lib/utils";
 import { CircleCheck, CircleX, Clock, Loader2, Layers, RotateCcw, Trash2, X } from "lucide-react";
 
 const STATUS_BADGE: Record<string, { label: string; variant: "default" | "muted" | "danger" | "warning" | "forest" }> = {
@@ -41,7 +40,7 @@ export default function BatchStudioPage() {
   const [selectedDesignIds, setSelectedDesignIds] = React.useState<string[]>([]);
   const [selectedMockupIds, setSelectedMockupIds] = React.useState<string[]>([]);
   const [variantRule, setVariantRule] = React.useState<InkVariant>("main");
-  const [concurrency, setConcurrency] = React.useState(2);
+  const concurrency = 2;
   const [skipExisting, setSkipExisting] = React.useState(true);
   const [placementTemplateId, setPlacementTemplateId] = React.useState<string>("none");
   const [starting, setStarting] = React.useState(false);

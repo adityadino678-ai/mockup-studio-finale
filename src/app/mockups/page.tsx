@@ -262,7 +262,7 @@ export default function MockupsPage() {
       <Dialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete "{confirmDelete?.name}"?</DialogTitle>
+            <DialogTitle>Delete &ldquo;{confirmDelete?.name}&rdquo;?</DialogTitle>
             <DialogDescription>
               Placements using this mockup will be removed. Generated batch images already made are kept.
             </DialogDescription>

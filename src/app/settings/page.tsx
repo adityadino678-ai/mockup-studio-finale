@@ -55,7 +55,7 @@ export default function SettingsPage() {
             <HardDrive className="h-4 w-4 text-forest" /> Local storage
           </CardTitle>
           <CardDescription>
-            Mockup Studio stores all designs, mockups and generated images in your browser's
+            Mockup Studio stores all designs, mockups and generated images in your browser&rsquo;s
             IndexedDB. Nothing is uploaded anywhere.
           </CardDescription>
         </CardHeader>
