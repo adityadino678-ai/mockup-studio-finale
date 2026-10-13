@@ -57,7 +57,7 @@ describe("IndexedDB persistence", () => {
   });
 
   it("keeps ink variants independent from the original asset", async () => {
-    const { design } = await seed();
+    await seed();
     const stored = await db.designs.get("d1");
     expect(stored?.originalAssetId).toBe("a1");
     expect(stored?.whiteInkAssetId).toBe("a2");
