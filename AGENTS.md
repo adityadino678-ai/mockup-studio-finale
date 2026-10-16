@@ -44,8 +44,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 27 unit tests
-npm run test:e2e      # 15 acceptance tests (local dev server)
+npm run test          # 34 unit tests
+npm run test:e2e      # 16 acceptance tests (local dev server)
 ```
 
 To run the e2e suite against the deployed site instead:
@@ -61,7 +61,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **12 static pages + 5 on-demand endpoints.** No page depends on request state,
+- **12 static pages + 6 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker.
@@ -101,10 +101,22 @@ Both must pass. The production run has caught bugs the local run missed.
 ## Known gaps
 
 - **Workers Builds auto-deploy is not connected** (needs the dashboard click above).
-- **No API keys are deployed**, by design. Printify and AI panels show an honest
-  "not configured" state. To enable: `npx wrangler secret put PRINTIFY_API_KEY`
-  (and/or `AI_API_KEY`). Because there are no secrets, the public attack surface
-  is effectively nil — every integration endpoint returns 503 before doing work.
+- **API keys are optional and user-supplied.** A visitor can paste their own
+  Printify / AI keys in **Settings → API connections**; they are stored in that
+  browser's IndexedDB (`settings` table, key `integrations`) and sent per-request
+  as `x-printify-key` / `x-ai-key` / `x-ai-base-url` / `x-ai-model` headers.
+  `src/lib/server/creds.ts` prefers the browser value and falls back to a server
+  secret, so nothing breaks when neither is set. The server never stores a
+  user's key. Preview deployments can also set secrets with
+  `npx wrangler secret put PRINTIFY_API_KEY` (and/or `AI_API_KEY`). With no keys
+  anywhere, every integration endpoint returns 503 before doing work.
+- **`/api/integrations/test`** performs a live read-only probe (Printify
+  `/v1/shops.json`; AI `/models` with a one-token chat fallback) and is the source
+  of truth for the "Test connection" buttons.
+- **Printify endpoints now use the documented paths** (`/v1/catalog/blueprints.json`,
+  `/v1/catalog/blueprints/{id}.json`, `/v1/catalog/blueprints/{id}/print_providers.json`,
+  `/v1/uploads/images.json`, `/v1/shops/{shop_id}/products.json`). Product creation
+  is still **not verified live** and has no price handling — treat it as a draft flow.
 - **The 25 MB base64 artwork upload in `api/printify/products.ts` exceeds the
   Workers 128 MB memory limit.** Unreachable while no keys are set, but that cap
   must come down before anyone enables Printify.

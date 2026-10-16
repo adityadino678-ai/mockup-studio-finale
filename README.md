@@ -16,7 +16,13 @@ Or from the folder one level up, without touching the terminal commands yourself
 | `../start.cmd` | Checks Node, installs deps on first run, opens the browser and starts the dev server |
 | `../setup.cmd` | Installs dependencies only |
 
-Optional integrations live in `.env.local` (copy `.env.example`):
+Optional integrations can be connected two ways:
+
+1. **In the app (recommended):** open **Settings → API connections**, paste your
+   Printify key and/or any OpenAI-compatible AI key (plus base URL and model),
+   and press **Test connection**. Keys are stored only in your browser's
+   IndexedDB and attached to the relevant requests — never saved on the server.
+2. **On the server** (`.env.local` / `wrangler secret put`):
 
 ```bash
 PRINTIFY_API_KEY=...      # live Printify catalog + product creation
@@ -24,6 +30,8 @@ AI_API_KEY=...            # any OpenAI-compatible provider (AI SEO + assistant)
 AI_BASE_URL=...           # default: https://api.openai.com/v1
 AI_MODEL=...              # default: gpt-4o-mini
 ```
+
+A browser-saved key takes precedence over a server key when both are present.
 
 **Everything in the core workflow works without any API key.**
 
@@ -37,8 +45,8 @@ AI_MODEL=...              # default: gpt-4o-mini
 | `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
-| `npm run test` | Unit/integration tests (27 tests) |
-| `npm run test:e2e` | End-to-end acceptance tests (15 tests, needs `npx playwright install chromium` once) |
+| `npm run test` | Unit/integration tests (34 tests) |
+| `npm run test:e2e` | End-to-end acceptance tests (16 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
 
 ## Deploying to Cloudflare
@@ -95,7 +103,11 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - **One compositing engine** (`src/lib/canvas/compose.ts`): the Konva editor, the batch renderer and the export compositor all call the same `computeGeometry`/`drawPlacement` math, so the rendered output provably matches the editor preview — exports are full-resolution composites, never screenshots.
 - **Transforms are mockup-relative** (fractions of mockup dimensions), so placements survive canvas resize and transfer across mockups via templates.
 - **Storage**: Dexie (IndexedDB) with metadata and blobs in separate tables; a future server-side migration only needs to swap the repository layer. Schema is versioned (v2 added render-provenance indexes).
-- **Secrets never reach the browser**: Printify and AI calls go through server endpoints (`src/pages/api/**`) reading env vars server-side; the client only ever receives `configured: true/false` plus results.
+- **Secrets never ship in the bundle.** Integration keys are either pasted by the
+  user in Settings (kept in that browser's IndexedDB, sent only as per-request
+  headers to the app's own API routes) or set server-side as secrets. Printify and
+  AI calls always go through server endpoints (`src/pages/api/**`), so keys are
+  never called from the client directly and never appear in client chunks.
 - **Client routing** is a thin History-API shim (`src/lib/client/nav.tsx`) providing `Link`, `useRouter`, `usePathname` and `useSearchParams`, so components navigate without a router dependency.
 - **Background removal** runs a Web Worker for the AI engine; the flood-key algorithm is a pure, unit-tested function.
 - **Batch rendering** is sequential on the main thread with event-loop yields — item statuses are the source of truth, and the UI stays responsive.
@@ -109,13 +121,18 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 27 unit/integration tests + 14 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
+- 34 unit/integration tests + 16 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 
 - **The project must live outside OneDrive.** It now runs from `C:\Users\hp\Projects\Mockup Studio 2.0`; the old copy under `OneDrive\Documents\ANTIGRAVITY PROJECTS` was removed. OneDrive turns build caches into cloud placeholders and breaks `node_modules` resolution, so keep the folder out of synced directories.
 
-- **Printify / Etsy / AI** are fully wired server-side but were **not verified live** in this environment — no credentials. Their UIs show real, unconfigured setup states. Etsy listing *submission* is deliberately not implemented as a live call yet (drafts + validation only) because Etsy's v3 OAuth flow needs app registration; the workspace is ready for it.
+- **Printify / AI** are wired to the live provider APIs and can be connected from
+  **Settings → API connections** (bring your own key) with a real **Test
+  connection** probe. They were **not verified against a real account** in this
+  environment; Etsy listing *submission* is deliberately not implemented as a live
+  call yet (drafts + validation only) because Etsy's v3 OAuth flow needs app
+  registration; the workspace is ready for it.
 - The AI background-removal model (MODNet) is trained for **photos of people/products**; for flat artwork on solid backgrounds the flood-key engine is faster and usually better. `Xenova/u2net` was gated (HTTP 401) at build time, so MODNet is the shipped default.
 - Perspective/warp editing is **not** offered — Konva cannot do true perspective transforms, and fake controls are worse than none.
 - Batch rendering is single-threaded by design (reliability over throughput); very large jobs still complete with live status and can be cancelled.
@@ -123,6 +140,11 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 
 ## Security
 
-- API keys are server-side only (`.env.local`, git-ignored; verified no key material in client bundles — covered by an E2E test).
+- API keys are never bundled into client code. A visitor may paste their own keys
+  in Settings (stored in their browser's IndexedDB); those are only ever sent as
+  headers to the app's own `/api/**` routes, which proxy to the provider. Server
+  keys live in `.env.local` / Wrangler secrets (git-ignored); no key material is
+  present in client bundles (covered by an E2E test).
+- The `/api/integrations/test` endpoint makes a read-only probe and persists nothing.
 - File uploads validated (type, size, emptiness); filenames sanitized against traversal (`sanitizeFilename`).
 - No network calls leave the machine in the core workflow; background-removal models load from jsDelivr/HuggingFace only when you use the AI engine.

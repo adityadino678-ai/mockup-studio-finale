@@ -5,6 +5,7 @@ import * as React from "react";
 import { usePathname } from "@/lib/client/nav";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/schema";
+import { authedFetch } from "@/lib/client/integrations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -57,7 +58,7 @@ export function AssistantPanel() {
   const [integrations, setIntegrations] = React.useState<Record<string, boolean>>({});
 
   React.useEffect(() => {
-    fetch("/api/integrations/status")
+    authedFetch("/api/integrations/status")
       .then((r) => r.json())
       .then((s) =>
         setIntegrations({
@@ -122,7 +123,7 @@ export function AssistantPanel() {
     setLoading(true);
     setAiError(null);
     try {
-      const res = await fetch("/api/ai/assistant", {
+      const res = await authedFetch("/api/ai/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -220,8 +221,11 @@ export function AssistantPanel() {
 
             {aiError && !integrations.ai && (
               <p className="rounded-md bg-surface-muted px-3 py-2 text-[11px] leading-relaxed text-ink-muted">
-                Free-text questions need an AI provider. Add <code>AI_API_KEY</code> to{" "}
-                <code>.env.local</code> and restart the server. Quick actions above work regardless.
+                Free-text questions need an AI provider. Paste an API key under{" "}
+                <Link href="/settings" onClick={() => setOpen(false)} className="text-forest underline">
+                  Settings → API connections
+                </Link>
+                . Quick actions above work regardless.
               </p>
             )}
           </div>

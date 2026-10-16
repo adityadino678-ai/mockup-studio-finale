@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { AiNotConfiguredError, aiConfig, complete } from "@/lib/server/ai";
+import { credentialsFromRequest } from "@/lib/server/creds";
 
 const SYSTEM_PROMPT = `You are the assistant inside Mockup Studio, a local-first print-on-demand workspace.
 
@@ -32,17 +33,18 @@ interface AssistantRequest {
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request }) => {
-  const { configured, model } = aiConfig();
-  if (!configured) {
+  const creds = credentialsFromRequest(request);
+  if (!creds.ai) {
     return json(
       {
         configured: false,
         error:
-          "The assistant needs an AI provider. Add AI_API_KEY to .env.local to enable Q&A. The quick actions on this panel work without it.",
+          "The assistant needs an AI provider. Paste your API key in Settings to enable Q&A. The quick actions on this panel work without it.",
       },
       503,
     );
   }
+  const model = aiConfig(creds.ai).model;
 
   let body: AssistantRequest;
   try {
@@ -73,6 +75,7 @@ export const POST: APIRoute = async ({ request }) => {
         { role: "user", content: `${contextLine}\n\nQuestion: ${body.question.trim()}` },
       ],
       { temperature: 0.4, maxTokens: 700 },
+      creds.ai,
     );
     return json({ configured: true, model, answer });
   } catch (error) {

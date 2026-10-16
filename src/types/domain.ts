@@ -371,6 +371,7 @@ export type ActivityType =
   | "product.create"
   | "listing.submit"
   | "integration.test"
+  | "integration.save"
   | "error";
 
 export interface ActivityRecord {
@@ -384,6 +385,8 @@ export interface ActivityRecord {
 export interface IntegrationStatus {
   key: "printify" | "etsy" | "ai";
   configured: boolean;
+  /** Where the active credential came from, when configured. */
+  source?: "browser" | "server" | null;
   providerLabel?: string;
   detail?: string;
   checkedAt: number;

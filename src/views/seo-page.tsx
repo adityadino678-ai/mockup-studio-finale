@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/schema";
 import { logActivity, uid } from "@/lib/db/repo";
+import { authedFetch } from "@/lib/client/integrations";
+import { Link } from "@/lib/client/nav";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Separator } from "@/components/ui/card";
@@ -63,7 +65,7 @@ export function SeoStudioPage() {
   const saved = useLiveQuery(() => db.templates.where("category").equals("seo").toArray(), []);
 
   React.useEffect(() => {
-    fetch("/api/integrations/status")
+    authedFetch("/api/integrations/status")
       .then((r) => r.json())
       .then((s) => setStatus({ configured: !!s.ai?.configured, detail: s.ai?.detail }))
       .catch(() => setStatus({ configured: false, detail: "Could not reach the server" }));
@@ -77,7 +79,7 @@ export function SeoStudioPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/ai/seo", {
+      const res = await authedFetch("/api/ai/seo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ niche, productType, audience, season, seedKeyword: seed }),
@@ -177,14 +179,18 @@ export function SeoStudioPage() {
               </p>
               <ol className="list-inside list-decimal space-y-1 text-[12px] leading-relaxed text-ink-muted">
                 <li>
-                  Add <code className="rounded bg-surface-muted px-1">AI_API_KEY=…</code> to{" "}
-                  <code className="rounded bg-surface-muted px-1">.env.local</code>.
+                  Open{" "}
+                  <Link href="/settings" className="text-forest underline">
+                    Settings → API connections
+                  </Link>
+                  .
                 </li>
                 <li>
-                  Optionally set <code className="rounded bg-surface-muted px-1">AI_BASE_URL</code> for any
-                  OpenAI-compatible provider and <code className="rounded bg-surface-muted px-1">AI_MODEL</code>.
+                  Paste an AI API key and, for any OpenAI-compatible provider, its{" "}
+                  <code className="rounded bg-surface-muted px-1">base URL</code> and{" "}
+                  <code className="rounded bg-surface-muted px-1">model</code>.
                 </li>
-                <li>Restart the dev server. All other features keep working without it.</li>
+                <li>Save, then press “Test connection”. All other features keep working without it.</li>
               </ol>
             </CardContent>
           </>

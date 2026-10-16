@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { AiNotConfiguredError, aiConfig, complete, parseJsonLoose } from "@/lib/server/ai";
+import { credentialsFromRequest } from "@/lib/server/creds";
 
 interface SeoRequest {
   niche: string;
@@ -33,13 +34,13 @@ Return strictly JSON matching the requested shape, no commentary.`;
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request }) => {
-  const { configured } = aiConfig();
-  if (!configured) {
+  const creds = credentialsFromRequest(request);
+  if (!creds.ai) {
     return json(
       {
         configured: false,
         error:
-          "AI provider is not configured. Add AI_API_KEY (and optionally AI_BASE_URL / AI_MODEL) to .env.local, then restart the dev server. Everything else in Mockup Studio keeps working without it.",
+          "AI provider is not configured. Paste your API key (and base URL / model) in Settings. Everything else in Mockup Studio keeps working without it.",
       },
       503,
     );
@@ -82,6 +83,7 @@ Rules: 15-25 keywords; 4-6 title drafts each under 140 characters; exactly 13 ta
         { role: "user", content: userPrompt },
       ],
       { jsonMode: true, temperature: 0.7, maxTokens: 1800 },
+      creds.ai,
     );
     const payload = parseJsonLoose<SeoPayload>(raw);
 
@@ -97,7 +99,7 @@ Rules: 15-25 keywords; 4-6 title drafts each under 140 characters; exactly 13 ta
 
     return json({
       configured: true,
-      model: aiConfig().model,
+      model: aiConfig(creds.ai).model,
       researchedAt: new Date().toISOString(),
       result: {
         keywords: (payload.keywords ?? []).slice(0, 40),

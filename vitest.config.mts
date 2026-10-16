@@ -16,6 +16,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
+      // `astro:env/server` is a virtual module provided by the Astro runtime.
+      // Point it at a plain stub so server modules are unit-testable.
+      "astro:env/server": path.resolve(import.meta.dirname, "./tests/stubs/astro-env-server.ts"),
     },
   },
 });

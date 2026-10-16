@@ -1,11 +1,7 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
-import {
-  createProduct,
-  isPrintifyConfigured,
-  uploadAsset,
-  PrintifyError,
-} from "@/lib/server/printify";
+import { credentialsFromRequest } from "@/lib/server/creds";
+import { createPrintifyClient, PrintifyError } from "@/lib/server/printify";
 
 interface CreateProductBody {
   /** Explicit user confirmation is required before anything is created remotely. */
@@ -24,7 +20,8 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
  * Decodes base64 without `Buffer`, which does not exist in the Workers
- * runtime. `atob` is available in Workers and in every browser.
+ * runtime. `atob` is available in Workers and in every browser. Used only to
+ * enforce the upload size limit before handing the base64 to Printify.
  */
 function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
@@ -38,11 +35,14 @@ function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
 export const prerender = false;
 
 export const POST: APIRoute = async ({ request }) => {
-  if (!isPrintifyConfigured()) {
+  const creds = credentialsFromRequest(request);
+  const client = createPrintifyClient(creds.printify?.apiKey);
+
+  if (!client.configured) {
     return json(
       {
         error:
-          "Printify is not configured. Add PRINTIFY_API_KEY to .env.local and restart the dev server before creating products.",
+          "Printify is not configured. Paste your Printify API key in Settings, or set PRINTIFY_API_KEY on the server, before creating products.",
       },
       503,
     );
@@ -78,8 +78,7 @@ export const POST: APIRoute = async ({ request }) => {
       if (bytes.byteLength > MAX_UPLOAD_BYTES) {
         return json({ error: "Artwork exceeds the 25 MB upload limit" }, 413);
       }
-      const blob = new Blob([bytes], { type: "image/png" });
-      const uploaded = await uploadAsset(blob, body.artwork.filename);
+      const uploaded = await client.uploadImage(body.artwork.base64, body.artwork.filename);
       assetId = uploaded.id;
     }
 
@@ -88,13 +87,13 @@ export const POST: APIRoute = async ({ request }) => {
       printAreas[body.artwork.printAreaId] = String(assetId);
     }
 
-    const product = await createProduct({
+    const product = await client.createProduct({
       title: body.title.trim(),
       description: body.description ?? "",
-      blueprint_id: body.blueprintId,
-      print_provider_id: body.printProviderId,
+      blueprintId: body.blueprintId,
+      printProviderId: body.printProviderId,
       variants: body.variants,
-      print_areas: Object.keys(printAreas).length > 0 ? printAreas : undefined,
+      printAreas: Object.keys(printAreas).length > 0 ? printAreas : undefined,
       assets: assetId ? [{ id: assetId, type: "default" }] : undefined,
     });
 

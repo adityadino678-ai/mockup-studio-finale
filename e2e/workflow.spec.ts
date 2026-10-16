@@ -485,6 +485,43 @@ test.describe("core workflow", () => {
       await expect(page.locator("main")).toContainText(section.copy, { timeout: 30_000 });
     }
   });
+
+  test("16. settings exposes key placeholders and connection tests", async ({ page }) => {
+    await gotoApp(page, "/settings");
+
+    // Placeholders for the user's own Printify and AI credentials.
+    await expect(page.getByLabel("Printify API key")).toBeVisible();
+    await expect(page.getByLabel("AI API key")).toBeVisible();
+    await expect(page.getByLabel("Base URL")).toBeVisible();
+    await expect(page.getByLabel("Model")).toBeVisible();
+
+    // Nothing saved yet, so the Printify test button is disabled...
+    const printifyTest = page.getByRole("button", { name: /Test connection/ }).first();
+    await expect(printifyTest).toBeDisabled();
+
+    // ...and typing a key enables it. (Not clicked: that would make a real
+    // network call to Printify, which is out of scope for the offline suite.)
+    await page.getByLabel("Printify API key").fill("pp_test_key_not_real");
+    await expect(printifyTest).toBeEnabled();
+
+    // Keys are held in the browser's IndexedDB, never sent on save.
+    await page.getByRole("button", { name: /Save keys/ }).click();
+    await expect(page.getByText("Keys saved in this browser")).toBeVisible({ timeout: 15_000 });
+    const stored = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      return new Promise<string | undefined>((res) => {
+        const rq = db
+          .transaction(["settings"], "readonly")
+          .objectStore("settings")
+          .get("integrations");
+        rq.onsuccess = () => res(rq.result?.value?.printifyKey);
+      });
+    });
+    expect(stored).toBe("pp_test_key_not_real");
+  });
 });
 
 /** Uploads fixture assets into the library (waits for each upload to land)

@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/schema";
 import { designMainAssetId, getAssetBlob, logActivity, uid } from "@/lib/db/repo";
+import { authedFetch } from "@/lib/client/integrations";
+import { Link } from "@/lib/client/nav";
 import type { Design, ProductDraft } from "@/types/domain";
 import { PageHeader } from "@/components/layout/page-header";
 import { AssetThumb } from "@/components/asset-thumb";
@@ -59,7 +61,7 @@ export function ProductBuilderPage() {
   const loadCatalog = async () => {
     setLoadingCatalog(true);
     try {
-      const res = await fetch("/api/printify/catalog");
+      const res = await authedFetch("/api/printify/catalog");
       const data = await res.json();
       setCatalog(data);
       if (data.configured) {
@@ -147,10 +149,17 @@ export function ProductBuilderPage() {
                   <span className="font-mono">developers.printify.com</span>.
                 </li>
                 <li>
-                  Add <code className="rounded bg-surface-muted px-1">PRINTIFY_API_KEY=…</code> to{" "}
-                  <code className="rounded bg-surface-muted px-1">.env.local</code> in the project root.
+                  Paste it under{" "}
+                  <Link href="/settings" className="text-forest underline">
+                    Settings → API connections
+                  </Link>{" "}
+                  (stored only in your browser), then press “Test connection”.
                 </li>
-                <li>Restart the dev server and press “Check Printify”.</li>
+                <li>
+                  Or Add <code className="rounded bg-surface-muted px-1">PRINTIFY_API_KEY=…</code> to{" "}
+                  <code className="rounded bg-surface-muted px-1">.env.local</code> on the server, then
+                  press “Check Printify”.
+                </li>
               </ol>
               {catalog.error && (
                 <p className="text-[12px] text-ink-subtle">{catalog.error}</p>
@@ -321,7 +330,7 @@ function DraftEditor({
   React.useEffect(() => {
     if (!catalogConfigured || blueprints.length > 0) return;
     (async () => {
-      const res = await fetch("/api/printify/catalog");
+      const res = await authedFetch("/api/printify/catalog");
       const data = await res.json();
       if (data.blueprints) setBlueprints(data.blueprints);
     })();
@@ -335,7 +344,7 @@ function DraftEditor({
     setLoadingDetail(true);
     setApiError(null);
     (async () => {
-      const res = await fetch(`/api/printify/catalog?id=${blueprintId}`);
+      const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}`);
       const data = await res.json();
       setLoadingDetail(false);
       if (data.blueprint) {
@@ -367,7 +376,7 @@ function DraftEditor({
         }
         artwork = { base64: btoa(binary), filename: `${design.name}.png`, printAreaId: printArea };
       }
-      const res = await fetch("/api/printify/products", {
+      const res = await authedFetch("/api/printify/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

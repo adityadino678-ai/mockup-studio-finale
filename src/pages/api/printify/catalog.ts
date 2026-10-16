@@ -1,10 +1,8 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
+import { credentialsFromRequest } from "@/lib/server/creds";
 import {
-  isPrintifyConfigured,
-  listBlueprints,
-  getBlueprint,
-  listProviders,
+  createPrintifyClient,
   PrintifyError,
   type PrintifyBlueprintDetail,
 } from "@/lib/server/printify";
@@ -26,16 +24,22 @@ function fail(error: unknown) {
  * GET /api/printify/catalog?category=...            -> blueprint list
  * GET /api/printify/catalog?id=123                 -> blueprint detail (variants + print areas)
  * GET /api/printify/catalog?id=123&providers=1     -> print providers for a blueprint
+ *
+ * The API key is taken from the request headers (the key pasted in Settings)
+ * when present, otherwise from the server environment.
  */
 export const prerender = false;
 
-export const GET: APIRoute = async ({ url }) => {
-  if (!isPrintifyConfigured()) {
+export const GET: APIRoute = async ({ url, request }) => {
+  const creds = credentialsFromRequest(request);
+  const client = createPrintifyClient(creds.printify?.apiKey);
+
+  if (!client.configured) {
     return json(
       {
         configured: false,
         error:
-          "Printify is not configured. Add PRINTIFY_API_KEY to .env.local and restart the dev server to enable the live catalog.",
+          "Printify is not configured. Paste your Printify API key in Settings, or set PRINTIFY_API_KEY on the server.",
       },
       503,
     );
@@ -46,12 +50,12 @@ export const GET: APIRoute = async ({ url }) => {
 
   try {
     if (!id) {
-      return json({ configured: true, blueprints: await listBlueprints(category) });
+      return json({ configured: true, blueprints: await client.listBlueprints(category) });
     }
     if (wantsProviders) {
-      return json({ configured: true, ...(await listProviders(Number(id))) });
+      return json({ configured: true, ...(await client.listProviders(Number(id))) });
     }
-    const detail: PrintifyBlueprintDetail = await getBlueprint(Number(id));
+    const detail: PrintifyBlueprintDetail = await client.getBlueprint(Number(id));
     return json({ configured: true, blueprint: detail });
   } catch (error) {
     return fail(error);
