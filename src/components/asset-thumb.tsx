@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -48,7 +48,6 @@ export function AssetThumb({ assetId, className, checkerboard, alt }: AssetThumb
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- local blob thumbnails, not remote images
     <img
       src={url}
       alt={alt ?? "Asset thumbnail"}

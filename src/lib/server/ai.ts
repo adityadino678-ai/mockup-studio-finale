@@ -1,7 +1,9 @@
-// Server-side AI provider. Speaks the OpenAI-compatible chat completions API so
+﻿// Server-side AI provider. Speaks the OpenAI-compatible chat completions API so
 // any compatible endpoint works. The key is read from the environment only and
 // never reaches the browser. When unconfigured, callers get an explicit error
 // instead of fabricated content.
+
+import { serverEnv } from "@/lib/server/env";
 
 export interface AiMessage {
   role: "system" | "user" | "assistant";
@@ -16,9 +18,9 @@ export interface AiCompletionOptions {
 }
 
 export function aiConfig(): { configured: boolean; baseUrl: string; model: string } {
-  const key = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
-  const baseUrl = process.env.AI_BASE_URL || "https://api.openai.com/v1";
-  const model = process.env.AI_MODEL || "gpt-4o-mini";
+  const key = serverEnv.aiApiKey() || serverEnv.openaiApiKey();
+  const baseUrl = serverEnv.aiBaseUrl() || "https://api.openai.com/v1";
+  const model = serverEnv.aiModel() || "gpt-4o-mini";
   return { configured: !!key, baseUrl, model };
 }
 
@@ -38,7 +40,7 @@ export async function complete(
   const { configured, baseUrl, model } = aiConfig();
   if (!configured) throw new AiNotConfiguredError();
 
-  const apiKey = process.env.AI_API_KEY || process.env.OPENAI_API_KEY;
+  const apiKey = serverEnv.aiApiKey() || serverEnv.openaiApiKey();
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {

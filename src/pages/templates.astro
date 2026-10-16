@@ -1,0 +1,8 @@
+﻿---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { TemplatesRoute } from "@/routes/TemplatesRoute";
+---
+
+<AppLayout>
+  <TemplatesRoute client:only="react" />
+</AppLayout>

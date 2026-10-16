@@ -15,6 +15,7 @@ export const ACCEPTED_MIMES = new Set([
 export function sanitizeFilename(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? "file";
   const cleaned = base
+    // eslint-disable-next-line no-control-regex -- stripping control characters is the point
     .replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_")
     .replace(/\s+/g, " ")
     .trim()

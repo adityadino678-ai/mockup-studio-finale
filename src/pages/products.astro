@@ -1,0 +1,8 @@
+﻿---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { ProductsRoute } from "@/routes/ProductsRoute";
+---
+
+<AppLayout>
+  <ProductsRoute client:only="react" />
+</AppLayout>

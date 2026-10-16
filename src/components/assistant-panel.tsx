@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
+import { Link } from "@/lib/client/nav";
 import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/client/nav";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ interface Turn {
 }
 
 /**
- * Contextual assistant. Quick actions are REAL navigation/events in the app —
+ * Contextual assistant. Quick actions are REAL navigation/events in the app â€”
  * the panel never claims to perform work it cannot do. Free-text questions go
  * to the server-side AI provider and require explicit configuration.
  */
@@ -90,7 +90,7 @@ export function AssistantPanel() {
     },
     {
       label: "Start a batch job",
-      description: pending > 0 ? `${pending} items pending` : "Designs × mockups in one run",
+      description: pending > 0 ? `${pending} items pending` : "Designs Ã— mockups in one run",
       icon: <Layers className="h-3.5 w-3.5" />,
       href: "/batch",
     },
@@ -172,7 +172,7 @@ export function AssistantPanel() {
             <div>
               <div className="text-[14px] font-semibold text-ink">Assistant</div>
               <div className="text-[11px] text-ink-subtle">
-                {integrations.ai ? "AI provider connected" : "Quick actions only — no AI provider"}
+                {integrations.ai ? "AI provider connected" : "Quick actions only â€” no AI provider"}
               </div>
             </div>
             <Button variant="ghost" size="icon-sm" onClick={() => setOpen(false)} title="Close">
@@ -232,7 +232,7 @@ export function AssistantPanel() {
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && ask()}
-                placeholder={integrations.ai ? "Ask how to do something…" : "Needs AI provider…"}
+                placeholder={integrations.ai ? "Ask how to do somethingâ€¦" : "Needs AI providerâ€¦"}
                 disabled={!integrations.ai || loading}
                 className="h-8 text-[12px]"
               />

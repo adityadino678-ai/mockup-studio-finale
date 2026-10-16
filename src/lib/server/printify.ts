@@ -1,7 +1,9 @@
-// Server-side Printify API client. The API key is read from the environment
-// only — it is never sent to the browser. All calls return normalized results
+﻿// Server-side Printify API client. The API key is read from the environment
+// only â€” it is never sent to the browser. All calls return normalized results
 // or throw an error with the provider's message so the UI can report real
 // failures instead of pretending success.
+
+import { serverEnv } from "@/lib/server/env";
 
 const PRINTIFY_BASE = "https://api.printify.com/v1";
 
@@ -17,13 +19,13 @@ export class PrintifyError extends Error {
 }
 
 export function isPrintifyConfigured(): boolean {
-  return !!process.env.PRINTIFY_API_KEY;
+  return !!serverEnv.printifyApiKey();
 }
 
 function headers(): HeadersInit {
   return {
     "Content-Type": "application/json",
-    "X-API-Key": process.env.PRINTIFY_API_KEY ?? "",
+    "X-API-Key": serverEnv.printifyApiKey() ?? "",
   };
 }
 
@@ -120,7 +122,7 @@ export async function uploadAsset(file: Blob, filename: string): Promise<{ id: n
   form.append("file", file, filename);
   const res = await fetch(`${PRINTIFY_BASE}/assets`, {
     method: "POST",
-    headers: { "X-API-Key": process.env.PRINTIFY_API_KEY ?? "" },
+    headers: { "X-API-Key": serverEnv.printifyApiKey() ?? "" },
     body: form,
     cache: "no-store",
   });

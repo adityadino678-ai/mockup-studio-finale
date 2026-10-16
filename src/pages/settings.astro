@@ -1,0 +1,8 @@
+﻿---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { SettingsRoute } from "@/routes/SettingsRoute";
+---
+
+<AppLayout>
+  <SettingsRoute client:only="react" />
+</AppLayout>

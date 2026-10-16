@@ -1,0 +1,8 @@
+﻿---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { DashboardRoute } from "@/routes/DashboardRoute";
+---
+
+<AppLayout>
+  <DashboardRoute client:only="react" />
+</AppLayout>

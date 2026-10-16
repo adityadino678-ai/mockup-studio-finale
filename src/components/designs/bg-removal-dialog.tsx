@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import { toast } from "sonner";
@@ -100,7 +100,7 @@ export function BgRemovalDialog({
         if (last) setResult(last);
         setState("done");
         if (designs.length === 1) {
-          toast.success("Background removed — review the result, then apply it to the design");
+          toast.success("Background removed â€” review the result, then apply it to the design");
         } else {
           toast.success(`Background removed and applied to ${saved} design${saved > 1 ? "s" : ""}`);
           onClose();
@@ -122,7 +122,7 @@ export function BgRemovalDialog({
     });
     await db.designs.update(design.id, { processedAssetId: asset.id, updatedAt: Date.now() });
     await logActivity("bgremoval.run", `Removed background from "${design.name}" (${Math.round(result.transparency * 100)}% transparent)`);
-    toast.success(`Applied to "${design.name}" — the original file is preserved`);
+    toast.success(`Applied to "${design.name}" â€” the original file is preserved`);
     onClose();
   };
 
@@ -142,7 +142,7 @@ export function BgRemovalDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-forest" />
-            Remove background — {single ? designs[0].name : `${designs.length} designs`}
+            Remove background â€” {single ? designs[0].name : `${designs.length} designs`}
           </DialogTitle>
           <DialogDescription>
             The original file is always preserved. The processed cutout becomes the design&rsquo;s placed artwork.
@@ -186,7 +186,7 @@ export function BgRemovalDialog({
 
           {engine === "ai-segmenter" && (
             <p className="text-[12px] leading-relaxed text-ink-muted">
-              Runs the open-source MODNet model (MIT license) entirely in your browser — images never
+              Runs the open-source MODNet model (MIT license) entirely in your browser â€” images never
               leave this machine. First use downloads ~25 MB, cached afterwards. MODNet is trained for
               photos of people and product shots; for flat artwork on solid backgrounds the flood-key
               engine is usually faster and cleaner.
@@ -196,8 +196,8 @@ export function BgRemovalDialog({
           {state === "processing" && (
             <div className="flex items-center gap-2 rounded-md bg-surface-muted px-3 py-2 text-[13px] text-ink-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {stage || "Processing…"}
-              {!single && savedCount > 0 && ` · ${savedCount} saved`}
+              {stage || "Processingâ€¦"}
+              {!single && savedCount > 0 && ` Â· ${savedCount} saved`}
             </div>
           )}
 
@@ -214,7 +214,7 @@ export function BgRemovalDialog({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-[12px] font-medium text-ink-muted">
-                  Before / after — {Math.round(result.transparency * 100)}% of pixels now transparent
+                  Before / after â€” {Math.round(result.transparency * 100)}% of pixels now transparent
                 </span>
                 <Badge variant={result.transparency > 0.05 ? "default" : "warning"}>
                   {result.transparency > 0.05 ? "transparent background" : "little transparency detected"}
@@ -225,7 +225,7 @@ export function BgRemovalDialog({
                   <AssetThumb assetId={designs[0].originalAssetId} className="h-[240px] w-full rounded-md border border-border-subtle" checkerboard />
                   <div className="mt-1 text-center text-[11px] text-ink-subtle">original</div>
                 </div>
-                {/* eslint-disable-next-line @next/next/no-img-element -- local blob preview */}
+                {/* local blob preview */}
                 <img
                   src={previewUrl}
                   alt="Background removed preview"
@@ -255,7 +255,7 @@ export function BgRemovalDialog({
               </Button>
             </>
           )}
-          {!single && state === "done" && <span className="text-[13px] text-forest">All done — results applied.</span>}
+          {!single && state === "done" && <span className="text-[13px] text-forest">All done â€” results applied.</span>}
           <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>

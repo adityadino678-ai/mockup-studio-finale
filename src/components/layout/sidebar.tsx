@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
+import { Link } from "@/lib/client/nav";
 import * as React from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/client/nav";
 import { cn } from "@/lib/utils";
 import {
   Aperture,
@@ -109,7 +109,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="border-t border-border-subtle px-4 py-2.5 text-[11px] text-ink-subtle">
-        Local workspace · v0.1
+        Local workspace Â· v0.1
       </div>
     </aside>
   );

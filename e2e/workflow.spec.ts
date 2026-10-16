@@ -1,11 +1,11 @@
-import { test, expect, type Page } from "@playwright/test";
+﻿import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
 /**
  * End-to-end acceptance coverage for the core workflow:
- *   upload → edit → batch generate → templates → export
+ *   upload â†’ edit â†’ batch generate â†’ templates â†’ export
  * External integrations are asserted in their *unconfigured* state, since no
  * credentials are used in CI. Those states are part of the contract.
  */
@@ -27,13 +27,28 @@ async function clearWorkspace(page: Page) {
   await page.reload();
 }
 
+/**
+ * Navigates and waits for the app shell to hydrate.
+ *
+ * The views render as client-only islands, so the markup arrives empty and is
+ * painted by React after the island script loads. The sidebar lives in the same
+ * React tree as the page view, so its presence proves the view is interactive
+ * and any subsequent click actually lands.
+ */
+async function gotoApp(page: Page, path: string) {
+  await page.goto(path);
+  await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
 test.describe("core workflow", () => {
   test.beforeEach(async ({ page }) => {
     await clearWorkspace(page);
   });
 
   test("1. uploads multiple designs and they survive a refresh", async ({ page }) => {
-    await page.goto("/designs");
+    await gotoApp(page, "/designs");
     await expect(page.getByText("No designs yet")).toBeVisible();
 
     await page.setInputFiles('input[type=file]', [
@@ -50,12 +65,13 @@ test.describe("core workflow", () => {
   });
 
   test("2. uploads mockups and reuses them across designs", async ({ page }) => {
-    await page.goto("/mockups");
+    await gotoApp(page, "/mockups");
     await page.setInputFiles('input[type=file]', [fixture("mockup-a.png"), fixture("mockup-b.png")]);
     await expect(page.getByRole("button", { name: /Actions for mockup-a/ })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /Actions for mockup-b/ })).toBeVisible({ timeout: 20_000 });
 
     // Mockups appear in the batch picker and the editor picker.
-    await page.goto("/batch");
+    await gotoApp(page, "/batch");
     await expect(page.getByRole("checkbox", { name: /mockup-a/ })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: /mockup-b/ })).toBeVisible();
   });
@@ -63,7 +79,7 @@ test.describe("core workflow", () => {
   test("3. edits, saves and reopens artwork in the editor", async ({ page }) => {
     const { designId, mockupId } = await seedLibrary(page);
 
-    await page.goto(`/editor?design=${designId}&mockup=${mockupId}`);
+    await gotoApp(page, `/editor?design=${designId}&mockup=${mockupId}`);
     await expect(page.getByText("Position")).toBeVisible({ timeout: 30_000 });
     // The Konva canvas renders (the preview is a real composite).
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
@@ -82,7 +98,7 @@ test.describe("core workflow", () => {
   test("4. rendered output reflects the saved transformation", async ({ page }) => {
     const { designId, mockupId } = await seedLibrary(page);
 
-    await page.goto(`/editor?design=${designId}&mockup=${mockupId}`);
+    await gotoApp(page, `/editor?design=${designId}&mockup=${mockupId}`);
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
 
     // Save a render through the editor and inspect the stored pixels.
@@ -126,23 +142,23 @@ test.describe("core workflow", () => {
     if (samples.found) {
       expect(samples.width).toBe(1200);
       expect(samples.height).toBe(1200);
-      // Red artwork is present at the placement centre…
+      // Red artwork is present at the placement centreâ€¦
       expect(samples.center[0]).toBeGreaterThan(samples.center[2]);
-      // …and the mockup background shows at the corner.
+      // â€¦and the mockup background shows at the corner.
       expect(samples.corner[3]).toBeGreaterThan(200);
     }
   });
 
   test("5. batch generates the expected number of outputs", async ({ page }) => {
     await seedLibrary(page, { extraDesign: true });
-    await page.goto("/batch");
+    await gotoApp(page, "/batch");
 
     await page.getByRole("checkbox", { name: /design-a/ }).click();
     await page.getByRole("checkbox", { name: /design-b/ }).click();
     await page.getByRole("checkbox", { name: /design-c/ }).click();
     await page.getByRole("checkbox", { name: /mockup-a/ }).click();
     await page.getByRole("checkbox", { name: /mockup-b/ }).click();
-    await expect(page.getByText("3 × 2 = 6")).toBeVisible();
+    await expect(page.getByText("3 Ã— 2 = 6")).toBeVisible();
 
     await page.getByRole("button", { name: /Start job/ }).click();
     await expect(page.getByText(/6 combinations/).first()).toBeVisible({ timeout: 30_000 });
@@ -153,7 +169,7 @@ test.describe("core workflow", () => {
 
   test("6. skipping existing renders avoids duplicate work", async ({ page }) => {
     await seedLibrary(page);
-    await page.goto("/batch");
+    await gotoApp(page, "/batch");
     await page.getByRole("checkbox", { name: /design-a/ }).click();
     await page.getByRole("checkbox", { name: /design-b/ }).click();
     await page.getByRole("checkbox", { name: /mockup-a/ }).click();
@@ -180,7 +196,7 @@ test.describe("core workflow", () => {
 
   test("7. background removal produces real transparency", async ({ page }) => {
     await seedLibrary(page, { solidBackgroundDesign: true });
-    await page.goto("/designs");
+    await gotoApp(page, "/designs");
 
     await page.getByRole("button", { name: /Actions for design-solid/ }).click();
     await page.getByRole("menuitem", { name: /Remove background/ }).click();
@@ -225,7 +241,7 @@ test.describe("core workflow", () => {
 
   test("8. ink variants are created without touching the original", async ({ page }) => {
     await seedLibrary(page);
-    await page.goto("/designs");
+    await gotoApp(page, "/designs");
 
     await page.getByRole("button", { name: /Actions for design-a/ }).click();
     await page.getByRole("menuitem", { name: /Ink variants/ }).click();
@@ -233,7 +249,7 @@ test.describe("core workflow", () => {
     await page.getByRole("button", { name: "Auto-generate" }).first().click();
     await expect(page.getByText("White ink variant created")).toBeVisible({ timeout: 30_000 });
     // Once white exists its slot stops offering Auto-generate, so exactly one
-    // (black) remains — click it.
+    // (black) remains â€” click it.
     await expect(page.getByRole("button", { name: "Auto-generate" })).toHaveCount(1, { timeout: 15_000 });
     await page.getByRole("button", { name: "Auto-generate" }).first().click();
     await expect(page.getByText("Black ink variant created")).toBeVisible({ timeout: 30_000 });
@@ -289,7 +305,7 @@ test.describe("core workflow", () => {
     const { designId, mockupId } = await seedLibrary(page);
 
     // Create a template from a 22% placement.
-    await page.goto(`/editor?design=${designId}&mockup=${mockupId}`);
+    await gotoApp(page, `/editor?design=${designId}&mockup=${mockupId}`);
     await expect(page.locator("canvas").first()).toBeVisible({ timeout: 30_000 });
     const width = page.getByRole("spinbutton").nth(2);
     await width.fill("22");
@@ -308,7 +324,7 @@ test.describe("core workflow", () => {
     await expect(page.getByText("Placement saved").first()).toBeVisible({ timeout: 15_000 });
 
     // Template survives a refresh.
-    await page.goto("/templates");
+    await gotoApp(page, "/templates");
     await page.reload();
     await expect(page.getByText("E2E template 22%")).toBeVisible({ timeout: 20_000 });
 
@@ -341,7 +357,7 @@ test.describe("core workflow", () => {
   test("10. exports a ZIP with the documented structure and manifest", async ({ page }) => {
     await seedLibrary(page, { extraDesign: true });
     // Generate renders first so the archive contains mockups folders.
-    await page.goto("/batch");
+    await gotoApp(page, "/batch");
     await page.getByRole("checkbox", { name: /design-a/ }).click();
     await page.getByRole("checkbox", { name: /design-b/ }).click();
     await page.getByRole("checkbox", { name: /mockup-a/ }).click();
@@ -349,21 +365,21 @@ test.describe("core workflow", () => {
     await page.getByRole("button", { name: /Start job/ }).click();
     await expect(page.getByText("4 done").first()).toBeVisible({ timeout: 90_000 });
 
-    await page.goto("/export");
+    await gotoApp(page, "/export");
     await page.getByRole("checkbox", { name: /design-a/ }).click();
     await page.getByRole("checkbox", { name: /design-b/ }).click();
     await page.getByRole("button", { name: /Build ZIP/ }).click();
     await expect(page.getByText(/files verified/).first()).toBeVisible({ timeout: 60_000 });
 
     // Fresh library: each design contributes 1 original + 2 renders,
-    // plus the manifest → 7 files.
+    // plus the manifest â†’ 7 files.
     await expect(page.getByText("7 files verified").first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Download ZIP/)).toBeVisible();
   });
 
   test("11. listing validation blocks invalid Etsy data", async ({ page }) => {
     await seedLibrary(page);
-    await page.goto("/listings");
+    await gotoApp(page, "/listings");
     await page.getByRole("button", { name: /Generate drafts from designs/ }).click();
     await expect(page.getByText(/Created \d+ local drafts/)).toBeVisible({ timeout: 20_000 });
 
@@ -382,16 +398,16 @@ test.describe("core workflow", () => {
   test("12. missing credentials never break unrelated features", async ({ page }) => {
     await seedLibrary(page);
     // Integrations report honest, unconfigured states.
-    await page.goto("/products");
+    await gotoApp(page, "/products");
     await expect(page.getByText("Not configured. Local drafts work without an account.")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/Add PRINTIFY_API_KEY/).first()).toBeVisible();
 
-    await page.goto("/seo");
+    await gotoApp(page, "/seo");
     await expect(page.getByText(/No AI provider configured/)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("button", { name: /Research & draft/ })).toBeDisabled();
 
     // Core workflow still works.
-    await page.goto("/designs");
+    await gotoApp(page, "/designs");
     await expect(page.getByRole("button", { name: /Actions for design-a/ })).toBeVisible({ timeout: 20_000 });
   });
 
@@ -401,7 +417,7 @@ test.describe("core workflow", () => {
       const url = res.url();
       if (url.includes("/_next/static/") || url.endsWith(".js")) responses.push(await res.text().catch(() => ""));
     });
-    await page.goto("/settings");
+    await gotoApp(page, "/settings");
     await page.waitForLoadState("networkidle");
 
     const bundle = responses.join("\n");
@@ -426,11 +442,11 @@ test.describe("core workflow", () => {
       await expect(page.locator("main")).toBeVisible();
     }
     // Expected console noise, not application bugs:
-    // - "Download the React DevTools" — dev-only banner.
-    // - "Failed to load resource: ... 503" — the browser's network layer
+    // - "Download the React DevTools" â€” dev-only banner.
+    // - "Failed to load resource: ... 503" â€” the browser's network layer
     //   logging the *honest* 503 responses from unconfigured integration
     //   endpoints (e.g. /api/printify/catalog). The UI handles these
-    //   gracefully — verified by test 12.
+    //   gracefully â€” verified by test 12.
     const real = errors.filter(
       (e) =>
         !e.includes("Download the React DevTools") &&
@@ -438,6 +454,33 @@ test.describe("core workflow", () => {
     );
     if (real.length > 0) console.log("CONSOLE ERRORS FOUND:\n" + real.join("\n---\n"));
     expect(real).toEqual([]);
+  });
+
+  test("15. clicking every sidebar link actually loads that page", async ({ page }) => {
+    // Each link must perform a real document load. A history-only navigation
+    // would change the URL while leaving the previous view on screen, so the
+    // assertion checks that the target page's own copy is rendered.
+    const sections: Array<{ link: RegExp; path: string; copy: RegExp }> = [
+      { link: /^Designs$/, path: "/designs", copy: /Your artwork library/ },
+      { link: /^Mockups$/, path: "/mockups", copy: /Photos of your products/ },
+      { link: /^Mockup Editor$/, path: "/editor", copy: /Pick a design/ },
+      { link: /^Batch Studio$/, path: "/batch", copy: /No batch jobs yet/ },
+      { link: /^Templates$/, path: "/templates", copy: /Reusable settings for placements/ },
+      { link: /^Product Builder$/, path: "/products", copy: /No product drafts/ },
+      { link: /^Listings$/, path: "/listings", copy: /Etsy-ready drafts with validation/ },
+      { link: /^Export Center$/, path: "/export", copy: /organized ZIP archive with a manifest/ },
+      { link: /^AI SEO Studio$/, path: "/seo", copy: /AI features need a provider/ },
+      { link: /^Activity$/, path: "/activity", copy: /No activity yet/ },
+      { link: /^Settings$/, path: "/settings", copy: /Workspace storage and external integrations/ },
+      { link: /^Overview$/, path: "/", copy: /Your local print-on-demand workspace/ },
+    ];
+
+    await gotoApp(page, "/");
+    for (const section of sections) {
+      await page.getByRole("link", { name: section.link }).click();
+      await page.waitForURL(`**${section.path}`);
+      await expect(page.locator("main")).toContainText(section.copy, { timeout: 30_000 });
+    }
   });
 });
 
@@ -451,14 +494,14 @@ async function seedLibrary(
   if (opts.extraDesign) designFiles.push(fixture("design-c.png"));
   if (opts.solidBackgroundDesign) designFiles.push(fixture("design-solid.png"));
 
-  await page.goto("/designs");
+  await gotoApp(page, "/designs");
   await page.setInputFiles('input[type=file]', designFiles);
   // Wait until every uploaded design actually appears before navigating away.
   for (const name of designFiles.map((f) => path.basename(f, ".png"))) {
     await expect(page.getByRole("button", { name: `Actions for ${name}` })).toBeVisible({ timeout: 30_000 });
   }
 
-  await page.goto("/mockups");
+  await gotoApp(page, "/mockups");
   await page.setInputFiles('input[type=file]', [fixture("mockup-a.png"), fixture("mockup-b.png")]);
   for (const name of ["mockup-a", "mockup-b"]) {
     await expect(page.getByRole("button", { name: `Actions for ${name}` })).toBeVisible({ timeout: 30_000 });

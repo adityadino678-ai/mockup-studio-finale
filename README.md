@@ -9,6 +9,13 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
+Or from the folder one level up, without touching the terminal commands yourself:
+
+| File | What it does |
+|---|---|
+| `../start.cmd` | Checks Node, installs deps on first run, opens the browser and starts the dev server |
+| `../setup.cmd` | Installs dependencies only |
+
 Optional integrations live in `.env.local` (copy `.env.example`):
 
 ```bash
@@ -25,12 +32,14 @@ AI_MODEL=...              # default: gpt-4o-mini
 | Command | What it does |
 |---|---|
 | `npm run dev` | Start the dev server on port 3000 |
-| `npm run build` | Production build |
-| `npm run start` | Serve the production build |
-| `npm run lint` | ESLint |
-| `npx tsc --noEmit` | Strict type check |
-| `npx vitest run` | Unit/integration tests (27 tests) |
-| `npx playwright test` | End-to-end acceptance tests (14 tests, needs `npx playwright install chromium` once) |
+| `npm run build` | Production build into `dist/` |
+| `npm run preview` | Serve the production build (`node dist/server/entry.mjs`) |
+| `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
+| `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
+| `npm run test` | Unit/integration tests (27 tests) |
+| `npm run test:e2e` | End-to-end acceptance tests (14 tests, needs `npx playwright install chromium` once) |
+| `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
+
 
 ## The workflow
 
@@ -49,11 +58,13 @@ AI_MODEL=...              # default: gpt-4o-mini
 
 ## Architecture notes
 
-- **Next.js 15 (App Router) + TypeScript strict + Tailwind v4 + shadcn-style components.**
+- **Astro 5 (SSR via `@astrojs/node`) + React 19 islands + TypeScript strict + Tailwind v4.** Every page is a thin `.astro` route that renders one React island; the shell and the view live in a single React tree (`src/routes/*.tsx`) because islands cannot nest and the views need Radix context from `TooltipProvider`.
+- **API routes** are Astro endpoints (`src/pages/api/**/*.ts`) exporting `GET`/`POST` as `APIRoute` and returning a plain `Response`. Secrets are read server-side through `src/lib/server/env.ts`.
 - **One compositing engine** (`src/lib/canvas/compose.ts`): the Konva editor, the batch renderer and the export compositor all call the same `computeGeometry`/`drawPlacement` math, so the rendered output provably matches the editor preview — exports are full-resolution composites, never screenshots.
 - **Transforms are mockup-relative** (fractions of mockup dimensions), so placements survive canvas resize and transfer across mockups via templates.
 - **Storage**: Dexie (IndexedDB) with metadata and blobs in separate tables; a future server-side migration only needs to swap the repository layer. Schema is versioned (v2 added render-provenance indexes).
-- **Secrets never reach the browser**: Printify and AI calls go through server route handlers (`src/app/api/**`) reading env vars server-side; the client only ever receives `configured: true/false` plus results.
+- **Secrets never reach the browser**: Printify and AI calls go through server endpoints (`src/pages/api/**`) reading env vars server-side; the client only ever receives `configured: true/false` plus results.
+- **Client routing** is a thin History-API shim (`src/lib/client/nav.tsx`) providing `Link`, `useRouter`, `usePathname` and `useSearchParams`, so components navigate without a router dependency.
 - **Background removal** runs a Web Worker for the AI engine; the flood-key algorithm is a pure, unit-tested function.
 - **Batch rendering** is sequential on the main thread with event-loop yields — item statuses are the source of truth, and the UI stays responsive.
 
@@ -66,11 +77,11 @@ AI_MODEL=...              # default: gpt-4o-mini
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 27 unit/integration tests + 14 E2E acceptance tests, lint clean, `tsc --strict` clean, production build passing.
+- 27 unit/integration tests + 14 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 
-- **OneDrive caveat (Windows)**: if the project lives inside an OneDrive-synced folder, OneDrive can turn `.next` build files into cloud placeholders and break `next dev`/`next build` with `EINVAL readlink`. Fix: exclude the project folder from OneDrive sync (OneDrive → Settings → Manage backup / "Always keep on this device"), or move the project outside the synced Documents directory. The E2E runner already wipes `.next` before starting for this reason.
+- **The project must live outside OneDrive.** It now runs from `C:\Users\hp\Projects\Mockup Studio 2.0`; the old copy under `OneDrive\Documents\ANTIGRAVITY PROJECTS` was removed. OneDrive turns build caches into cloud placeholders and breaks `node_modules` resolution, so keep the folder out of synced directories.
 
 - **Printify / Etsy / AI** are fully wired server-side but were **not verified live** in this environment — no credentials. Their UIs show real, unconfigured setup states. Etsy listing *submission* is deliberately not implemented as a live call yet (drafts + validation only) because Etsy's v3 OAuth flow needs app registration; the workspace is ready for it.
 - The AI background-removal model (MODNet) is trained for **photos of people/products**; for flat artwork on solid backgrounds the flood-key engine is faster and usually better. `Xenova/u2net` was gated (HTTP 401) at build time, so MODNet is the shipped default.
