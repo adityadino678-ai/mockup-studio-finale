@@ -30,6 +30,8 @@ Rules you must follow:
 - Be concrete and specific to the seller's niche and product.
 Return strictly JSON matching the requested shape, no commentary.`;
 
+export const prerender = false;
+
 export const POST: APIRoute = async ({ request }) => {
   const { configured } = aiConfig();
   if (!configured) {
@@ -83,7 +85,7 @@ Rules: 15-25 keywords; 4-6 title drafts each under 140 characters; exactly 13 ta
     );
     const payload = parseJsonLoose<SeoPayload>(raw);
 
-    // Server-side validation against Etsy constraints — never trust the model.
+    // Server-side validation against Etsy constraints â€” never trust the model.
     const tags = (payload.tags ?? [])
       .map((t) => String(t).trim())
       .filter((t) => t.length > 0 && t.length <= 20)

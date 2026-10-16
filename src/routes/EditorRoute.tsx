@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { EditorPage } from "@/views/editor-page";

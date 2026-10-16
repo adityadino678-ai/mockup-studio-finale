@@ -1,8 +1,10 @@
 import type { APIRoute } from "astro";
 import { json, serverEnv } from "@/lib/server/env";
 
-// Server-side integration status check. Never returns secret values — only
+// Server-side integration status check. Never returns secret values â€” only
 // whether credentials are present and basic provider info.
+export const prerender = false;
+
 export const GET: APIRoute = () => {
   const printifyKey = serverEnv.printifyApiKey();
   const etsyKey = serverEnv.etsyApiKey();

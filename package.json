@@ -7,7 +7,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "start": "astro dev",
-    "preview": "node ./dist/server/entry.mjs",
+    "preview": "wrangler dev",
+    "deploy": "astro build && wrangler deploy",
     "astro": "astro",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -16,7 +17,7 @@
     "typecheck": "astro check --minimumSeverity error"
   },
   "dependencies": {
-    "@astrojs/node": "^9.5.0",
+    "@astrojs/cloudflare": "^12.6.13",
     "@astrojs/react": "^5.0.0",
     "@fontsource-variable/inter": "^5.2.5",
     "@radix-ui/react-checkbox": "^1.3.12",
@@ -53,7 +54,6 @@
     "@astrojs/check": "^0.9.4",
     "@eslint/js": "^9.39.0",
     "@playwright/test": "^1.64.0",
-    "@tailwindcss/postcss": "^4",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -73,6 +73,7 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "typescript-eslint": "^8.46.4",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "wrangler": "^4.151.0"
   }
 }

@@ -1,4 +1,4 @@
-﻿// Server-side AI provider. Speaks the OpenAI-compatible chat completions API so
+// Server-side AI provider. Speaks the OpenAI-compatible chat completions API so
 // any compatible endpoint works. The key is read from the environment only and
 // never reaches the browser. When unconfigured, callers get an explicit error
 // instead of fabricated content.

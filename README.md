@@ -33,12 +33,44 @@ AI_MODEL=...              # default: gpt-4o-mini
 |---|---|
 | `npm run dev` | Start the dev server on port 3000 |
 | `npm run build` | Production build into `dist/` |
-| `npm run preview` | Serve the production build (`node dist/server/entry.mjs`) |
+| `npm run preview` | Serve the production build |
+| `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
 | `npm run test` | Unit/integration tests (27 tests) |
-| `npm run test:e2e` | End-to-end acceptance tests (14 tests, needs `npx playwright install chromium` once) |
+| `npm run test:e2e` | End-to-end acceptance tests (15 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
+
+## Deploying to Cloudflare
+
+The production build targets **Cloudflare Workers** via `@astrojs/cloudflare`.
+
+```powershell
+npx wrangler login     # one time
+npm run deploy         # build + wrangler deploy
+```
+
+The app is published to `https://mockup-studio.adityadino678.workers.dev`.
+
+**How it is shaped:** `output: "static"`, because no page depends on request
+state — every view reads its data from the visitor's own IndexedDB. So all 12
+pages prerender to static HTML and are served directly from Cloudflare's CDN,
+and `dist/_routes.json` excludes them from the Worker. Only the five `/api/**`
+endpoints run on demand, each opting in with `export const prerender = false`.
+
+**Secrets:** none are required and none are deployed by default. The whole core
+workflow runs without any key, and the AI/Printify panels show an honest
+"not configured" state. To enable them in production:
+
+```powershell
+npx wrangler secret put PRINTIFY_API_KEY
+npx wrangler secret put AI_API_KEY
+```
+
+Secrets are read through `getSecret()` from `astro:env/server`, which is
+adapter-provided, so the same code works locally, on Workers, and would survive
+a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
+
 
 
 ## The workflow

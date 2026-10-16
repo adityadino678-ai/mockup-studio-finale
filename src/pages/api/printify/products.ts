@@ -22,6 +22,21 @@ interface CreateProductBody {
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+/**
+ * Decodes base64 without `Buffer`, which does not exist in the Workers
+ * runtime. `atob` is available in Workers and in every browser.
+ */
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export const prerender = false;
+
 export const POST: APIRoute = async ({ request }) => {
   if (!isPrintifyConfigured()) {
     return json(
@@ -59,11 +74,11 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     let assetId: number | undefined;
     if (body.artwork) {
-      const buffer = Buffer.from(body.artwork.base64, "base64");
-      if (buffer.byteLength > MAX_UPLOAD_BYTES) {
+      const bytes = base64ToBytes(body.artwork.base64);
+      if (bytes.byteLength > MAX_UPLOAD_BYTES) {
         return json({ error: "Artwork exceeds the 25 MB upload limit" }, 413);
       }
-      const blob = new Blob([new Uint8Array(buffer)], { type: "image/png" });
+      const blob = new Blob([bytes], { type: "image/png" });
       const uploaded = await uploadAsset(blob, body.artwork.filename);
       assetId = uploaded.id;
     }

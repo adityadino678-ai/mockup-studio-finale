@@ -1,4 +1,4 @@
-﻿// Server-side Printify API client. The API key is read from the environment
+// Server-side Printify API client. The API key is read from the environment
 // only â€” it is never sent to the browser. All calls return normalized results
 // or throw an error with the provider's message so the UI can report real
 // failures instead of pretending success.

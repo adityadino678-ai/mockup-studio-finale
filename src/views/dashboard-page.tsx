@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Link } from "@/lib/client/nav";
 import * as React from "react";

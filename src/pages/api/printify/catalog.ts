@@ -27,6 +27,8 @@ function fail(error: unknown) {
  * GET /api/printify/catalog?id=123                 -> blueprint detail (variants + print areas)
  * GET /api/printify/catalog?id=123&providers=1     -> print providers for a blueprint
  */
+export const prerender = false;
+
 export const GET: APIRoute = async ({ url }) => {
   if (!isPrintifyConfigured()) {
     return json(
