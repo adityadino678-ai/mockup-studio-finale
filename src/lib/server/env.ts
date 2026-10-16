@@ -25,5 +25,8 @@ export function json(data: unknown, init: number | ResponseInit = 200): Response
   const responseInit: ResponseInit = typeof init === "number" ? { status: init } : init;
   const headers = new Headers(responseInit.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  // These responses vary by credential headers (x-ai-key / x-printify-key / …).
+  // Never let a browser or intermediary cache them.
+  headers.set("Cache-Control", "no-store");
   return new Response(JSON.stringify(data), { ...responseInit, headers });
 }
