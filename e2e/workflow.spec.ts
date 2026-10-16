@@ -552,6 +552,11 @@ test.describe("core workflow", () => {
 
     // The floating launcher is hidden on the agent page itself.
     await expect(page.getByRole("link", { name: /Open the agent/ })).toHaveCount(0);
+
+    // The workspace rail (shown at xl) lists real artifacts and can be toggled.
+    await expect(page.getByText("stored in this browser")).toBeVisible();
+    await page.getByRole("button", { name: "Hide workspace rail" }).click();
+    await expect(page.getByText("stored in this browser")).toHaveCount(0);
   });
 });
 

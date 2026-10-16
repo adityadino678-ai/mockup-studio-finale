@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowUp, ImagePlus, Square, X } from "lucide-react";
+import { ArrowUp, ImagePlus, Mic, Square, Volume2, VolumeX, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ImagePartData } from "@/types/domain";
 
@@ -27,6 +27,14 @@ interface ComposerProps {
   header: React.ReactNode;
   commands?: SlashCommand[];
   error?: string | null;
+  /** Voice: omit these to hide the controls (unsupported browser). */
+  voiceSupported?: boolean;
+  listening?: boolean;
+  onToggleVoice?(): void;
+  speakReplies?: boolean;
+  onToggleSpeak?(): void;
+  /** Messages waiting to be sent once the current reply finishes. */
+  queuedCount?: number;
 }
 
 export function Composer({
@@ -44,6 +52,12 @@ export function Composer({
   header,
   commands = [],
   error,
+  voiceSupported,
+  listening,
+  onToggleVoice,
+  speakReplies,
+  onToggleSpeak,
+  queuedCount = 0,
 }: ComposerProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -61,9 +75,10 @@ export function Composer({
   const matches = slashQuery === null ? [] : commands.filter((c) => c.name.startsWith(slashQuery));
   const showSlash = slashQuery !== null && matches.length > 0;
 
+  const hasContent = !!value.trim() || attachments.length > 0;
+
   const submit = () => {
-    if (disabled || streaming) return;
-    if (!value.trim() && attachments.length === 0) return;
+    if (disabled || !hasContent) return;
     setHistoryIndex(-1);
     onSend();
   };
@@ -162,7 +177,13 @@ export function Composer({
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
             aria-label="Message the agent"
-            placeholder={disabled ? "Add an AI provider key in Settings to chat…" : "Message the agent…  ( / for commands)"}
+            placeholder={
+              disabled
+                ? "Add an AI provider key in Settings to chat…"
+                : streaming
+                  ? "Type to steer — your message is queued…"
+                  : "Message the agent…  ( / for commands)"
+            }
             disabled={disabled}
             rows={1}
             className="scroll-thin max-h-[220px] w-full resize-none bg-transparent px-3.5 py-2.5 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed"
@@ -190,8 +211,36 @@ export function Composer({
               </>
             )}
             <div className="ml-auto flex items-center gap-1.5">
+              {voiceSupported && onToggleSpeak && (
+                <button
+                  type="button"
+                  onClick={onToggleSpeak}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted",
+                    speakReplies ? "text-forest" : "text-ink-subtle hover:text-ink",
+                  )}
+                  title={speakReplies ? "Stop reading replies aloud" : "Read replies aloud"}
+                  aria-pressed={!!speakReplies}
+                >
+                  {speakReplies ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                </button>
+              )}
+              {voiceSupported && onToggleVoice && (
+                <button
+                  type="button"
+                  onClick={onToggleVoice}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted",
+                    listening ? "animate-pulse bg-danger-soft text-danger" : "text-ink-subtle hover:text-ink",
+                  )}
+                  title={listening ? "Stop dictation" : "Dictate"}
+                  aria-pressed={!!listening}
+                >
+                  <Mic className="h-4 w-4" />
+                </button>
+              )}
               {header}
-              {streaming ? (
+              {streaming && (
                 <button
                   type="button"
                   onClick={onStop}
@@ -200,20 +249,24 @@ export function Composer({
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={disabled || (!value.trim() && attachments.length === 0)}
-                  className="flex h-7 w-7 items-center justify-center rounded-md bg-forest text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
-                  title="Send"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </button>
               )}
+              <button
+                type="button"
+                onClick={submit}
+                disabled={disabled || !hasContent}
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-forest text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
+                title={streaming ? "Queue (sends when the reply finishes)" : "Send"}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
             </div>
           </div>
         </div>
+        {queuedCount > 0 && (
+          <div className="mt-1.5 px-1 text-[10px] text-ink-subtle">
+            {queuedCount} message{queuedCount === 1 ? "" : "s"} queued — will send when the current reply finishes.
+          </div>
+        )}
         <div className="mt-1.5 px-1 text-[10px] text-ink-subtle">
           Enter to send · Shift+Enter for a new line · responses may be inaccurate; verify before publishing.
         </div>

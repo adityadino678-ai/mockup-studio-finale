@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 74 unit tests
+npm run test          # 82 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -151,8 +151,17 @@ Both must pass. The production run has caught bugs the local run missed.
   `tool_calls` frame, the browser runs each tool, replays assistant/tool messages,
   and re-calls the endpoint (max 4 steps per turn). `toApiMessages` omits tool
   calls that never got a result so the replayed history stays valid. Threads are
-  auto-titled by the active model via **`/api/ai/title`**. Voice, the artifact
-  rail, and steering are still M3.
+  auto-titled by the active model via **`/api/ai/title`**.
+- **Agent voice, steering, and the rail (M3).** `src/lib/client/speech.ts` wraps the
+  Web Speech API with feature detection (nothing throws when unsupported); the
+  composer shows a mic (dictation → draft) and a speaker toggle (read replies
+  aloud, persisted in `settings` key `ai:speakReplies`). Because the tool loop is
+  client-driven, **steering** is just a queue: sending while a reply streams appends
+  to `queueRef` and the turn drains it when it finishes (one queued message per
+  turn). The right-hand **`ArtifactRail`** reads IndexedDB live (batch jobs,
+  exports, listing drafts, render count) and is a toggle in the header. The
+  sessions rail is a drawer below `lg` and static above it; the artifact rail is
+  `xl` only. All four milestones are now shipped.
 - **Printify endpoints now use the documented paths** (`/v1/catalog/blueprints.json`,
   `/v1/catalog/blueprints/{id}.json`, `/v1/catalog/blueprints/{id}/print_providers.json`,
   `/v1/uploads/images.json`, `/v1/shops/{shop_id}/products.json`). Product creation

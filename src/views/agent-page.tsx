@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Settings as SettingsIcon } from "lucide-react";
-import { db } from "@/lib/db/schema";
+import { Menu, Settings as SettingsIcon, PanelRight } from "lucide-react";
+import { db, getSetting, setSetting } from "@/lib/db/schema";
 import {
   activeModel,
   activeProvider,
@@ -43,11 +43,22 @@ import {
 } from "@/lib/ai/providers";
 import { SessionsRail } from "@/components/agent/sessions-rail";
 import { Transcript } from "@/components/agent/transcript";
+import { ArtifactRail } from "@/components/agent/artifact-rail";
+import {
+  recognitionSupported,
+  speak,
+  speechTextFromParts,
+  startDictation,
+  stopSpeaking,
+  synthesisSupported,
+  type Dictation,
+} from "@/lib/client/speech";
 import { Composer, type SlashCommand } from "@/components/agent/composer";
 import { ModelPicker, type ProviderModels } from "@/components/agent/model-picker";
 import { EffortPill } from "@/components/agent/effort-pill";
 import { StatusBar } from "@/components/agent/status-bar";
 import type { ChatMessage, ImagePartData, MessagePart, ToolCallData } from "@/types/domain";
+import { cn } from "@/lib/utils";
 
 const MAX_TURN_STEPS = 4;
 
@@ -80,8 +91,21 @@ export function AgentPage() {
   const [streaming, setStreaming] = React.useState<StreamState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [tokensPerSecond, setTokensPerSecond] = React.useState<number | undefined>();
+  const [sessionsOpen, setSessionsOpen] = React.useState(false);
+  const [artifactsOpen, setArtifactsOpen] = React.useState(true);
+  const [listening, setListening] = React.useState(false);
+  const [speakReplies, setSpeakReplies] = React.useState(false);
+  const [queue, setQueue] = React.useState<string[]>([]);
   const abortRef = React.useRef<AbortController | null>(null);
   const busyRef = React.useRef(false);
+  const dictationRef = React.useRef<Dictation | null>(null);
+  const queueRef = React.useRef<string[]>([]);
+  const sendTextRef = React.useRef<(text: string, images: ImagePartData[]) => void>(() => {});
+
+  const voiceSupported = React.useMemo(
+    () => recognitionSupported() || synthesisSupported(),
+    [],
+  );
 
   const conversations = useLiveQuery(
     () => db.conversations.orderBy("updatedAt").reverse().toArray(),
@@ -96,15 +120,17 @@ export function AgentPage() {
 
   React.useEffect(() => {
     void (async () => {
-      const [c, fav, status] = await Promise.all([
+      const [c, fav, voicePref, status] = await Promise.all([
         loadIntegrations(),
         loadFavorites(),
+        getSetting<boolean>("ai:speakReplies", false),
         authedFetch("/api/integrations/status")
           .then((r) => r.json())
           .catch(() => null),
       ]);
       setConfig(c);
       setFavorites(fav);
+      setSpeakReplies(!!voicePref);
       setAiReady(!!status?.ai?.configured);
       const map: Record<string, ModelInfo[]> = {};
       for (const p of providerList()) {
@@ -116,6 +142,14 @@ export function AgentPage() {
       setModelsByProvider(map);
     })();
   }, []);
+
+  React.useEffect(
+    () => () => {
+      dictationRef.current?.abort();
+      stopSpeaking();
+    },
+    [],
+  );
 
   const cfg = config ?? EMPTY_INTEGRATIONS;
 
@@ -200,6 +234,9 @@ export function AgentPage() {
     setError(null);
     setDraft("");
     setAttachments([]);
+    queueRef.current = [];
+    setQueue([]);
+    setSessionsOpen(false);
   }, []);
 
   const attachFiles = React.useCallback(async (files: FileList | File[]) => {
@@ -229,6 +266,7 @@ export function AgentPage() {
       abortRef.current = controller;
       const toolNames = caps.tools ? AGENT_TOOL_NAMES : undefined;
       let titled = false;
+      let spoken = "";
 
       try {
         for (let step = 0; step < MAX_TURN_STEPS; step++) {
@@ -291,6 +329,7 @@ export function AgentPage() {
           await touchConversation(conversationId, { provider, model });
           setStreaming(null);
           setTokensPerSecond(result.tokensPerSecond);
+          spoken = result.text;
 
           if (!titled && titleSeed) {
             titled = true;
@@ -310,40 +349,97 @@ export function AgentPage() {
         setStreaming(null);
         busyRef.current = false;
         abortRef.current = null;
+        if (speakReplies && spoken.trim()) {
+          speak(speechTextFromParts([{ type: "text", text: spoken }]));
+        }
+        const next = queueRef.current.shift();
+        if (next !== undefined) {
+          setQueue(queueRef.current.slice());
+          sendTextRef.current(next, []);
+        }
       }
     },
-    [config, caps.reasoning, caps.tools, effort, retitle],
+    [config, caps.reasoning, caps.tools, effort, retitle, speakReplies],
   );
 
-  const send = React.useCallback(async () => {
-    if (!config || streaming || !aiReady || busyRef.current) return;
+  const sendText = React.useCallback(
+    async (text: string, images: ImagePartData[]) => {
+      if (!config || !aiReady) return;
+      setError(null);
+      let conversationId = activeId;
+      if (!conversationId) {
+        const created = await createConversation(
+          config.activeProvider,
+          activeModel(config),
+          text ? text.slice(0, 48) : "Image chat",
+        );
+        conversationId = created.id;
+        setActiveId(created.id);
+      }
+
+      const parts: MessagePart[] = [];
+      if (text) parts.push({ type: "text", text });
+      for (const image of images) parts.push({ type: "image", image });
+      await addMessage(conversationId, "user", parts);
+      if (text) setHistory((h) => [...h, text].slice(-50));
+
+      await runTurn(conversationId, text || "Image chat");
+    },
+    [config, aiReady, activeId, runTurn],
+  );
+
+  React.useEffect(() => {
+    sendTextRef.current = (text, images) => void sendText(text, images);
+  }, [sendText]);
+
+  const send = React.useCallback(() => {
+    if (!config || !aiReady) return;
     const text = draft.trim();
     const images = attachments;
     if (!text && images.length === 0) return;
 
-    setError(null);
-    let conversationId = activeId;
-    if (!conversationId) {
-      const created = await createConversation(
-        config.activeProvider,
-        activeModel(config),
-        text ? text.slice(0, 48) : "Image chat",
-      );
-      conversationId = created.id;
-      setActiveId(created.id);
-    }
-
-    const parts: MessagePart[] = [];
-    if (text) parts.push({ type: "text", text });
-    for (const image of images) parts.push({ type: "image", image });
-    await addMessage(conversationId, "user", parts);
-
     setDraft("");
     setAttachments([]);
-    if (text) setHistory((h) => [...h, text].slice(-50));
 
-    await runTurn(conversationId, text || "Image chat");
-  }, [config, streaming, aiReady, draft, attachments, activeId, runTurn]);
+    // While a reply is streaming, hold the message and send it when the turn ends.
+    if (busyRef.current || streaming) {
+      if (!text) return;
+      queueRef.current = [...queueRef.current, text];
+      setQueue(queueRef.current.slice());
+      return;
+    }
+    void sendText(text, images);
+  }, [config, aiReady, draft, attachments, streaming, sendText]);
+
+  const toggleVoice = React.useCallback(() => {
+    if (listening) {
+      dictationRef.current?.stop();
+      dictationRef.current = null;
+      setListening(false);
+      return;
+    }
+    const session = startDictation({
+      onResult: (text, isFinal) => {
+        if (!isFinal) return;
+        setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}${text.trim()}`);
+      },
+      onError: () => setListening(false),
+      onEnd: () => setListening(false),
+    });
+    if (session) {
+      dictationRef.current = session;
+      setListening(true);
+    }
+  }, [listening]);
+
+  const toggleSpeak = React.useCallback(() => {
+    setSpeakReplies((v) => {
+      const next = !v;
+      void setSetting("ai:speakReplies", next);
+      if (!next) stopSpeaking();
+      return next;
+    });
+  }, []);
 
   const onConfirmTool = React.useCallback(
     async (messageId: string, call: ToolCallData) => {
@@ -407,25 +503,43 @@ export function AgentPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <SessionsRail
-        conversations={conversations}
-        activeId={activeId}
-        onSelect={(id) => {
-          setActiveId(id);
-          setError(null);
-        }}
-        onNew={newChat}
-        onRename={(id, title) => void renameConversation(id, title)}
-        onTogglePin={(id, pinned) => void setConversationPinned(id, pinned)}
-        onDelete={(id) => {
-          void deleteConversation(id).then(() => {
-            if (id === activeId) setActiveId(null);
-          });
-        }}
-      />
+      {sessionsOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 lg:hidden"
+          onClick={() => setSessionsOpen(false)}
+          aria-hidden
+        />
+      )}
+      <div className={cn("shrink-0", sessionsOpen ? "fixed inset-y-0 left-0 z-40 lg:static" : "hidden lg:block")}>
+        <SessionsRail
+          conversations={conversations}
+          activeId={activeId}
+          onSelect={(id) => {
+            setActiveId(id);
+            setError(null);
+            setSessionsOpen(false);
+          }}
+          onNew={newChat}
+          onRename={(id, title) => void renameConversation(id, title)}
+          onTogglePin={(id, pinned) => void setConversationPinned(id, pinned)}
+          onDelete={(id) => {
+            void deleteConversation(id).then(() => {
+              if (id === activeId) setActiveId(null);
+            });
+          }}
+        />
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-border-subtle px-4 py-2.5">
+        <header className="flex items-center gap-2 border-b border-border-subtle px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setSessionsOpen(true)}
+            className="rounded-md p-1.5 text-ink-muted hover:bg-surface-muted hover:text-ink lg:hidden"
+            title="Chats"
+          >
+            <Menu className="h-4 w-4" />
+          </button>
           <div className="min-w-0">
             <div className="text-[13px] font-semibold text-ink">Agent</div>
             <div className="truncate text-[11px] text-ink-subtle">
@@ -434,12 +548,26 @@ export function AgentPage() {
                 : "No AI provider configured"}
             </div>
           </div>
-          <a
-            href="/settings"
-            className="ml-auto flex items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-ink"
-          >
-            <SettingsIcon className="h-3.5 w-3.5" /> Providers
-          </a>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setArtifactsOpen((v) => !v)}
+              className={cn(
+                "hidden rounded-md border border-border-subtle p-1.5 xl:flex",
+                artifactsOpen ? "text-forest" : "text-ink-muted hover:text-ink",
+              )}
+              title={artifactsOpen ? "Hide workspace rail" : "Show workspace rail"}
+              aria-pressed={artifactsOpen}
+            >
+              <PanelRight className="h-3.5 w-3.5" />
+            </button>
+            <a
+              href="/settings"
+              className="flex items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-ink"
+            >
+              <SettingsIcon className="h-3.5 w-3.5" /> Providers
+            </a>
+          </div>
         </header>
 
         <Transcript
@@ -473,6 +601,12 @@ export function AgentPage() {
           onRemoveAttachment={(i) => setAttachments((a) => a.filter((_, idx) => idx !== i))}
           history={history}
           commands={commands}
+          voiceSupported={voiceSupported && recognitionSupported()}
+          listening={listening}
+          onToggleVoice={toggleVoice}
+          speakReplies={speakReplies}
+          onToggleSpeak={synthesisSupported() ? toggleSpeak : undefined}
+          queuedCount={queue.length}
           header={
             <>
               <ModelPicker
@@ -498,6 +632,12 @@ export function AgentPage() {
           streaming={!!streaming}
         />
       </div>
+
+      {artifactsOpen && (
+        <div className="hidden xl:flex">
+          <ArtifactRail onClose={() => setArtifactsOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

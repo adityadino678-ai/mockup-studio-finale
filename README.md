@@ -51,7 +51,7 @@ A browser-saved key takes precedence over a server key when both are present.
 | `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
-| `npm run test` | Unit/integration tests (74 tests) |
+| `npm run test` | Unit/integration tests (82 tests) |
 | `npm run test:e2e` | End-to-end acceptance tests (17 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
 
@@ -101,7 +101,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 10. **AI SEO Studio** — with an AI key: keyword ideas by intent, product/audience/seasonal angles, title drafts, description, tags — all editable, never fabricating search volume or sales data; save as template or spin into a listing draft. Without a key: honest setup instructions.
 11. **Export Center** — real ZIP (fflate) with `MockupStudio_Export/<Design>/original.png`, ink variants, `mockups/`, `listing/`, and a `manifest.json`. The archive is re-read and verified before success is reported; missing assets are listed, not hidden.
 12. **Activity** — a log of what actually happened (uploads, saves, batches, exports, errors).
-13. **Agent** — a Hermes-style chat surface at `/agent`: sessions rail, streaming transcript with markdown + syntax highlighting, collapsible reasoning blocks, a combined provider/model picker with favorites and a reasoning-effort pill, and an approximate token/context meter. The agent can really run four tools — explain a workflow, summarize the local library, draft listing copy, and propose a batch job — shown as expandable activity cards; the batch tool writes nothing until you click Create. A model's effort hint is only sent when the model is flagged as a reasoning model (e.g. o-series, gpt-5, deepseek-reasoner, `:thinking`), and threads are auto-titled by the active model. Conversations persist in this browser's IndexedDB. Replies stream over SSE from `/api/ai/chat`; without an AI provider the composer is disabled and points at Settings.
+13. **Agent** — a Hermes-style chat surface at `/agent`: sessions rail, streaming transcript with markdown + syntax highlighting, collapsible reasoning blocks, a combined provider/model picker with favorites and a reasoning-effort pill, and an approximate token/context meter. The agent can really run four tools — explain a workflow, summarize the local library, draft listing copy, and propose a batch job — shown as expandable activity cards; the batch tool writes nothing until you click Create. A model's effort hint is only sent when the model is flagged as a reasoning model (e.g. o-series, gpt-5, deepseek-reasoner, `:thinking`), and threads are auto-titled by the active model. Voice in/out uses the Web Speech API when the browser offers it (dictation into the composer, optional read-aloud replies), sending while a reply streams queues the message instead of interrupting it, and a right-hand workspace rail lists real batch jobs, exports, and listing drafts read live from IndexedDB. Conversations persist in this browser's IndexedDB. Replies stream over SSE from `/api/ai/chat`; without an AI provider the composer is disabled and points at Settings.
 
 ## Architecture notes
 
@@ -128,7 +128,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 74 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
+- 82 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 
@@ -145,7 +145,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
   + validation only) because Etsy's v3 OAuth flow needs app registration; the
   workspace is ready for it.
 - The AI background-removal model (MODNet) is trained for **photos of people/products**; for flat artwork on solid backgrounds the flood-key engine is faster and usually better. `Xenova/u2net` was gated (HTTP 401) at build time, so MODNet is the shipped default.
-- **The Agent chat is at milestone M2.** Replies stream from `/api/ai/chat` over SSE and the four tools run against real local data (tool-activity cards, a Create/Cancel confirm step before any batch job, and model-written thread titles). The streaming and tool-calling paths have not been exercised against a real provider account in this environment (they need a pasted key), so they are covered by unit tests over synthetic SSE rather than a live call. Voice input/output, the artifact rail, and steering while streaming are planned for M3.
+- **The Agent chat is complete through milestone M3.** Replies stream from `/api/ai/chat` over SSE, the four tools run against real local data (tool-activity cards, a Create/Cancel confirm step before any batch job, and model-written thread titles), and voice, steering, and the workspace rail are in place. The streaming and tool-calling paths have not been exercised against a real provider account in this environment (they need a pasted key), so they are covered by unit tests over synthetic SSE rather than a live call; voice relies on browser Web Speech support and is hidden where that is absent.
 - Perspective/warp editing is **not** offered — Konva cannot do true perspective transforms, and fake controls are worse than none.
 - Batch rendering is single-threaded by design (reliability over throughput); very large jobs still complete with live status and can be cancelled.
 - Data lives in the browser profile that created it (IndexedDB is per-profile).
