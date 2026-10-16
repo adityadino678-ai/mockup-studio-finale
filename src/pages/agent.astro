@@ -1,0 +1,8 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { AgentRoute } from "@/routes/AgentRoute";
+---
+
+<AppLayout>
+  <AgentRoute client:only="react" />
+</AppLayout>

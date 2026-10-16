@@ -391,3 +391,61 @@ export interface IntegrationStatus {
   detail?: string;
   checkedAt: number;
 }
+
+// ---------------------------------------------------------------------------
+// Agent chat — local-first conversation history. Persisted in IndexedDB only;
+// the server never sees a stored transcript. Messages are a list of typed parts
+// so a single assistant turn can carry text, collapsible reasoning, and tool
+// activity without losing ordering.
+// ---------------------------------------------------------------------------
+
+export type ChatRole = "user" | "assistant" | "system";
+
+export type ToolCallStatus = "pending" | "running" | "done" | "error";
+
+export interface ToolCallData {
+  /** Stable id from the provider, or generated locally by the intent router. */
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  status: ToolCallStatus;
+  /** Rendered summary shown on the collapsed card. */
+  summary?: string;
+  /** Full result payload (JSON), when the tool ran. */
+  result?: unknown;
+  error?: string;
+}
+
+export interface ImagePartData {
+  name: string;
+  mime: string;
+  /** Data URL, kept small; attachments are not uploaded anywhere. */
+  dataUrl: string;
+}
+
+export type MessagePart =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
+  | { type: "tool"; call: ToolCallData }
+  | { type: "image"; image: ImagePartData };
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  role: ChatRole;
+  parts: MessagePart[];
+  /** Provider/model used for this turn (assistant messages). */
+  provider?: string;
+  model?: string;
+  createdAt: number;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  provider: string;
+  model: string;
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}

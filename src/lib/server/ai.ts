@@ -8,9 +8,13 @@ import { serverEnv } from "@/lib/server/env";
 import { DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL, type AiCredentials } from "@/lib/server/creds";
 import { authHeaders, baseUrlFor, getProvider, normalizeModels, type ModelInfo } from "@/lib/ai/providers";
 
+export type AiContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface AiMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | AiContentPart[];
 }
 
 export interface AiCompletionOptions {
@@ -106,6 +110,112 @@ export async function complete(
   const content = (data as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI provider returned an empty response");
   return content;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming chat
+// ---------------------------------------------------------------------------
+
+export interface AiStreamOptions {
+  temperature?: number;
+  maxTokens?: number;
+  /** Reasoning effort hint (`low` | `medium` | `high`); only sent when set. */
+  effort?: string;
+  signal?: AbortSignal;
+}
+
+export type AiStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "reasoning"; text: string }
+  | { type: "usage"; usage: Record<string, unknown> }
+  | { type: "done" };
+
+/**
+ * Parses one line of an OpenAI-compatible streaming response into normalized
+ * events. Exported so the parsing rules are unit-testable without a network.
+ */
+export function parseProviderStreamLine(line: string): AiStreamEvent[] {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith(":") || !trimmed.startsWith("data:")) return [];
+  const payload = trimmed.slice(5).trim();
+  if (payload === "[DONE]") return [{ type: "done" }];
+  let data: unknown;
+  try {
+    data = JSON.parse(payload);
+  } catch {
+    return [];
+  }
+  const choice = (data as { choices?: Array<{ delta?: Record<string, unknown> }> })?.choices?.[0];
+  const delta = (choice?.delta ?? {}) as Record<string, unknown>;
+  const events: AiStreamEvent[] = [];
+  const reasoning = delta.reasoning_content ?? delta.reasoning;
+  if (typeof reasoning === "string" && reasoning) events.push({ type: "reasoning", text: reasoning });
+  if (typeof delta.content === "string" && delta.content) events.push({ type: "delta", text: delta.content });
+  const usage = (data as { usage?: Record<string, unknown> })?.usage;
+  if (usage && typeof usage === "object") events.push({ type: "usage", usage });
+  return events;
+}
+
+/**
+ * Streams a chat completion, yielding normalized events. Throws before the
+ * first yield for configuration/HTTP errors so callers can still send a real
+ * status code; after the first yield the response is committed.
+ */
+export async function* streamChat(
+  messages: AiMessage[],
+  options: AiStreamOptions = {},
+  creds?: AiCredentials,
+): AsyncGenerator<AiStreamEvent> {
+  const { configured, baseUrl, model, provider } = aiConfig(creds);
+  if (!configured) throw new AiNotConfiguredError();
+
+  const apiKey = creds?.apiKey ?? serverEnv.aiApiKey() ?? serverEnv.openaiApiKey() ?? "";
+  const def = getProvider(provider);
+  const chatPath = def?.chatPath ?? "/chat/completions";
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}${chatPath}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authFor(provider, apiKey),
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 1400,
+      ...(options.effort ? { reasoning_effort: options.effort } : {}),
+    }),
+    signal: options.signal,
+    cache: "no-store",
+  });
+
+  if (!res.ok) throw new Error(await readAiError(res));
+  if (!res.body) throw new Error("AI provider returned no response stream");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index: number;
+      while ((index = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        for (const event of parseProviderStreamLine(line)) {
+          if (event.type === "done") finished = true;
+          yield event;
+        }
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  if (!finished) yield { type: "done" };
 }
 
 export interface AiProbe {

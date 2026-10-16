@@ -51,8 +51,8 @@ A browser-saved key takes precedence over a server key when both are present.
 | `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
-| `npm run test` | Unit/integration tests (44 tests) |
-| `npm run test:e2e` | End-to-end acceptance tests (16 tests, needs `npx playwright install chromium` once) |
+| `npm run test` | Unit/integration tests (61 tests) |
+| `npm run test:e2e` | End-to-end acceptance tests (17 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
 
 ## Deploying to Cloudflare
@@ -67,9 +67,9 @@ npm run deploy         # build + wrangler deploy
 The app is published to `https://mockup-studio.adityadino678.workers.dev`.
 
 **How it is shaped:** `output: "static"`, because no page depends on request
-state — every view reads its data from the visitor's own IndexedDB. So all 12
+state — every view reads its data from the visitor's own IndexedDB. So all 13
 pages prerender to static HTML and are served directly from Cloudflare's CDN,
-and `dist/_routes.json` excludes them from the Worker. Only the seven `/api/**`
+and `dist/_routes.json` excludes them from the Worker. Only the eight `/api/**`
 endpoints run on demand, each opting in with `export const prerender = false`.
 
 **Secrets:** none are required and none are deployed by default. The whole core
@@ -101,14 +101,15 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 10. **AI SEO Studio** — with an AI key: keyword ideas by intent, product/audience/seasonal angles, title drafts, description, tags — all editable, never fabricating search volume or sales data; save as template or spin into a listing draft. Without a key: honest setup instructions.
 11. **Export Center** — real ZIP (fflate) with `MockupStudio_Export/<Design>/original.png`, ink variants, `mockups/`, `listing/`, and a `manifest.json`. The archive is re-read and verified before success is reported; missing assets are listed, not hidden.
 12. **Activity** — a log of what actually happened (uploads, saves, batches, exports, errors).
+13. **Agent** — a Hermes-style chat surface at `/agent`: sessions rail, streaming transcript with markdown + syntax highlighting, collapsible reasoning blocks, a combined provider/model picker with favorites and a reasoning-effort pill, and an approximate token/context meter. A model's effort hint is only sent when the model is flagged as a reasoning model (e.g. o-series, gpt-5, deepseek-reasoner, `:thinking`). Conversations persist in this browser's IndexedDB. Replies stream over SSE from `/api/ai/chat`; without an AI provider the composer is disabled and points at Settings.
 
 ## Architecture notes
 
-- **Astro 5 (SSR via `@astrojs/node`) + React 19 islands + TypeScript strict + Tailwind v4.** Every page is a thin `.astro` route that renders one React island; the shell and the view live in a single React tree (`src/routes/*.tsx`) because islands cannot nest and the views need Radix context from `TooltipProvider`.
+- **Astro 5 (`output: "static"` via `@astrojs/cloudflare`) + React 19 islands + TypeScript strict + Tailwind v4.** Every page is a thin `.astro` route that renders one React island; the shell and the view live in a single React tree (`src/routes/*.tsx`) because islands cannot nest and the views need Radix context from `TooltipProvider`.
 - **API routes** are Astro endpoints (`src/pages/api/**/*.ts`) exporting `GET`/`POST` as `APIRoute` and returning a plain `Response`. Secrets are read server-side through `src/lib/server/env.ts`.
 - **One compositing engine** (`src/lib/canvas/compose.ts`): the Konva editor, the batch renderer and the export compositor all call the same `computeGeometry`/`drawPlacement` math, so the rendered output provably matches the editor preview — exports are full-resolution composites, never screenshots.
 - **Transforms are mockup-relative** (fractions of mockup dimensions), so placements survive canvas resize and transfer across mockups via templates.
-- **Storage**: Dexie (IndexedDB) with metadata and blobs in separate tables; a future server-side migration only needs to swap the repository layer. Schema is versioned (v2 added render-provenance indexes).
+- **Storage**: Dexie (IndexedDB) with metadata and blobs in separate tables; a future server-side migration only needs to swap the repository layer. Schema is versioned (v2 added render-provenance indexes; v3 added the agent-chat `conversations` / `messages` tables).
 - **Secrets never ship in the bundle.** Integration keys are either pasted by the
   user in Settings (kept in that browser's IndexedDB, sent only as per-request
   headers to the app's own API routes) or set server-side as secrets. Printify and
@@ -127,7 +128,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 44 unit/integration tests + 16 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
+- 61 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 
@@ -144,6 +145,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
   + validation only) because Etsy's v3 OAuth flow needs app registration; the
   workspace is ready for it.
 - The AI background-removal model (MODNet) is trained for **photos of people/products**; for flat artwork on solid backgrounds the flood-key engine is faster and usually better. `Xenova/u2net` was gated (HTTP 401) at build time, so MODNet is the shipped default.
+- **The Agent chat is at milestone M1.** Replies stream from `/api/ai/chat` over SSE, but the streaming path has not been exercised against a real provider account in this environment (it needs a pasted key). Tool execution, tool-activity cards, auto-titling, voice, the artifact rail, and steering while streaming are planned for M2/M3 — for now the agent explains, drafts copy, and summarizes from the local database.
 - Perspective/warp editing is **not** offered — Konva cannot do true perspective transforms, and fake controls are worse than none.
 - Batch rendering is single-threaded by design (reliability over throughput); very large jobs still complete with live status and can be cancelled.
 - Data lives in the browser profile that created it (IndexedDB is per-profile).

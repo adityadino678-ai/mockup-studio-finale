@@ -32,6 +32,17 @@ export interface ProviderModelSeed {
   contextLength?: number;
 }
 
+/**
+ * Per-model capability hints for the chat composer. `reasoning` decides whether
+ * the reasoning/effort pill is shown; `tools` gates function calling; `vision`
+ * gates image attachment. All are best-effort heuristics, never guarantees.
+ */
+export interface ModelCapabilities {
+  reasoning: boolean;
+  tools: boolean;
+  vision: boolean;
+}
+
 export interface ProviderDef {
   id: string;
   label: string;
@@ -379,4 +390,59 @@ export function normalizeModels(def: ProviderDef, raw: unknown): ModelInfo[] {
     if (a.free !== b.free) return a.free ? -1 : 1;
     return a.id.localeCompare(b.id);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Capability hints
+//
+// Tools (function calling) and vision are provider-wide flags — the composer
+// only offers them where the provider broadly supports them. Reasoning effort is
+// model-specific, so it is matched against the model id.
+// ---------------------------------------------------------------------------
+
+const PROVIDER_CAPS: Record<string, { tools?: boolean; vision?: boolean }> = {
+  opencode: { tools: true },
+  nvidia: { tools: true, vision: true },
+  openrouter: { tools: true, vision: true },
+  groq: { tools: true },
+  cerebras: { tools: true },
+  together: { tools: true, vision: true },
+  google: { tools: true, vision: true },
+  mistral: { tools: true, vision: true },
+  deepseek: { tools: true },
+  fireworks: { tools: true },
+  xai: { tools: true, vision: true },
+  openai: { tools: true, vision: true },
+  anthropic: { tools: true, vision: true },
+  ollama: { tools: true, vision: true },
+  custom: { tools: true, vision: true },
+};
+
+const REASONING_MODEL =
+  /(^|[-_/])(o1|o3|o4|gpt-5|reasoner|reasoning|thinking|think|qwq|deepseek-r|r1|glm-z|magistral)([-_/]|$)/i;
+
+/** Whether a model id looks like a reasoning model that accepts an effort hint. */
+export function modelReasoning(modelId: string): boolean {
+  const id = (modelId || "").toLowerCase();
+  if (!id) return false;
+  if (/:thinking\b/.test(id)) return true;
+  return REASONING_MODEL.test(id);
+}
+
+/** Best-effort capabilities for a provider + model id. */
+export function modelCapabilities(providerId: string, modelId: string): ModelCapabilities {
+  const caps = PROVIDER_CAPS[providerId] ?? {};
+  return {
+    reasoning: modelReasoning(modelId),
+    tools: !!caps.tools,
+    vision: !!caps.vision,
+  };
+}
+
+export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** Favourites are stored as `provider/model` keys. */
+export function favoriteKey(providerId: string, modelId: string): string {
+  return `${providerId}/${modelId}`;
 }

@@ -433,7 +433,7 @@ test.describe("core workflow", () => {
       if (msg.type() === "error") errors.push(msg.text());
     });
     const routes = [
-      "/", "/designs", "/mockups", "/editor", "/batch", "/templates",
+      "/", "/agent", "/designs", "/mockups", "/editor", "/batch", "/templates",
       "/products", "/listings", "/export", "/seo", "/activity", "/settings",
     ];
     for (const route of routes) {
@@ -461,6 +461,7 @@ test.describe("core workflow", () => {
     // would change the URL while leaving the previous view on screen, so the
     // assertion checks that the target page's own copy is rendered.
     const sections: Array<{ link: RegExp; path: string; copy: RegExp }> = [
+      { link: /^Agent$/, path: "/agent", copy: /How can I help\?/ },
       { link: /^Designs$/, path: "/designs", copy: /Your artwork library/ },
       { link: /^Mockups$/, path: "/mockups", copy: /Photos of your products/ },
       { link: /^Mockup Editor$/, path: "/editor", copy: /Pick a design/ },
@@ -528,6 +529,29 @@ test.describe("core workflow", () => {
     });
     expect(stored?.printifyKey).toBe("pp_test_key_not_real");
     expect(stored?.activeProvider).toBe("nvidia");
+  });
+
+  test("17. agent page exposes sessions, composer and a model switcher", async ({ page }) => {
+    await gotoApp(page, "/agent");
+
+    // Sessions rail with a search box and a New chat button.
+    await expect(page.getByRole("button", { name: /New chat/ })).toBeVisible();
+    await expect(page.getByPlaceholder("Search chats")).toBeVisible();
+
+    // Empty state, and the composer is offered.
+    await expect(page.getByText("How can I help?")).toBeVisible();
+    const composer = page.getByRole("textbox", { name: "Message the agent" });
+    await expect(composer).toBeVisible();
+
+    // The combined provider/model picker lives in the composer.
+    await expect(page.getByRole("button", { name: /Choose model/ })).toBeVisible();
+
+    // With no provider key, the composer is disabled and a CTA points at Settings.
+    await expect(composer).toBeDisabled();
+    await expect(page.getByRole("link", { name: /Add an AI provider key/ })).toBeVisible();
+
+    // The floating launcher is hidden on the agent page itself.
+    await expect(page.getByRole("link", { name: /Open the agent/ })).toHaveCount(0);
   });
 });
 

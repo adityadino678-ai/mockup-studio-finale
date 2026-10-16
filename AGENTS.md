@@ -44,8 +44,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 44 unit tests
-npm run test:e2e      # 16 acceptance tests (local dev server)
+npm run test          # 61 unit tests
+npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
 To run the e2e suite against the deployed site instead:
@@ -61,7 +61,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **12 static pages + 7 on-demand endpoints.** No page depends on request state,
+- **13 static pages + 8 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker.
@@ -127,6 +127,19 @@ Both must pass. The production run has caught bugs the local run missed.
   it (chat models only, deduped, free-tagged) and returns it. Some providers
   (OpenRouter) publish a public list, so a key is not always required. Fetched
   lists are cached per provider in IndexedDB (`ai:models:<id>`, 10-minute TTL).
+- **Agent chat (M1) lives at `/agent`.** A Hermes-style chat surface: sessions
+  rail, streaming transcript (markdown + syntax highlighting), reasoning blocks,
+  a combined provider/model picker with favorites and a reasoning-effort pill, and
+  a status bar with an *approximate* token/context meter. Conversations and
+  messages are stored in IndexedDB (`conversations` / `messages`, schema v3) —
+  never server-side. Replies stream over SSE from **`/api/ai/chat`** (POST,
+  `prerender = false`): the endpoint re-emits OpenAI-compatible deltas as
+  `delta` / `reasoning` / `usage` / `done` / `error` frames (`src/lib/ai/sse.ts`).
+  Capabilities (`reasoning` / `tools` / `vision`) are curated heuristics in
+  `src/lib/ai/providers.ts` (`modelCapabilities`); the effort hint is only sent to
+  models flagged as reasoning models. The floating `AssistantPanel` is now just a
+  launcher for `/agent`. Tool execution, auto-titling, voice, and the artifact
+  rail are planned for M2/M3.
 - **Printify endpoints now use the documented paths** (`/v1/catalog/blueprints.json`,
   `/v1/catalog/blueprints/{id}.json`, `/v1/catalog/blueprints/{id}/print_providers.json`,
   `/v1/uploads/images.json`, `/v1/shops/{shop_id}/products.json`). Product creation

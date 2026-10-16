@@ -6,6 +6,7 @@ import { usePathname } from "@/lib/client/nav";
 import { cn } from "@/lib/utils";
 import {
   Aperture,
+  Bot,
   Boxes,
   ClipboardList,
   FileArchive,
@@ -32,6 +33,10 @@ interface NavGroup {
 }
 
 const NAV: NavGroup[] = [
+  {
+    label: "Agent",
+    items: [{ href: "/agent", label: "Agent", icon: <Bot className="h-4 w-4" /> }],
+  },
   {
     label: "Workspace",
     items: [

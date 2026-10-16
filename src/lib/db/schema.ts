@@ -5,6 +5,8 @@ import type {
   BatchItem,
   BatchJob,
   BgRemovalRecord,
+  ChatMessage,
+  Conversation,
   Design,
   ExportJob,
   ListingDraft,
@@ -50,6 +52,8 @@ export class MockupStudioDB extends Dexie {
   exports!: EntityTable<ExportJob, "id">;
   activity!: EntityTable<ActivityRecord, "id">;
   settings!: EntityTable<SettingRecord, "key">;
+  conversations!: EntityTable<Conversation, "id">;
+  messages!: EntityTable<ChatMessage, "id">;
 
   constructor() {
     super("mockup-studio");
@@ -73,6 +77,11 @@ export class MockupStudioDB extends Dexie {
     // v2: add render provenance indexes for batch dedupe and export queries.
     this.version(2).stores({
       assets: "id, kind, parentId, sourceDesignId, sourceMockupId, createdAt",
+    });
+    // v3: agent chat history (local-first; never stored on the server).
+    this.version(3).stores({
+      conversations: "id, updatedAt, createdAt, pinned",
+      messages: "id, conversationId, createdAt, [conversationId+createdAt]",
     });
   }
 }
