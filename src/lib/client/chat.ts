@@ -12,15 +12,23 @@
 import { db, getSetting, setSetting } from "@/lib/db/schema";
 import { authedFetch } from "@/lib/client/integrations";
 import { SseParser, decodeSseData, type SseFrame } from "@/lib/ai/sse";
-import type { ChatMessage, ChatRole, Conversation, MessagePart } from "@/types/domain";
+import type { ChatMessage, ChatRole, Conversation, MessagePart, ToolCallData } from "@/types/domain";
 
 export type ApiContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
 
+export interface ApiToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
 export interface ApiMessage {
-  role: ChatRole;
-  content: string | ApiContentPart[];
+  role: ChatRole | "tool";
+  content: string | ApiContentPart[] | null;
+  tool_calls?: ApiToolCall[];
+  tool_call_id?: string;
 }
 
 export function newId(): string {
@@ -93,6 +101,38 @@ export async function addMessage(
   return message;
 }
 
+/** Updates a single tool-call part in place (status, summary, result, error). */
+export async function patchToolCall(
+  messageId: string,
+  callId: string,
+  patch: Partial<ToolCallData>,
+): Promise<void> {
+  const message = await db.messages.get(messageId);
+  if (!message) return;
+  const parts = message.parts.map((part) =>
+    part.type === "tool" && part.call.id === callId
+      ? { type: "tool" as const, call: { ...part.call, ...patch } }
+      : part,
+  );
+  await db.messages.put({ ...message, parts });
+}
+
+/** Asks the active model for a short thread title. Returns null when it fails. */
+export async function suggestTitle(prompt: string, reply: string): Promise<string | null> {
+  try {
+    const res = await authedFetch("/api/ai/title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, reply }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { title?: string } | null;
+    return data?.title?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Flattens stored messages into the `{role, content}` shape the API expects. */
 export function toApiMessages(messages: ChatMessage[]): ApiMessage[] {
   const out: ApiMessage[] = [];
@@ -107,6 +147,38 @@ export function toApiMessages(messages: ChatMessage[]): ApiMessage[] {
       (p): p is { type: "image"; image: { name: string; mime: string; dataUrl: string } } =>
         p.type === "image",
     );
+
+    // Tool calls the model made, plus their results, are replayed as the
+    // assistant/tool pair the provider's protocol expects. Calls that never got
+    // a result (for example a batch job still awaiting confirmation) are left
+    // out so the history stays valid.
+    if (message.role === "assistant") {
+      const toolParts = message.parts.filter(
+        (p): p is { type: "tool"; call: ToolCallData } => p.type === "tool",
+      );
+      const calls: ApiToolCall[] = toolParts
+        .filter((p) => p.call.status === "done" || p.call.status === "error")
+        .map((p) => ({
+          id: p.call.id,
+          type: "function",
+          function: { name: p.call.name, arguments: JSON.stringify(p.call.args ?? {}) },
+        }));
+      if (calls.length > 0) {
+        out.push({ role: "assistant", content: text || null, tool_calls: calls });
+        for (const part of toolParts) {
+          if (part.call.status !== "done" && part.call.status !== "error") continue;
+          out.push({
+            role: "tool",
+            tool_call_id: part.call.id,
+            content: JSON.stringify(
+              part.call.error ? { error: part.call.error } : (part.call.result ?? { ok: true }),
+            ),
+          });
+        }
+        continue;
+      }
+    }
+
     if (images.length > 0) {
       const content: ApiContentPart[] = [];
       if (text) content.push({ type: "text", text });
@@ -159,6 +231,8 @@ export interface StreamCallbacks {
 export interface StreamResult {
   text: string;
   reasoning: string;
+  /** Tool calls the model requested this turn, if any. */
+  toolCalls?: ApiToolCall[];
   firstTokenMs?: number;
   tokensPerSecond?: number;
   aborted: boolean;
@@ -182,6 +256,9 @@ function applyFrame(
     callbacks.onReasoning?.(data.text);
   } else if (frame.event === "usage" && data) {
     callbacks.onUsage?.(data);
+  } else if (frame.event === "tool_calls") {
+    const calls = (data as { calls?: ApiToolCall[] } | null)?.calls;
+    if (Array.isArray(calls) && calls.length > 0) result.toolCalls = calls;
   } else if (frame.event === "error") {
     result.error = (data?.message as string) ?? "The provider stopped the response.";
   }
@@ -226,12 +303,16 @@ export async function consumeStream(res: Response, callbacks: StreamCallbacks = 
 /** Posts message history to `/api/ai/chat` and streams the reply. */
 export async function streamReply(
   messages: ApiMessage[],
-  options: { effort?: string; signal?: AbortSignal } & StreamCallbacks = {},
+  options: { effort?: string; tools?: string[]; signal?: AbortSignal } & StreamCallbacks = {},
 ): Promise<StreamResult> {
   const res = await authedFetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, effort: options.effort }),
+    body: JSON.stringify({
+      messages,
+      effort: options.effort,
+      ...(options.tools?.length ? { tools: options.tools } : {}),
+    }),
     signal: options.signal,
   });
 

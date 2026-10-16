@@ -5,14 +5,24 @@ import { Markdown } from "@/components/agent/markdown";
 import { ReasoningBlock } from "@/components/agent/reasoning-block";
 import { ToolCard } from "@/components/agent/tool-card";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@/types/domain";
+import type { ChatMessage, ToolCallData } from "@/types/domain";
 
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 /** One transcript row: user bubble, or an assistant turn with reasoning + tools + markdown. */
-export function MessageItem({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
+export function MessageItem({
+  message,
+  streaming,
+  onConfirmTool,
+  onCancelTool,
+}: {
+  message: ChatMessage;
+  streaming?: boolean;
+  onConfirmTool?: (messageId: string, call: ToolCallData) => void;
+  onCancelTool?: (messageId: string, call: ToolCallData) => void;
+}) {
   const isUser = message.role === "user";
   return (
     <div className={cn("flex flex-col gap-1", isUser ? "items-end" : "items-start")}>
@@ -27,7 +37,14 @@ export function MessageItem({ message, streaming }: { message: ChatMessage; stre
             return <ReasoningBlock key={i} text={part.text} streaming={streaming} />;
           }
           if (part.type === "tool") {
-            return <ToolCard key={i} call={part.call} />;
+            return (
+              <ToolCard
+                key={i}
+                call={part.call}
+                onConfirm={onConfirmTool ? () => onConfirmTool(message.id, part.call) : undefined}
+                onCancel={onCancelTool ? () => onCancelTool(message.id, part.call) : undefined}
+              />
+            );
           }
           if (part.type === "image") {
             return (

@@ -9,11 +9,14 @@ import {
   deleteConversation,
   estimateTokens,
   loadFavorites,
+  patchToolCall,
   renameConversation,
   saveFavorites,
   setConversationPinned,
   toApiMessages,
 } from "@/lib/client/chat";
+import { executeTool } from "@/lib/client/tools";
+import { agentTool, parseToolArguments, toOpenAiTools } from "@/lib/ai/tools";
 import { db } from "@/lib/db/schema";
 import type { ChatMessage } from "@/types/domain";
 
@@ -195,5 +198,199 @@ describe("consumeStream", () => {
     );
     expect(result.text).toBe("partial");
     expect(result.error).toBe("boom");
+  });
+
+  it("captures a tool_calls frame", async () => {
+    const result = await consumeStream(
+      sseResponse([
+        encodeSse("tool_calls", {
+          calls: [{ id: "c1", type: "function", function: { name: "summarize_workspace", arguments: "{}" } }],
+        }),
+        encodeSse("done", { model: "m" }),
+      ]),
+    );
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls?.[0].function.name).toBe("summarize_workspace");
+  });
+});
+
+describe("agent tools", () => {
+  it("marks only the writing tool as needing confirmation", () => {
+    expect(agentTool("create_batch_job")?.confirm).toBe(true);
+    expect(agentTool("explain_howto")?.confirm).toBeFalsy();
+    expect(agentTool("summarize_workspace")?.confirm).toBeFalsy();
+    expect(agentTool("draft_listing")?.confirm).toBeFalsy();
+    expect(agentTool("nope")).toBeUndefined();
+  });
+
+  it("builds OpenAI tool defs for the requested subset only", () => {
+    const defs = toOpenAiTools(["summarize_workspace", "bogus", "explain_howto"]);
+    expect(defs.map((d) => d.function.name)).toEqual(["summarize_workspace", "explain_howto"]);
+    expect(defs[0].type).toBe("function");
+  });
+
+  it("parses tool arguments tolerantly", () => {
+    expect(parseToolArguments('{"topic":"upload"}')).toEqual({ topic: "upload" });
+    expect(parseToolArguments("")).toEqual({});
+    expect(parseToolArguments("not json")).toEqual({});
+    expect(parseToolArguments("[1,2]")).toEqual({});
+  });
+});
+
+describe("provider tool-call streaming", () => {
+  it("emits tool_delta events from a delta payload", () => {
+    const events = parseProviderStreamLine(
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"draft_listing","arguments":"{\\"conce"}}]}}]}',
+    );
+    expect(events).toContainEqual({
+      type: "tool_delta",
+      index: 0,
+      id: "c1",
+      name: "draft_listing",
+      args: '{"conce',
+    });
+  });
+});
+
+describe("toApiMessages tool replay", () => {
+  it("replays completed tool calls as assistant + tool pairs", () => {
+    const messages: ChatMessage[] = [
+      { id: "1", conversationId: "c", role: "user", parts: [{ type: "text", text: "summarize" }], createdAt: 1 },
+      {
+        id: "2",
+        conversationId: "c",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "On it." },
+          {
+            type: "tool",
+            call: {
+              id: "c1",
+              name: "summarize_workspace",
+              args: {},
+              status: "done",
+              result: { designs: 2 },
+            },
+          },
+        ],
+        createdAt: 2,
+      },
+    ];
+    const api = toApiMessages(messages);
+    expect(api).toHaveLength(3);
+    expect(api[1].role).toBe("assistant");
+    expect(api[1].content).toBe("On it.");
+    expect(api[1].tool_calls?.[0].function.name).toBe("summarize_workspace");
+    expect(api[2].role).toBe("tool");
+    expect(api[2].tool_call_id).toBe("c1");
+    expect(api[2].content).toBe(JSON.stringify({ designs: 2 }));
+  });
+
+  it("omits tool calls that never got a result", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "2",
+        conversationId: "c",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool",
+            call: { id: "c1", name: "create_batch_job", args: {}, status: "pending", summary: "…" },
+          },
+        ],
+        createdAt: 2,
+      },
+    ];
+    expect(toApiMessages(messages)).toEqual([]);
+  });
+});
+
+describe("tool executors", () => {
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  it("answers a known how-to question", async () => {
+    const result = await executeTool("explain_howto", { topic: "how do I upload a design" });
+    expect(result.error).toBeUndefined();
+    expect(String((result.result as { answer: string }).answer)).toContain("Designs page");
+  });
+
+  it("counts the workspace from IndexedDB", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const result = await executeTool("summarize_workspace", {});
+    expect((result.result as { designs: number }).designs).toBe(1);
+    expect(result.summary).toContain("1 designs");
+  });
+
+  it("refuses to propose a batch with nothing to work on", async () => {
+    const result = await executeTool("create_batch_job", {});
+    expect(result.error).toBeDefined();
+    expect(result.confirmation).toBeUndefined();
+  });
+
+  it("proposes a batch without writing anything", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await db.mockups.put({
+      id: "m1",
+      name: "Tee",
+      category: "tshirt",
+      tags: [],
+      favorite: false,
+      assetId: "a2",
+      width: 100,
+      height: 100,
+      source: "user",
+      createdAt: 1,
+    });
+    const result = await executeTool("create_batch_job", { variant: "white" });
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.total).toBe(1);
+    expect(result.confirmation?.payload.variant).toBe("white");
+    expect(await db.batchJobs.count()).toBe(0);
+  });
+
+  it("reports an unknown tool instead of guessing", async () => {
+    const result = await executeTool("delete_everything", {});
+    expect(result.error).toContain("No tool named");
+  });
+});
+
+describe("patchToolCall", () => {
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  it("updates one tool part in place", async () => {
+    const c = await createConversation("groq", "m", "t");
+    const message = await addMessage(c.id, "assistant", [
+      { type: "tool", call: { id: "c1", name: "create_batch_job", args: {}, status: "pending" } },
+    ]);
+    await patchToolCall(message.id, "c1", { status: "done", result: { jobId: "j1" } });
+    const stored = await db.messages.get(message.id);
+    const part = stored?.parts[0];
+    expect(part?.type).toBe("tool");
+    if (part?.type === "tool") {
+      expect(part.call.status).toBe("done");
+      expect(part.call.result).toEqual({ jobId: "j1" });
+    }
   });
 });

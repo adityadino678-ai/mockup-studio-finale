@@ -23,13 +23,17 @@ import {
   deleteConversation,
   loadFavorites,
   messageTokens,
+  patchToolCall,
   renameConversation,
   saveFavorites,
   setConversationPinned,
   streamReply,
+  suggestTitle,
   toApiMessages,
   touchConversation,
 } from "@/lib/client/chat";
+import { confirmBatchJob, executeTool } from "@/lib/client/tools";
+import { AGENT_TOOL_NAMES, parseToolArguments } from "@/lib/ai/tools";
 import {
   favoriteKey,
   modelCapabilities,
@@ -43,7 +47,9 @@ import { Composer, type SlashCommand } from "@/components/agent/composer";
 import { ModelPicker, type ProviderModels } from "@/components/agent/model-picker";
 import { EffortPill } from "@/components/agent/effort-pill";
 import { StatusBar } from "@/components/agent/status-bar";
-import type { ChatMessage, ImagePartData, MessagePart } from "@/types/domain";
+import type { ChatMessage, ImagePartData, MessagePart, ToolCallData } from "@/types/domain";
+
+const MAX_TURN_STEPS = 4;
 
 interface StreamState {
   text: string;
@@ -75,6 +81,7 @@ export function AgentPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [tokensPerSecond, setTokensPerSecond] = React.useState<number | undefined>();
   const abortRef = React.useRef<AbortController | null>(null);
+  const busyRef = React.useRef(false);
 
   const conversations = useLiveQuery(
     () => db.conversations.orderBy("updatedAt").reverse().toArray(),
@@ -202,8 +209,114 @@ export function AgentPage() {
     setAttachments((a) => [...a, ...next]);
   }, []);
 
+  /** Renames a thread from its first exchange, but only while it has a placeholder title. */
+  const retitle = React.useCallback(async (conversationId: string, seed: string, reply: string) => {
+    const conversation = await db.conversations.get(conversationId);
+    if (!conversation) return;
+    const placeholders = new Set(["New chat", "Image chat", seed.slice(0, 48)]);
+    if (!placeholders.has(conversation.title)) return;
+    const title = await suggestTitle(seed, reply);
+    if (title && title !== conversation.title) await renameConversation(conversationId, title);
+  }, []);
+
+  const runTurn = React.useCallback(
+    async (conversationId: string, titleSeed?: string) => {
+      if (!config || busyRef.current) return;
+      busyRef.current = true;
+      const provider = config.activeProvider;
+      const model = activeModel(config);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const toolNames = caps.tools ? AGENT_TOOL_NAMES : undefined;
+      let titled = false;
+
+      try {
+        for (let step = 0; step < MAX_TURN_STEPS; step++) {
+          const stored = await db.messages
+            .where("conversationId")
+            .equals(conversationId)
+            .sortBy("createdAt");
+          const apiMessages = toApiMessages(stored);
+
+          setStreaming({ text: "", reasoning: "" });
+          const result = await streamReply(apiMessages, {
+            effort: caps.reasoning ? effort : undefined,
+            tools: toolNames,
+            signal: controller.signal,
+            onDelta: (t) => setStreaming((s) => (s ? { ...s, text: s.text + t } : s)),
+            onReasoning: (t) => setStreaming((s) => (s ? { ...s, reasoning: s.reasoning + t } : s)),
+          });
+
+          const parts: MessagePart[] = [];
+          if (result.reasoning.trim()) parts.push({ type: "reasoning", text: result.reasoning });
+          if (result.text.trim()) parts.push({ type: "text", text: result.text });
+
+          const toolParts: MessagePart[] = [];
+          let awaitingConfirm = false;
+          for (const call of result.toolCalls ?? []) {
+            const args = parseToolArguments(call.function.arguments);
+            const exec = await executeTool(call.function.name, args);
+            if (exec.confirmation) {
+              awaitingConfirm = true;
+              toolParts.push({
+                type: "tool",
+                call: {
+                  id: call.id,
+                  name: call.function.name,
+                  args: exec.confirmation.payload,
+                  status: "pending",
+                  summary: exec.summary,
+                },
+              });
+            } else {
+              toolParts.push({
+                type: "tool",
+                call: {
+                  id: call.id,
+                  name: call.function.name,
+                  args,
+                  status: exec.error ? "error" : "done",
+                  summary: exec.summary,
+                  result: exec.result,
+                  error: exec.error,
+                },
+              });
+            }
+          }
+
+          const allParts = [...parts, ...toolParts];
+          if (allParts.length) {
+            await addMessage(conversationId, "assistant", allParts, { provider, model });
+          }
+          await touchConversation(conversationId, { provider, model });
+          setStreaming(null);
+          setTokensPerSecond(result.tokensPerSecond);
+
+          if (!titled && titleSeed) {
+            titled = true;
+            void retitle(conversationId, titleSeed, result.text);
+          }
+
+          if (result.aborted) return;
+          if (result.error) {
+            setError(result.error);
+            return;
+          }
+          if (awaitingConfirm) return;
+          if (!result.toolCalls?.length) return;
+        }
+        setError("The agent reached its step limit for this turn.");
+      } finally {
+        setStreaming(null);
+        busyRef.current = false;
+        abortRef.current = null;
+      }
+    },
+    [config, caps.reasoning, caps.tools, effort, retitle],
+  );
+
   const send = React.useCallback(async () => {
-    if (!config || streaming || !aiReady) return;
+    if (!config || streaming || !aiReady || busyRef.current) return;
     const text = draft.trim();
     const images = attachments;
     if (!text && images.length === 0) return;
@@ -229,40 +342,32 @@ export function AgentPage() {
     setAttachments([]);
     if (text) setHistory((h) => [...h, text].slice(-50));
 
-    const stored = await db.messages.where("conversationId").equals(conversationId).sortBy("createdAt");
-    const apiMessages = toApiMessages(stored);
+    await runTurn(conversationId, text || "Image chat");
+  }, [config, streaming, aiReady, draft, attachments, activeId, runTurn]);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setStreaming({ text: "", reasoning: "" });
-    setTokensPerSecond(undefined);
-
-    const result = await streamReply(apiMessages, {
-      effort: caps.reasoning ? effort : undefined,
-      signal: controller.signal,
-      onDelta: (t) => setStreaming((s) => (s ? { ...s, text: s.text + t } : s)),
-      onReasoning: (t) => setStreaming((s) => (s ? { ...s, reasoning: s.reasoning + t } : s)),
-    });
-
-    const assistantParts: MessagePart[] = [];
-    if (result.reasoning.trim()) assistantParts.push({ type: "reasoning", text: result.reasoning });
-    if (result.text.trim()) assistantParts.push({ type: "text", text: result.text });
-    if (assistantParts.length) {
-      await addMessage(conversationId, "assistant", assistantParts, {
-        provider: config.activeProvider,
-        model: activeModel(config),
+  const onConfirmTool = React.useCallback(
+    async (messageId: string, call: ToolCallData) => {
+      if (!activeId || busyRef.current) return;
+      await patchToolCall(messageId, call.id, { status: "running", summary: "Creating the batch job…" });
+      const exec = await confirmBatchJob(call.args);
+      await patchToolCall(messageId, call.id, {
+        status: exec.error ? "error" : "done",
+        summary: exec.summary,
+        result: exec.result,
+        error: exec.error,
       });
-    }
-    await touchConversation(conversationId, {
-      provider: config.activeProvider,
-      model: activeModel(config),
-    });
+      await runTurn(activeId);
+    },
+    [activeId, runTurn],
+  );
 
-    setStreaming(null);
-    setTokensPerSecond(result.tokensPerSecond);
-    setError(result.aborted ? null : result.error ?? null);
-    abortRef.current = null;
-  }, [config, streaming, aiReady, draft, attachments, activeId, caps.reasoning, effort]);
+  const onCancelTool = React.useCallback(async (messageId: string, call: ToolCallData) => {
+    await patchToolCall(messageId, call.id, {
+      status: "error",
+      summary: "Cancelled before anything was created",
+      error: "The user cancelled this batch job.",
+    });
+  }, []);
 
   const stop = React.useCallback(() => {
     abortRef.current?.abort();
@@ -341,6 +446,8 @@ export function AgentPage() {
           messages={messages}
           streaming={streamingMessage}
           error={error}
+          onConfirmTool={(id, call) => void onConfirmTool(id, call)}
+          onCancelTool={(id, call) => void onCancelTool(id, call)}
           emptyHint={
             !aiReady && (
               <a

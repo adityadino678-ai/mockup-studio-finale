@@ -3,16 +3,18 @@
 import * as React from "react";
 import { Sparkles } from "lucide-react";
 import { MessageItem } from "@/components/agent/message-item";
-import type { ChatMessage } from "@/types/domain";
+import type { ChatMessage, ToolCallData } from "@/types/domain";
 
 interface TranscriptProps {
   messages: ChatMessage[];
   streaming?: ChatMessage | null;
   error?: string | null;
   emptyHint?: React.ReactNode;
+  onConfirmTool?: (messageId: string, call: ToolCallData) => void;
+  onCancelTool?: (messageId: string, call: ToolCallData) => void;
 }
 
-export function Transcript({ messages, streaming, error, emptyHint }: TranscriptProps) {
+export function Transcript({ messages, streaming, error, emptyHint, onConfirmTool, onCancelTool }: TranscriptProps) {
   const endRef = React.useRef<HTMLDivElement>(null);
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const stickRef = React.useRef(true);
@@ -50,7 +52,12 @@ export function Transcript({ messages, streaming, error, emptyHint }: Transcript
         ) : (
           <>
             {messages.map((m) => (
-              <MessageItem key={m.id} message={m} />
+              <MessageItem
+                key={m.id}
+                message={m}
+                onConfirmTool={onConfirmTool}
+                onCancelTool={onCancelTool}
+              />
             ))}
             {streaming && <MessageItem message={streaming} streaming />}
           </>

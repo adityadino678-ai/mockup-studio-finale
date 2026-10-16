@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 61 unit tests
+npm run test          # 74 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -61,7 +61,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **13 static pages + 8 on-demand endpoints.** No page depends on request state,
+- **13 static pages + 9 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker.
@@ -138,8 +138,21 @@ Both must pass. The production run has caught bugs the local run missed.
   Capabilities (`reasoning` / `tools` / `vision`) are curated heuristics in
   `src/lib/ai/providers.ts` (`modelCapabilities`); the effort hint is only sent to
   models flagged as reasoning models. The floating `AssistantPanel` is now just a
-  launcher for `/agent`. Tool execution, auto-titling, voice, and the artifact
-  rail are planned for M2/M3.
+  launcher for `/agent`.
+- **Agent tools (M2) are real, and only real.** `src/lib/ai/tools.ts` is the
+  isomorphic registry of four tools: `explain_howto`, `summarize_workspace`,
+  `draft_listing` (calls the existing `/api/ai/seo`), and `create_batch_job`.
+  `create_batch_job` is marked `confirm` and **writes nothing** until the user
+  clicks Create on the tool card; only then does `src/lib/client/tools.ts` call
+  `createBatchJob` + `runBatchJob` for real. Execution happens in the browser
+  against IndexedDB, so the honesty rule in the system prompt still holds: the
+  agent never claims an action the transcript does not show. The loop is
+  client-driven: the model's streamed `tool_calls` come back on the SSE
+  `tool_calls` frame, the browser runs each tool, replays assistant/tool messages,
+  and re-calls the endpoint (max 4 steps per turn). `toApiMessages` omits tool
+  calls that never got a result so the replayed history stays valid. Threads are
+  auto-titled by the active model via **`/api/ai/title`**. Voice, the artifact
+  rail, and steering are still M3.
 - **Printify endpoints now use the documented paths** (`/v1/catalog/blueprints.json`,
   `/v1/catalog/blueprints/{id}.json`, `/v1/catalog/blueprints/{id}/print_providers.json`,
   `/v1/uploads/images.json`, `/v1/shops/{shop_id}/products.json`). Product creation

@@ -7,14 +7,26 @@
 import { serverEnv } from "@/lib/server/env";
 import { DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL, type AiCredentials } from "@/lib/server/creds";
 import { authHeaders, baseUrlFor, getProvider, normalizeModels, type ModelInfo } from "@/lib/ai/providers";
+import type { OpenAiToolDef } from "@/lib/ai/tools";
 
 export type AiContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
 
+/** A tool call the model asked for, in the OpenAI-compatible wire shape. */
+export interface AiToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
 export interface AiMessage {
-  role: "system" | "user" | "assistant";
-  content: string | AiContentPart[];
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | AiContentPart[] | null;
+  /** Present on assistant messages that requested one or more tools. */
+  tool_calls?: AiToolCall[];
+  /** Present on `role: "tool"` messages; ties the result back to its call. */
+  tool_call_id?: string;
 }
 
 export interface AiCompletionOptions {
@@ -121,12 +133,16 @@ export interface AiStreamOptions {
   maxTokens?: number;
   /** Reasoning effort hint (`low` | `medium` | `high`); only sent when set. */
   effort?: string;
+  /** Tool definitions the model may call; only sent when non-empty. */
+  tools?: OpenAiToolDef[];
   signal?: AbortSignal;
 }
 
 export type AiStreamEvent =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
+  | { type: "tool_delta"; index: number; id?: string; name?: string; args?: string }
+  | { type: "tool_calls"; calls: AiToolCall[] }
   | { type: "usage"; usage: Record<string, unknown> }
   | { type: "done" };
 
@@ -151,6 +167,23 @@ export function parseProviderStreamLine(line: string): AiStreamEvent[] {
   const reasoning = delta.reasoning_content ?? delta.reasoning;
   if (typeof reasoning === "string" && reasoning) events.push({ type: "reasoning", text: reasoning });
   if (typeof delta.content === "string" && delta.content) events.push({ type: "delta", text: delta.content });
+  const calls = delta.tool_calls;
+  if (Array.isArray(calls)) {
+    for (const call of calls) {
+      const entry = call as {
+        index?: number;
+        id?: string;
+        function?: { name?: string; arguments?: string };
+      };
+      events.push({
+        type: "tool_delta",
+        index: typeof entry.index === "number" ? entry.index : 0,
+        id: entry.id,
+        name: entry.function?.name,
+        args: entry.function?.arguments,
+      });
+    }
+  }
   const usage = (data as { usage?: Record<string, unknown> })?.usage;
   if (usage && typeof usage === "object") events.push({ type: "usage", usage });
   return events;
@@ -185,6 +218,7 @@ export async function* streamChat(
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 1400,
       ...(options.effort ? { reasoning_effort: options.effort } : {}),
+      ...(options.tools?.length ? { tools: options.tools, tool_choice: "auto" } : {}),
     }),
     signal: options.signal,
     cache: "no-store",
@@ -195,6 +229,7 @@ export async function* streamChat(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const toolCalls = new Map<number, { id: string; name: string; args: string }>();
   let buffer = "";
   let finished = false;
   try {
@@ -208,6 +243,14 @@ export async function* streamChat(
         buffer = buffer.slice(index + 1);
         for (const event of parseProviderStreamLine(line)) {
           if (event.type === "done") finished = true;
+          if (event.type === "tool_delta") {
+            const current = toolCalls.get(event.index) ?? { id: "", name: "", args: "" };
+            if (event.id) current.id = event.id;
+            if (event.name) current.name = event.name;
+            if (event.args) current.args += event.args;
+            toolCalls.set(event.index, current);
+            continue;
+          }
           yield event;
         }
       }
@@ -215,6 +258,15 @@ export async function* streamChat(
   } finally {
     await reader.cancel().catch(() => {});
   }
+  const calls: AiToolCall[] = [...toolCalls.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, call]) => ({
+      id: call.id || `call_${index}`,
+      type: "function" as const,
+      function: { name: call.name, arguments: call.args },
+    }))
+    .filter((call) => call.function.name);
+  if (calls.length) yield { type: "tool_calls", calls };
   if (!finished) yield { type: "done" };
 }
 
