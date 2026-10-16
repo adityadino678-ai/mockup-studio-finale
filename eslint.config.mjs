@@ -13,7 +13,7 @@ export default [
   ...tseslint.configs.recommended,
   ...astro.configs.recommended,
   {
-    files: ["**/*.{ts,tsx,astro}"],
+    files: ["**/*.{ts,tsx,astro,mjs,js}"],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
       parserOptions: { ecmaFeatures: { jsx: true } },

@@ -478,7 +478,10 @@ test.describe("core workflow", () => {
     await gotoApp(page, "/");
     for (const section of sections) {
       await page.getByRole("link", { name: section.link }).click();
-      await page.waitForURL(`**${section.path}`);
+      // Cloudflare static assets 307-redirect `/designs` to `/designs/`, while
+      // `astro dev` serves it unslashed - so match an optional trailing slash.
+      const escaped = section.path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      await page.waitForURL(new RegExp(`${escaped.replace(/\/$/, "")}\\/?$`));
       await expect(page.locator("main")).toContainText(section.copy, { timeout: 30_000 });
     }
   });
