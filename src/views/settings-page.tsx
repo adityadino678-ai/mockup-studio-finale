@@ -13,25 +13,36 @@ import { Input, Label } from "@/components/ui/input";
 import { cn, formatBytes } from "@/lib/utils";
 import {
   EMPTY_INTEGRATIONS,
+  activeModel,
+  activeProvider,
+  activeProviderConfig,
   authedFetch,
   clearIntegrations,
   integrationHeaders,
+  loadCachedModels,
   loadIntegrations,
+  patchProvider,
+  saveCachedModels,
   saveIntegrations,
+  selectModel,
+  selectProvider,
   type IntegrationConfig,
 } from "@/lib/client/integrations";
+import { providerList, type ModelInfo } from "@/lib/ai/providers";
 import {
   Check,
   CircleCheck,
   CircleX,
   Cloud,
   Database,
+  Download,
   Eye,
   EyeOff,
   HardDrive,
   KeyRound,
   Loader2,
   RefreshCw,
+  Search,
   Server,
   Settings as SettingsIcon,
   Sparkles,
@@ -62,6 +73,9 @@ export function SettingsPage() {
   const [reveal, setReveal] = React.useState<Record<string, boolean>>({});
   const [testing, setTesting] = React.useState<Provider | null>(null);
   const [results, setResults] = React.useState<Partial<Record<Provider, TestResult>>>({});
+  const [models, setModels] = React.useState<ModelInfo[] | null>(null);
+  const [loadingModels, setLoadingModels] = React.useState(false);
+  const [modelQuery, setModelQuery] = React.useState("");
 
   const counts = useLiveQuery(async () => {
     const [designs, mockups, assets, renders, templates] = await Promise.all([
@@ -92,7 +106,13 @@ export function SettingsPage() {
       }
     });
     void refreshStatus();
-    void loadIntegrations().then(setConfig);
+    void loadIntegrations().then((c) => {
+      setConfig(c);
+      // Show any previously fetched model list immediately.
+      void loadCachedModels(c.activeProvider).then((cache) => {
+        if (cache) setModels(cache.models);
+      });
+    });
   }, [refreshStatus]);
 
   const patchConfig = (patch: Partial<IntegrationConfig>) => {
@@ -111,6 +131,7 @@ export function SettingsPage() {
     await clearIntegrations();
     setConfig({ ...EMPTY_INTEGRATIONS });
     setResults({});
+    setModels(null);
     await logActivity("integration.save", "Cleared integration API keys from this browser");
     toast.success("Keys cleared from this browser");
     void refreshStatus();
@@ -148,8 +169,65 @@ export function SettingsPage() {
     }
   };
 
+  const onProviderChange = (id: string) => {
+    if (!config) return;
+    setConfig(selectProvider(config, id));
+    setModels(null);
+    setModelQuery("");
+    void loadCachedModels(id).then((cache) => {
+      if (cache) setModels(cache.models);
+    });
+  };
+
+  const loadModels = async () => {
+    if (!config) return;
+    const providerId = config.activeProvider;
+    setLoadingModels(true);
+    try {
+      const res = await fetch("/api/integrations/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...integrationHeaders(config) },
+        body: JSON.stringify({ provider: providerId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        toast.error(data.message ?? data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      const list = (data.models ?? []) as ModelInfo[];
+      setModels(list);
+      await saveCachedModels(providerId, list);
+      toast.success(
+        `Loaded ${list.length} model${list.length === 1 ? "" : "s"}${
+          data.free ? ` · ${data.free} free` : ""
+        }`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not fetch models");
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  const onSelectModel = (modelId: string) => {
+    if (!config) return;
+    setConfig(selectModel(config, modelId));
+  };
+
   const printifyStatus = integrations?.printify;
   const aiStatus = integrations?.ai;
+  const def = config ? activeProvider(config) : undefined;
+  const providerConf = config ? activeProviderConfig(config) : { apiKey: "" };
+  const currentModel = config ? activeModel(config) : "";
+  const needsKey = def ? !def.keyOptional : true;
+  const canLoad = !!config && (!needsKey || providerConf.apiKey.trim().length > 0);
+
+  const filteredModels = React.useMemo(() => {
+    if (!models) return [];
+    const q = modelQuery.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  }, [models, modelQuery]);
 
   return (
     <div className="mx-auto max-w-3xl p-8">
@@ -205,9 +283,9 @@ export function SettingsPage() {
             <KeyRound className="h-4 w-4 text-forest" /> API connections
           </CardTitle>
           <CardDescription>
-            Paste your own keys to connect Printify and any OpenAI-compatible AI model. Keys are stored
-            only in this browser (IndexedDB), sent to the provider through the server on each request,
-            and never written to the server. Clear them any time.
+            Paste your own keys to connect Printify and any AI provider. Keys are stored only in this
+            browser (IndexedDB), sent to the provider through the server on each request, and never
+            written to the server. Clear them any time.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -272,61 +350,114 @@ export function SettingsPage() {
 
               <Separator />
 
-              {/* AI */}
-              <section className="space-y-2 rounded-md border border-border-subtle p-3">
+              {/* AI provider */}
+              <section className="space-y-3 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
                     <Sparkles className="h-4 w-4 text-ink-subtle" /> AI model
                   </div>
                   <StatusBadge status={aiStatus} />
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="ai-provider">Provider</Label>
+                  <select
+                    id="ai-provider"
+                    value={config.activeProvider}
+                    onChange={(e) => onProviderChange(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+                  >
+                    {providerList().map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {config.providers[p.id]?.apiKey?.trim() ? "✓ " : ""}
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                  {def && (
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[11px] text-ink-subtle">
+                      <span>{def.blurb}</span>
+                      {def.freeTier && (
+                        <Badge variant="default" className="shrink-0">
+                          {def.freeTier}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-1.5">
                   <Label htmlFor="ai-key">AI API key</Label>
                   <SecretInput
                     id="ai-key"
-                    value={config.aiKey}
+                    value={providerConf.apiKey}
                     reveal={!!reveal.aiKey}
                     onToggleReveal={() => setReveal((r) => ({ ...r, aiKey: !r.aiKey }))}
-                    onChange={(v) => patchConfig({ aiKey: v })}
-                    placeholder="Paste any OpenAI-compatible API key"
+                    onChange={(v) => patchConfig(patchProvider(config, config.activeProvider, { apiKey: v }))}
+                    placeholder={def?.keyHint ?? "Paste any OpenAI-compatible API key"}
                   />
+                  {def && (
+                    <p className="text-[11px] text-ink-subtle">
+                      {def.keyOptional ? "No key needed. " : "Get a key at "}
+                      {!def.keyOptional && (
+                        <a href={def.docsUrl} target="_blank" rel="noreferrer" className="text-forest underline">
+                          {def.docsUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                        </a>
+                      )}
+                    </p>
+                  )}
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ai-base-url">Base URL</Label>
-                    <Input
-                      id="ai-base-url"
-                      value={config.aiBaseUrl}
-                      onChange={(e) => patchConfig({ aiBaseUrl: e.target.value })}
-                      placeholder="https://api.openai.com/v1"
-                      className="font-mono text-[12px]"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
+
+                {config.activeProvider === "custom" && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ai-base-url">Base URL</Label>
+                      <Input
+                        id="ai-base-url"
+                        value={providerConf.baseUrl ?? ""}
+                        onChange={(e) =>
+                          patchConfig(patchProvider(config, "custom", { baseUrl: e.target.value }))
+                        }
+                        placeholder="https://api.openai.com/v1"
+                        className="font-mono text-[12px]"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ai-model">Model</Label>
+                      <Input
+                        id="ai-model"
+                        value={providerConf.model ?? ""}
+                        onChange={(e) => patchConfig(patchProvider(config, "custom", { model: e.target.value }))}
+                        placeholder="gpt-4o-mini"
+                        className="font-mono text-[12px]"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="ai-model">Model</Label>
-                    <Input
-                      id="ai-model"
-                      value={config.aiModel}
-                      onChange={(e) => patchConfig({ aiModel: e.target.value })}
-                      placeholder="gpt-4o-mini"
-                      className="font-mono text-[12px]"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  </div>
-                </div>
-                <p className="text-[11px] text-ink-subtle">
-                  Works with OpenAI, OpenRouter, Groq, DeepSeek, Together, a local server, or any other
-                  OpenAI-compatible endpoint. Leave base URL/model empty to use the defaults.
-                </p>
-                <div className="flex items-center gap-2 pt-0.5">
+                )}
+
+                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={loadModels}
+                    disabled={testing !== null || loadingModels || !canLoad}
+                  >
+                    {loadingModels ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    Load models
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => runTest("ai")}
-                    disabled={testing !== null || !config.aiKey.trim()}
+                    disabled={testing !== null || !canLoad}
                   >
                     {testing === "ai" ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -335,7 +466,73 @@ export function SettingsPage() {
                     )}
                     Test connection
                   </Button>
+                  {currentModel && (
+                    <span className="text-[11px] text-ink-muted">
+                      Active: <span className="font-mono text-ink">{currentModel}</span>
+                    </span>
+                  )}
                 </div>
+
+                {models && (
+                  <div className="space-y-1.5 border-t border-border-subtle pt-3">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
+                      <Input
+                        value={modelQuery}
+                        onChange={(e) => setModelQuery(e.target.value)}
+                        placeholder={`Search ${models.length} models…`}
+                        className="pl-8 text-[12px]"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="scroll-thin max-h-64 overflow-y-auto rounded-md border border-border-subtle">
+                      {filteredModels.length === 0 ? (
+                        <p className="p-3 text-[12px] text-ink-muted">No models match “{modelQuery}”.</p>
+                      ) : (
+                        filteredModels.map((m) => {
+                          const active = m.id === currentModel;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => onSelectModel(m.id)}
+                              className={cn(
+                                "flex w-full items-center justify-between gap-2 border-b border-border-subtle px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-surface-muted",
+                                active && "bg-sage-soft",
+                              )}
+                            >
+                              <span className="min-w-0">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="truncate text-[12px] font-medium text-ink">{m.name}</span>
+                                  {m.free && (
+                                    <Badge variant="default" className="shrink-0 px-1.5 py-0 text-[10px]">
+                                      free
+                                    </Badge>
+                                  )}
+                                </span>
+                                <span className="block truncate font-mono text-[10px] text-ink-subtle">
+                                  {m.id}
+                                </span>
+                              </span>
+                              <span className="flex shrink-0 items-center gap-2">
+                                {m.contextLength && (
+                                  <span className="text-[10px] text-ink-subtle">{formatContext(m.contextLength)}</span>
+                                )}
+                                {active && <Check className="h-3.5 w-3.5 text-forest" />}
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                    <p className="text-[10px] text-ink-subtle">
+                      Fetched live from {def?.label ?? "the provider"}. Free models are tagged from the
+                      provider&rsquo;s own pricing where available.
+                    </p>
+                  </div>
+                )}
+
                 <ResultLine result={results.ai} testing={testing === "ai"} />
               </section>
 
@@ -363,6 +560,12 @@ export function SettingsPage() {
       </Card>
     </div>
   );
+}
+
+function formatContext(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
 }
 
 function StatusBadge({ status }: { status?: IntegrationStatus }) {

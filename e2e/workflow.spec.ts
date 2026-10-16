@@ -486,14 +486,17 @@ test.describe("core workflow", () => {
     }
   });
 
-  test("16. settings exposes key placeholders and connection tests", async ({ page }) => {
+  test("16. settings exposes a provider picker and key placeholders", async ({ page }) => {
     await gotoApp(page, "/settings");
 
     // Placeholders for the user's own Printify and AI credentials.
     await expect(page.getByLabel("Printify API key")).toBeVisible();
+    await expect(page.getByLabel("Provider")).toBeVisible();
     await expect(page.getByLabel("AI API key")).toBeVisible();
-    await expect(page.getByLabel("Base URL")).toBeVisible();
-    await expect(page.getByLabel("Model")).toBeVisible();
+
+    // Selecting a provider swaps the key placeholder to that provider's own.
+    await page.getByLabel("Provider").selectOption("nvidia");
+    await expect(page.getByLabel("AI API key")).toHaveAttribute("placeholder", /nvapi-/);
 
     // Nothing saved yet, so the Printify test button is disabled...
     const printifyTest = page.getByRole("button", { name: /Test connection/ }).first();
@@ -504,6 +507,9 @@ test.describe("core workflow", () => {
     await page.getByLabel("Printify API key").fill("pp_test_key_not_real");
     await expect(printifyTest).toBeEnabled();
 
+    // Both the Printify and AI sections offer a connection test.
+    await expect(page.getByRole("button", { name: /Test connection/ })).toHaveCount(2);
+
     // Keys are held in the browser's IndexedDB, never sent on save.
     await page.getByRole("button", { name: /Save keys/ }).click();
     await expect(page.getByText("Keys saved in this browser")).toBeVisible({ timeout: 15_000 });
@@ -512,15 +518,16 @@ test.describe("core workflow", () => {
         const r = indexedDB.open("mockup-studio");
         r.onsuccess = () => res(r.result);
       });
-      return new Promise<string | undefined>((res) => {
+      return new Promise<{ printifyKey?: string; activeProvider?: string } | undefined>((res) => {
         const rq = db
           .transaction(["settings"], "readonly")
           .objectStore("settings")
           .get("integrations");
-        rq.onsuccess = () => res(rq.result?.value?.printifyKey);
+        rq.onsuccess = () => res(rq.result?.value);
       });
     });
-    expect(stored).toBe("pp_test_key_not_real");
+    expect(stored?.printifyKey).toBe("pp_test_key_not_real");
+    expect(stored?.activeProvider).toBe("nvidia");
   });
 });
 

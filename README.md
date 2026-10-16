@@ -18,10 +18,16 @@ Or from the folder one level up, without touching the terminal commands yourself
 
 Optional integrations can be connected two ways:
 
-1. **In the app (recommended):** open **Settings → API connections**, paste your
-   Printify key and/or any OpenAI-compatible AI key (plus base URL and model),
-   and press **Test connection**. Keys are stored only in your browser's
-   IndexedDB and attached to the relevant requests — never saved on the server.
+1. **In the app (recommended):** open **Settings → API connections**. Paste your
+   Printify key, then pick an AI **provider** (OpenCode Zen, NVIDIA NIM,
+   OpenRouter, Groq, Cerebras, Together, Google Gemini, Mistral, DeepSeek,
+   Fireworks, xAI, OpenAI, Anthropic, a local Ollama server, or any custom
+   OpenAI-compatible endpoint). The **Load models** button fetches that
+   provider's live model list and tags free models `free`; choose one and press
+   **Test connection**. You can keep a key per provider and switch the active
+   model from the assistant panel without losing the others. Keys are stored only
+   in your browser's IndexedDB and attached to the relevant requests — never
+   saved on the server.
 2. **On the server** (`.env.local` / `wrangler secret put`):
 
 ```bash
@@ -45,7 +51,7 @@ A browser-saved key takes precedence over a server key when both are present.
 | `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
-| `npm run test` | Unit/integration tests (34 tests) |
+| `npm run test` | Unit/integration tests (44 tests) |
 | `npm run test:e2e` | End-to-end acceptance tests (16 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
 
@@ -63,7 +69,7 @@ The app is published to `https://mockup-studio.adityadino678.workers.dev`.
 **How it is shaped:** `output: "static"`, because no page depends on request
 state — every view reads its data from the visitor's own IndexedDB. So all 12
 pages prerender to static HTML and are served directly from Cloudflare's CDN,
-and `dist/_routes.json` excludes them from the Worker. Only the five `/api/**`
+and `dist/_routes.json` excludes them from the Worker. Only the seven `/api/**`
 endpoints run on demand, each opting in with `export const prerender = false`.
 
 **Secrets:** none are required and none are deployed by default. The whole core
@@ -121,18 +127,22 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 34 unit/integration tests + 16 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
+- 44 unit/integration tests + 16 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 
 - **The project must live outside OneDrive.** It now runs from `C:\Users\hp\Projects\Mockup Studio 2.0`; the old copy under `OneDrive\Documents\ANTIGRAVITY PROJECTS` was removed. OneDrive turns build caches into cloud placeholders and breaks `node_modules` resolution, so keep the folder out of synced directories.
 
 - **Printify / AI** are wired to the live provider APIs and can be connected from
-  **Settings → API connections** (bring your own key) with a real **Test
-  connection** probe. They were **not verified against a real account** in this
-  environment; Etsy listing *submission* is deliberately not implemented as a live
-  call yet (drafts + validation only) because Etsy's v3 OAuth flow needs app
-  registration; the workspace is ready for it.
+  **Settings → API connections** (bring your own key). The AI section is a
+  provider picker: choose a provider, paste its key, **Load models** to fetch the
+  live list (free models tagged from the provider's own pricing where available),
+  then **Test connection**. Free tags are best-effort — OpenRouter's real pricing
+  is authoritative, other providers use id conventions or their advertised free
+  tier. Neither was **verified against a real account** in this environment; Etsy
+  listing *submission* is deliberately not implemented as a live call yet (drafts
+  + validation only) because Etsy's v3 OAuth flow needs app registration; the
+  workspace is ready for it.
 - The AI background-removal model (MODNet) is trained for **photos of people/products**; for flat artwork on solid backgrounds the flood-key engine is faster and usually better. `Xenova/u2net` was gated (HTTP 401) at build time, so MODNet is the shipped default.
 - Perspective/warp editing is **not** offered — Konva cannot do true perspective transforms, and fake controls are worse than none.
 - Batch rendering is single-threaded by design (reliability over throughput); very large jobs still complete with live status and can be cancelled.
@@ -145,6 +155,6 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
   headers to the app's own `/api/**` routes, which proxy to the provider. Server
   keys live in `.env.local` / Wrangler secrets (git-ignored); no key material is
   present in client bundles (covered by an E2E test).
-- The `/api/integrations/test` endpoint makes a read-only probe and persists nothing.
+- The `/api/integrations/test` endpoint makes a read-only probe and persists nothing. `/api/integrations/models` proxies a provider's public model list (read-only, nothing persisted).
 - File uploads validated (type, size, emptiness); filenames sanitized against traversal (`sanitizeFilename`).
 - No network calls leave the machine in the core workflow; background-removal models load from jsDelivr/HuggingFace only when you use the AI engine.

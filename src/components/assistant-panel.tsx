@@ -5,7 +5,18 @@ import * as React from "react";
 import { usePathname } from "@/lib/client/nav";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/schema";
-import { authedFetch } from "@/lib/client/integrations";
+import {
+  activeModel,
+  activeProvider,
+  activeProviderConfig,
+  authedFetch,
+  loadCachedModels,
+  loadIntegrations,
+  saveIntegrations,
+  selectModel,
+  type IntegrationConfig,
+} from "@/lib/client/integrations";
+import { type ModelInfo } from "@/lib/ai/providers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -56,6 +67,8 @@ export function AssistantPanel() {
     0,
   );
   const [integrations, setIntegrations] = React.useState<Record<string, boolean>>({});
+  const [aiConfig, setAiConfig] = React.useState<IntegrationConfig | null>(null);
+  const [models, setModels] = React.useState<ModelInfo[]>([]);
 
   React.useEffect(() => {
     authedFetch("/api/integrations/status")
@@ -68,7 +81,21 @@ export function AssistantPanel() {
         }),
       )
       .catch(() => setIntegrations({}));
+    void loadIntegrations().then((c) => {
+      setAiConfig(c);
+      void loadCachedModels(c.activeProvider).then((cache) => setModels(cache?.models ?? []));
+    });
   }, []);
+
+  const switchModel = React.useCallback(
+    async (modelId: string) => {
+      if (!aiConfig) return;
+      const next = selectModel(aiConfig, modelId);
+      setAiConfig(next);
+      await saveIntegrations(next);
+    },
+    [aiConfig],
+  );
 
   const actions: QuickAction[] = [
     {
@@ -180,6 +207,39 @@ export function AssistantPanel() {
               <X className="h-4 w-4" />
             </Button>
           </div>
+
+          {aiConfig && (
+            <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2">
+              <span className="shrink-0 text-[11px] text-ink-subtle">
+                {activeProvider(aiConfig)?.label ?? "AI"}
+              </span>
+              {models.length > 0 ? (
+                <select
+                  aria-label="Model"
+                  value={activeModel(aiConfig) || models[0]?.id || ""}
+                  onChange={(e) => void switchModel(e.target.value)}
+                  className="h-7 min-w-0 flex-1 rounded-md border border-border-strong bg-surface px-1.5 text-[11px] text-ink focus-visible:border-forest focus-visible:outline-none"
+                >
+                  {activeModel(aiConfig) && !models.some((m) => m.id === activeModel(aiConfig)) && (
+                    <option value={activeModel(aiConfig)}>{activeModel(aiConfig)}</option>
+                  )}
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.free ? `${m.name} [free]` : m.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Link
+                  href="/settings"
+                  onClick={() => setOpen(false)}
+                  className="min-w-0 flex-1 truncate text-[11px] text-forest underline"
+                >
+                  {activeProviderConfig(aiConfig).apiKey.trim() ? "Load models in Settings →" : "Add a key in Settings →"}
+                </Link>
+              )}
+            </div>
+          )}
 
           <div className="scroll-thin flex-1 space-y-3 overflow-y-auto p-4">
             <div className="space-y-1.5">

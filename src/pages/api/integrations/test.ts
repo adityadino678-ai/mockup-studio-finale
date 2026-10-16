@@ -3,6 +3,7 @@ import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { probePrintify, PrintifyError } from "@/lib/server/printify";
 import { probeAi } from "@/lib/server/ai";
+import { getProvider } from "@/lib/ai/providers";
 
 // Live connection test. Reads credentials from the request headers (the key the
 // visitor pasted in Settings) with a fallback to server secrets, then makes a
@@ -63,23 +64,26 @@ export const POST: APIRoute = async ({ request }) => {
   if (provider === "ai") {
     if (!creds.ai) {
       return json(
-        { ok: false, configured: false, provider, message: "Paste your AI API key (and base URL / model) first." },
+        { ok: false, configured: false, provider, message: "Paste your AI API key in Settings first." },
         400,
       );
     }
+    const label = getProvider(creds.ai.provider)?.label ?? creds.ai.provider;
     try {
       const probe = await probeAi(creds.ai);
       const message =
         probe.mode === "models"
-          ? `Connected — ${creds.ai.model}${probe.modelCount != null ? ` · ${probe.modelCount} models available` : ""}.`
-          : `Connected — ${creds.ai.model} replied in ${probe.ms} ms.`;
+          ? `Connected — ${label} · ${creds.ai.model}${
+              probe.modelCount != null ? ` · ${probe.modelCount} models available` : ""
+            }.`
+          : `Connected — ${label} · ${creds.ai.model} replied in ${probe.ms} ms.`;
       return json({
         ok: true,
         configured: true,
         provider,
         source: creds.ai.source,
         message,
-        detail: { ...probe, baseUrl: creds.ai.baseUrl },
+        detail: { ...probe, baseUrl: creds.ai.baseUrl, aiProvider: creds.ai.provider },
       });
     } catch (error) {
       return json(

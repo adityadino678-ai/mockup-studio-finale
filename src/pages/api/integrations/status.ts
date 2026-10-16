@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { json, serverEnv } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
+import { getProvider } from "@/lib/ai/providers";
 
 // Server-side integration status check. Never returns secret values — only
 // whether credentials are present (in the browser request or on the server),
@@ -10,6 +11,7 @@ export const prerender = false;
 export const GET: APIRoute = ({ request }) => {
   const creds = credentialsFromRequest(request);
   const etsyKey = serverEnv.etsyApiKey();
+  const aiProviderLabel = creds.ai ? (getProvider(creds.ai.provider)?.label ?? creds.ai.provider) : null;
 
   return json({
     printify: {
@@ -35,12 +37,13 @@ export const GET: APIRoute = ({ request }) => {
     ai: {
       configured: !!creds.ai,
       source: creds.ai?.source ?? null,
-      providerLabel: creds.ai ? creds.ai.model : "OpenAI-compatible provider",
+      provider: creds.ai?.provider ?? null,
+      providerLabel: creds.ai ? `${aiProviderLabel} · ${creds.ai.model}` : "OpenAI-compatible provider",
       detail: creds.ai
         ? creds.ai.source === "browser"
-          ? `AI provider ready — ${creds.ai.model} via the key saved in this browser.`
-          : `AI provider ready — ${creds.ai.model} configured on the server.`
-        : "No AI provider configured. Paste your API key and base URL in Settings to enable AI features.",
+          ? `AI provider ready — ${aiProviderLabel} · ${creds.ai.model} via the key saved in this browser.`
+          : `AI provider ready — ${aiProviderLabel} · ${creds.ai.model} configured on the server.`
+        : "No AI provider configured. Pick a provider and paste your API key in Settings to enable AI features.",
       checkedAt: Date.now(),
     },
   });

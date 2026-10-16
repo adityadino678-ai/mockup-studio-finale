@@ -6,6 +6,7 @@
 
 import { serverEnv } from "@/lib/server/env";
 import { DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL, type AiCredentials } from "@/lib/server/creds";
+import { authHeaders, baseUrlFor, getProvider, normalizeModels, type ModelInfo } from "@/lib/ai/providers";
 
 export interface AiMessage {
   role: "system" | "user" | "assistant";
@@ -19,14 +20,15 @@ export interface AiCompletionOptions {
   signal?: AbortSignal;
 }
 
-export function aiConfig(creds?: AiCredentials): { configured: boolean; baseUrl: string; model: string } {
+export function aiConfig(creds?: AiCredentials): { configured: boolean; baseUrl: string; model: string; provider: string } {
   if (creds) {
-    return { configured: true, baseUrl: creds.baseUrl, model: creds.model };
+    return { configured: true, baseUrl: creds.baseUrl, model: creds.model, provider: creds.provider };
   }
   const key = serverEnv.aiApiKey() || serverEnv.openaiApiKey();
   const baseUrl = serverEnv.aiBaseUrl() || DEFAULT_AI_BASE_URL;
   const model = serverEnv.aiModel() || DEFAULT_AI_MODEL;
-  return { configured: !!key, baseUrl, model };
+  const provider = serverEnv.aiBaseUrl() ? "custom" : "openai";
+  return { configured: !!key, baseUrl, model, provider };
 }
 
 export class AiNotConfiguredError extends Error {
@@ -53,20 +55,29 @@ async function readAiError(res: Response): Promise<string> {
   );
 }
 
+/** Authorization header for a provider, or `{}` when the provider needs no key. */
+function authFor(provider: string, apiKey: string): Record<string, string> {
+  const def = getProvider(provider);
+  if (!def) return apiKey.trim() ? { Authorization: `Bearer ${apiKey}` } : {};
+  return authHeaders(def, apiKey);
+}
+
 export async function complete(
   messages: AiMessage[],
   options: AiCompletionOptions = {},
   creds?: AiCredentials,
 ): Promise<string> {
-  const { configured, baseUrl, model } = aiConfig(creds);
+  const { configured, baseUrl, model, provider } = aiConfig(creds);
   if (!configured) throw new AiNotConfiguredError();
 
   const apiKey = creds?.apiKey ?? serverEnv.aiApiKey() ?? serverEnv.openaiApiKey() ?? "";
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const def = getProvider(provider);
+  const chatPath = def?.chatPath ?? "/chat/completions";
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}${chatPath}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      ...authFor(provider, apiKey),
     },
     body: JSON.stringify({
       model,
@@ -105,16 +116,19 @@ export interface AiProbe {
 }
 
 /**
- * Live connectivity probe. Tries the cheap `GET /models` first and falls back to
- * a one-token chat completion for providers that do not implement it. Throws with
+ * Live connectivity probe. Tries the cheap model list first and falls back to a
+ * one-token chat completion for providers that do not implement it. Throws with
  * the provider's own message on failure (bad key, wrong URL, unreachable host).
  */
 export async function probeAi(creds: AiCredentials): Promise<AiProbe> {
+  const def = getProvider(creds.provider);
   const base = creds.baseUrl.replace(/\/$/, "");
+  const chatPath = def?.chatPath ?? "/chat/completions";
+  const modelsPath = def?.modelsPath ?? "/models";
   const started = Date.now();
-  const auth = { Authorization: `Bearer ${creds.apiKey}` };
+  const auth = authFor(creds.provider, creds.apiKey);
 
-  const modelsRes = await fetch(`${base}/models`, { headers: auth, cache: "no-store" });
+  const modelsRes = await fetch(`${base}${modelsPath}`, { headers: auth, cache: "no-store" });
   if (modelsRes.ok) {
     const data = (await modelsRes.json().catch(() => null)) as { data?: unknown[] } | null;
     return {
@@ -128,7 +142,7 @@ export async function probeAi(creds: AiCredentials): Promise<AiProbe> {
     throw new Error(await readAiError(modelsRes));
   }
 
-  const chatRes = await fetch(`${base}/chat/completions`, {
+  const chatRes = await fetch(`${base}${chatPath}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...auth },
     body: JSON.stringify({
@@ -140,6 +154,31 @@ export async function probeAi(creds: AiCredentials): Promise<AiProbe> {
   });
   if (!chatRes.ok) throw new Error(await readAiError(chatRes));
   return { model: creds.model, mode: "chat", ms: Date.now() - started };
+}
+
+/**
+ * Fetches and normalizes a provider's live model list. Falls back to the
+ * provider's curated seed list when the endpoint is missing or empty.
+ */
+export async function listModels(
+  providerId: string,
+  apiKey: string,
+  baseUrlOverride?: string | null,
+): Promise<ModelInfo[]> {
+  const def = getProvider(providerId);
+  if (!def) throw new Error(`Unknown provider "${providerId}".`);
+  const base = baseUrlFor(def, baseUrlOverride) || DEFAULT_AI_BASE_URL;
+  const auth = authHeaders(def, apiKey);
+
+  const res = await fetch(`${base}${def.modelsPath}`, { headers: auth, cache: "no-store" });
+  if (!res.ok) {
+    if (def.fallbackModels?.length) return normalizeModels(def, def.fallbackModels);
+    throw new Error(await readAiError(res));
+  }
+  const raw = await res.json().catch(() => null);
+  const models = normalizeModels(def, raw);
+  if (!models.length && def.fallbackModels?.length) return normalizeModels(def, def.fallbackModels);
+  return models;
 }
 
 /** Best-effort JSON parse that tolerates markdown fences. */
