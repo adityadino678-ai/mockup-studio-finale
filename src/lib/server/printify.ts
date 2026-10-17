@@ -194,10 +194,17 @@ export function createPrintifyClient(explicitKey?: string) {
       includeOutOfStock = true,
     ): Promise<PrintifyVariant[]> {
       const qs = includeOutOfStock ? "?show-out-of-stock=1" : "";
-      const variants = await request<PrintifyVariant[]>(
+      const data = await request<unknown>(
         `/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/variants.json${qs}`,
       );
-      return Array.isArray(variants) ? variants : [];
+      // Despite the docs the endpoint returns an object — { id, title, variants }
+      // — not a bare array; tolerate both shapes.
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray((data as { variants?: unknown })?.variants)
+          ? (data as { variants: unknown[] }).variants
+          : [];
+      return list as PrintifyVariant[];
     },
 
     /** POST /uploads/images.json — uploads base64 artwork, returns the asset id. */

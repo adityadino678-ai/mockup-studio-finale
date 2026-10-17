@@ -456,7 +456,7 @@ describe("tool executors", () => {
       updatedAt: 1,
     });
     const fetchMock = vi.fn(
-      async () =>
+      async (_url: string, _init?: RequestInit) =>
         new Response(
           JSON.stringify({
             configured: true,

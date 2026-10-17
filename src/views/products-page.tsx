@@ -662,7 +662,6 @@ function DraftEditor({
                             onClick={() => setPrintArea(a.position)}
                           >
                             {a.label}
-                            {a.width && a.height ? ` (${a.width}×${a.height})` : ""}
                           </Button>
                         ))}
                       </div>
