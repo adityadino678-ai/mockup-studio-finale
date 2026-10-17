@@ -37,17 +37,42 @@ interface Blueprint {
   id: number;
   title: string;
   brand: string;
-  category: string;
+  category?: string;
 }
+/** Blueprint detail carries identity only — variants need a print provider. */
 interface BlueprintDetail extends Blueprint {
-  variants: Array<{ id: number; title: string; options: number[]; available: boolean }>;
-  print_areas: Array<{ id: string; title?: string; width?: number; height?: number }>;
+  description?: string;
+}
+interface Placeholder {
+  position: string;
+  decoration_method?: string;
+  width?: number;
+  height?: number;
+}
+interface Variant {
+  id: number;
+  title: string;
+  options?: Record<string, string>;
+  placeholders?: Placeholder[];
+  available?: boolean;
+}
+interface PrintAreaOption {
+  position: string;
+  label: string;
+  width?: number;
+  height?: number;
 }
 interface CatalogState {
   configured: boolean;
   blueprints?: Blueprint[];
   blueprint?: BlueprintDetail;
   error?: string;
+}
+
+function titleCase(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function ProductBuilderPage() {
@@ -326,11 +351,14 @@ function DraftEditor({
   const [blueprintId, setBlueprintId] = React.useState<number | null>(draft.blueprintId ?? null);
   const [providers, setProviders] = React.useState<Array<{ id: number; title: string }>>([]);
   const [printProviderId, setPrintProviderId] = React.useState<number | null>(draft.printProviderId ?? null);
+  const [variants, setVariants] = React.useState<Variant[]>([]);
+  const [areas, setAreas] = React.useState<PrintAreaOption[]>([]);
   const [printArea, setPrintArea] = React.useState<string>("front");
   const [selectedVariants, setSelectedVariants] = React.useState<Record<number, boolean>>({});
-  const [sizeOptions, setSizeOptions] = React.useState<number[]>([]);
-  const [colorOptions, setColorOptions] = React.useState<number[]>([]);
+  const [sizeLabels, setSizeLabels] = React.useState<string[]>([]);
+  const [colorLabels, setColorLabels] = React.useState<string[]>([]);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
+  const [loadingVariants, setLoadingVariants] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [apiError, setApiError] = React.useState<string | null>(null);
 
@@ -346,20 +374,21 @@ function DraftEditor({
   React.useEffect(() => {
     if (!blueprintId) {
       setDetail(null);
+      setVariants([]);
+      setAreas([]);
       return;
     }
     setLoadingDetail(true);
     setApiError(null);
+    setVariants([]);
+    setAreas([]);
+    setSelectedVariants({});
     (async () => {
       const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}`);
       const data = await res.json();
       setLoadingDetail(false);
       if (data.blueprint) {
-        const bp: BlueprintDetail = data.blueprint;
-        setDetail(bp);
-        setSelectedVariants(Object.fromEntries(bp.variants.map((v: { id: number }) => [v.id, true])));
-        setSizeOptions(bp.variants.find((v: { title: string }) => /size/i.test(v.title))?.options ?? []);
-        setColorOptions(bp.variants.find((v: { title: string }) => /colou?r/i.test(v.title))?.options ?? []);
+        setDetail(data.blueprint as BlueprintDetail);
       } else {
         setApiError(data.error ?? "Could not load blueprint");
       }
@@ -368,18 +397,80 @@ function DraftEditor({
 
   // Print providers are required by Printify, so load them for the blueprint.
   React.useEffect(() => {
-    if (!blueprintId || !catalogConfigured) return;
+    if (!blueprintId || !catalogConfigured) {
+      setProviders([]);
+      return;
+    }
     (async () => {
       const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&providers=1`);
       const data = await res.json();
       const list: Array<{ id: number; title: string }> = Array.isArray(data.providers) ? data.providers : [];
       setProviders(list);
-      setPrintProviderId((current) => current ?? list[0]?.id ?? null);
+      // Keep a saved provider only when this blueprint still offers it.
+      setPrintProviderId((current) => (current && list.some((p) => p.id === current) ? current : list[0]?.id ?? null));
     })();
   }, [blueprintId, catalogConfigured]);
 
+  // Variants and printable areas are provider-scoped in the Printify catalog
+  // (the blueprint detail itself has neither).
+  React.useEffect(() => {
+    if (!blueprintId || !printProviderId || !catalogConfigured) {
+      setVariants([]);
+      setAreas([]);
+      setSelectedVariants({});
+      return;
+    }
+    setLoadingVariants(true);
+    setApiError(null);
+    (async () => {
+      const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&provider=${printProviderId}`);
+      const data = await res.json();
+      setLoadingVariants(false);
+      const list: Variant[] = Array.isArray(data.variants) ? data.variants : [];
+      if (!res.ok || list.length === 0) {
+        setVariants([]);
+        setAreas([]);
+        setSelectedVariants({});
+        setApiError(data.error ?? "That print provider has no variants for this product.");
+        return;
+      }
+      setVariants(list);
+      setSelectedVariants(
+        Object.fromEntries(list.filter((v) => v.available !== false).map((v) => [v.id, true])),
+      );
+
+      const sizes = new Set<string>();
+      const colors = new Set<string>();
+      for (const v of list) {
+        if (v.options?.size) sizes.add(v.options.size);
+        if (v.options?.color) colors.add(v.options.color);
+      }
+      setSizeLabels([...sizes]);
+      setColorLabels([...colors]);
+
+      const byPosition = new Map<string, PrintAreaOption>();
+      for (const v of list) {
+        for (const p of v.placeholders ?? []) {
+          if (!p.position || byPosition.has(p.position)) continue;
+          const decoration = p.decoration_method ? ` · ${p.decoration_method}` : "";
+          byPosition.set(p.position, {
+            position: p.position,
+            label: titleCase(p.position) + decoration,
+            width: p.width,
+            height: p.height,
+          });
+        }
+      }
+      const areaList = [...byPosition.values()];
+      setAreas(areaList);
+      setPrintArea((current) =>
+        areaList.some((a) => a.position === current) ? current : areaList[0]?.position ?? "front",
+      );
+    })();
+  }, [blueprintId, printProviderId, catalogConfigured]);
+
   const createRemote = async () => {
-    if (!blueprintId || !detail || !printProviderId) return;
+    if (!blueprintId || !printProviderId || variants.length === 0) return;
     const priceCents = Math.round(Number(priceInput) * 100);
     if (!(priceCents > 0)) {
       setApiError("Enter a price greater than zero before creating the product.");
@@ -527,24 +618,28 @@ function DraftEditor({
                 <div className="rounded-md bg-danger-soft px-3 py-2 text-[12px] text-danger">{apiError}</div>
               )}
 
-              {detail && (
+              {loadingVariants && (
+                <p className="text-[11px] text-ink-subtle">Loading variants for that print provider…</p>
+              )}
+
+              {variants.length > 0 && (
                 <>
                   <Separator />
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label>Variants ({selectedCount} selected)</Label>
                       <span className="text-[11px] text-ink-subtle">
-                        {sizeOptions.length > 0 ? `${sizeOptions.length} sizes · ` : ""}
-                        {colorOptions.length > 0 ? `${colorOptions.length} colors` : ""}
+                        {sizeLabels.length > 0 ? `${sizeLabels.length} sizes · ` : ""}
+                        {colorLabels.length > 0 ? `${colorLabels.length} colors` : ""}
                       </span>
                     </div>
                     <div className="scroll-thin flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                      {detail.variants.map((v) => (
+                      {variants.map((v) => (
                         <Button
                           key={v.id}
                           size="sm"
                           variant={selectedVariants[v.id] ? "default" : "outline"}
-                          disabled={!v.available}
+                          disabled={v.available === false}
                           onClick={() =>
                             setSelectedVariants((s) => ({ ...s, [v.id]: !s[v.id] }))
                           }
@@ -555,18 +650,18 @@ function DraftEditor({
                     </div>
                   </div>
 
-                  {detail.print_areas.length > 0 && (
+                  {areas.length > 0 && (
                     <div className="space-y-1.5">
                       <Label>Print area for your artwork</Label>
                       <div className="flex flex-wrap gap-1.5">
-                        {detail.print_areas.map((a) => (
+                        {areas.map((a) => (
                           <Button
-                            key={a.id}
+                            key={a.position}
                             size="sm"
-                            variant={printArea === a.id ? "default" : "outline"}
-                            onClick={() => setPrintArea(a.id)}
+                            variant={printArea === a.position ? "default" : "outline"}
+                            onClick={() => setPrintArea(a.position)}
                           >
-                            {a.title ?? a.id}
+                            {a.label}
                             {a.width && a.height ? ` (${a.width}×${a.height})` : ""}
                           </Button>
                         ))}
@@ -604,6 +699,7 @@ function DraftEditor({
               !blueprintId ||
               !detail ||
               !printProviderId ||
+              variants.length === 0 ||
               !(Number(priceInput) > 0) ||
               selectedCount === 0 ||
               creating

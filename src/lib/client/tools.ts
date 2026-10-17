@@ -191,15 +191,15 @@ async function proposeBatchJob(args: Record<string, unknown>): Promise<ToolExecR
   };
 }
 
-interface BlueprintDetailResponse {
+interface VariantsResponse {
   configured?: boolean;
   error?: string;
-  blueprint?: {
+  variants?: Array<{
     id: number;
-    title: string;
-    variants?: Array<{ id: number; title?: string; available?: boolean }>;
-    print_areas?: Array<{ id: string; title?: string }>;
-  };
+    title?: string;
+    available?: boolean;
+    placeholders?: Array<{ position?: string }>;
+  }>;
 }
 
 async function proposePrintifyProduct(args: Record<string, unknown>): Promise<ToolExecResult> {
@@ -231,19 +231,23 @@ async function proposePrintifyProduct(args: Record<string, unknown>): Promise<To
     return { summary: "Price needed", error: "Set a price in integer cents (e.g. 1999 for $19.99)." };
   }
 
-  const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}`);
-  const data = (await res.json().catch(() => null)) as BlueprintDetailResponse | null;
-  if (!res.ok || !data?.blueprint) {
+  // Variants and print areas are provider-scoped in the Printify catalog.
+  const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&provider=${printProviderId}`);
+  const data = (await res.json().catch(() => null)) as VariantsResponse | null;
+  if (!res.ok) {
     return {
-      summary: "Could not load that blueprint",
+      summary: "Could not load variants for that print provider",
       error: data?.error ?? `Printify catalog request failed (HTTP ${res.status}).`,
     };
   }
-  const variants = (data.blueprint.variants ?? []).filter((v) => v.available !== false);
+  const variants = (data?.variants ?? []).filter((v) => v.available !== false);
   if (!variants.length) {
-    return { summary: "No variants on that blueprint", error: "That blueprint has no available variants." };
+    return {
+      summary: "No variants for that provider",
+      error: "That print provider has no available variants for this blueprint. Pick another provider.",
+    };
   }
-  const printArea = data.blueprint.print_areas?.[0]?.id ?? "front";
+  const printArea = variants.find((v) => v.placeholders?.length)?.placeholders?.[0]?.position ?? "front";
   const title = String(args.title ?? "").trim() || design.name;
 
   return {

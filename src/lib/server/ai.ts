@@ -64,11 +64,21 @@ async function readAiError(res: Response): Promise<string> {
   } catch {
     data = text;
   }
-  return (
-    (data as { error?: { message?: string } })?.error?.message ??
-    (data as { message?: string })?.message ??
-    `AI provider request failed with HTTP ${res.status}`
-  );
+  const record = data as
+    | { error?: { message?: string } | string; message?: unknown; detail?: unknown }
+    | null;
+  const errorField = record?.error;
+  const message =
+    (typeof errorField === "string" ? errorField : errorField?.message) ??
+    (typeof record?.message === "string" ? record.message : undefined) ??
+    (typeof record?.detail === "string" ? record.detail : undefined);
+  if (message) return message;
+  // FastAPI (NVIDIA NIM, some gateways) uses `detail`; unrecognised shapes still
+  // get a readable hint instead of a bare status code.
+  const raw = (typeof data === "string" ? data : text).replace(/\s+/g, " ").trim().slice(0, 180);
+  return raw
+    ? `AI provider request failed with HTTP ${res.status}: ${raw}`
+    : `AI provider request failed with HTTP ${res.status}`;
 }
 
 /** Authorization header for a provider, or `{}` when the provider needs no key. */

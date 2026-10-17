@@ -460,16 +460,11 @@ describe("tool executors", () => {
         new Response(
           JSON.stringify({
             configured: true,
-            blueprint: {
-              id: 6,
-              title: "Tee",
-              variants: [
-                { id: 1, available: true },
-                { id: 2, available: true },
-                { id: 3, available: false },
-              ],
-              print_areas: [{ id: "front" }],
-            },
+            variants: [
+              { id: 1, available: true, placeholders: [{ position: "front" }] },
+              { id: 2, available: true, placeholders: [{ position: "front" }] },
+              { id: 3, available: false, placeholders: [{ position: "front" }] },
+            ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -482,6 +477,7 @@ describe("tool executors", () => {
       price: 1999,
     });
     vi.unstubAllGlobals();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`provider=99`);
     expect(result.error).toBeUndefined();
     expect(result.confirmation?.payload.variantIds).toEqual([1, 2]);
     expect(result.confirmation?.payload.printArea).toBe("front");

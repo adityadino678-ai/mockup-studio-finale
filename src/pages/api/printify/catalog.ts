@@ -22,8 +22,9 @@ function fail(error: unknown) {
 
 /**
  * GET /api/printify/catalog?category=...            -> blueprint list
- * GET /api/printify/catalog?id=123                 -> blueprint detail (variants + print areas)
+ * GET /api/printify/catalog?id=123                 -> blueprint detail (identity only)
  * GET /api/printify/catalog?id=123&providers=1     -> print providers for a blueprint
+ * GET /api/printify/catalog?id=123&provider=29     -> variants (sizes/colors + print areas)
  *
  * The API key is taken from the request headers (the key pasted in Settings)
  * when present, otherwise from the server environment.
@@ -47,6 +48,7 @@ export const GET: APIRoute = async ({ url, request }) => {
   const id = url.searchParams.get("id");
   const category = url.searchParams.get("category") ?? undefined;
   const wantsProviders = url.searchParams.get("providers") === "1";
+  const provider = url.searchParams.get("provider");
 
   try {
     if (!id) {
@@ -54,6 +56,10 @@ export const GET: APIRoute = async ({ url, request }) => {
     }
     if (wantsProviders) {
       return json({ configured: true, ...(await client.listProviders(Number(id))) });
+    }
+    if (provider) {
+      const variants = await client.listVariants(Number(id), Number(provider));
+      return json({ configured: true, variants });
     }
     const detail: PrintifyBlueprintDetail = await client.getBlueprint(Number(id));
     return json({ configured: true, blueprint: detail });

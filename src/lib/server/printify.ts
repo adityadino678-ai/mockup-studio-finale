@@ -30,31 +30,41 @@ export interface PrintifyBlueprint {
   image?: string;
 }
 
-export interface PrintifyVariantOption {
-  id: number;
-  title: string;
-  options: number[];
-  available?: boolean;
-  price_variant?: number;
-}
-
-export interface PrintifyPrintArea {
-  id: string;
-  title?: string;
-  image?: string;
-  position?: string;
+/** A printable area on a variant (Printify calls these "placeholders"). */
+export interface PrintifyPlaceholder {
+  position: string;
+  decoration_method?: string;
   width?: number;
   height?: number;
 }
 
+/**
+ * A catalog variant. Printify returns variants only for a specific print
+ * provider (`/print_providers/{id}/variants.json`); the blueprint detail itself
+ * carries no variants. `options` is an object like `{ color, size }` keyed by
+ * option name, and each variant lists the printable areas it supports.
+ */
+export interface PrintifyVariant {
+  id: number;
+  title: string;
+  options?: Record<string, string>;
+  placeholders?: PrintifyPlaceholder[];
+  available?: boolean;
+}
+
+/** Blueprint detail: identity only. Variants require a print provider. */
 export interface PrintifyBlueprintDetail extends PrintifyBlueprint {
-  variants: PrintifyVariantOption[];
-  print_areas: PrintifyPrintArea[];
+  description?: string;
+  images?: string[];
+  tags?: string[];
+  features?: Array<{ name?: string; description?: string; image?: string }>;
+  care_instructions?: string[];
 }
 
 export interface PrintifyProvider {
   id: number;
   title: string;
+  decoration_methods?: string[];
 }
 
 export interface PrintifyShop {
@@ -161,7 +171,7 @@ export function createPrintifyClient(explicitKey?: string) {
       return request<PrintifyBlueprint[]>(`/catalog/blueprints.json${qs}`);
     },
 
-    /** GET /catalog/blueprints/{id}.json */
+    /** GET /catalog/blueprints/{id}.json — identity only; no variants. */
     getBlueprint(id: number): Promise<PrintifyBlueprintDetail> {
       return request<PrintifyBlueprintDetail>(`/catalog/blueprints/${id}.json`);
     },
@@ -172,6 +182,22 @@ export function createPrintifyClient(explicitKey?: string) {
         `/catalog/blueprints/${blueprintId}/print_providers.json`,
       );
       return { providers: Array.isArray(providers) ? providers : [] };
+    },
+
+    /**
+     * GET /catalog/blueprints/{id}/print_providers/{pid}/variants.json
+     * Variants (sizes/colors) and their printable areas are provider-specific.
+     */
+    async listVariants(
+      blueprintId: number,
+      printProviderId: number,
+      includeOutOfStock = true,
+    ): Promise<PrintifyVariant[]> {
+      const qs = includeOutOfStock ? "?show-out-of-stock=1" : "";
+      const variants = await request<PrintifyVariant[]>(
+        `/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/variants.json${qs}`,
+      );
+      return Array.isArray(variants) ? variants : [];
     },
 
     /** POST /uploads/images.json — uploads base64 artwork, returns the asset id. */
