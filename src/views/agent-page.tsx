@@ -35,6 +35,7 @@ import {
 } from "@/lib/client/chat";
 import { CONFIRM_TOOL_RUNNERS, executeTool } from "@/lib/client/tools";
 import { AGENT_TOOL_NAMES, parseToolArguments, routeIntent } from "@/lib/ai/tools";
+import { createCallTracker, MAX_IDENTICAL_CALLS, MAX_TURN_STEPS } from "@/lib/ai/step-limits";
 import {
   favoriteKey,
   modelCapabilities,
@@ -61,8 +62,6 @@ import { StatusBar } from "@/components/agent/status-bar";
 import { DebugPanel, type DebugEntry } from "@/components/agent/debug-panel";
 import type { ChatMessage, ImagePartData, MessagePart, ToolCallData } from "@/types/domain";
 import { cn } from "@/lib/utils";
-
-const MAX_TURN_STEPS = 6;
 
 // Mirror the server's output budgets (src/lib/server/ai.ts) so a truncated
 // reasoning reply can be retried with more room.
@@ -112,6 +111,9 @@ export function AgentPage() {
   const [effort, setEffort] = React.useState<ReasoningEffort>("medium");
   const [streaming, setStreaming] = React.useState<StreamState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // True when a turn stopped early but can simply be resumed from the persisted
+  // history (step budget spent, or the model stalled on a repeated call).
+  const [canContinue, setCanContinue] = React.useState(false);
   const [tokensPerSecond, setTokensPerSecond] = React.useState<number | undefined>();
   const [sessionsOpen, setSessionsOpen] = React.useState(false);
   const [artifactsOpen, setArtifactsOpen] = React.useState(true);
@@ -295,6 +297,7 @@ export function AgentPage() {
     async (conversationId: string, titleSeed?: string) => {
       if (!config || busyRef.current) return;
       busyRef.current = true;
+      setCanContinue(false);
       const provider = config.activeProvider;
       const model = activeModel(config);
       const controller = new AbortController();
@@ -334,6 +337,11 @@ export function AgentPage() {
             .map((p) => p.image) ?? [];
       }
       if (debug) logDebug("turn", `turn · ${provider} · ${model} · tools: ${toolNames?.length ?? 0}`);
+
+      // Detects a model that repeats the same tool call with the same arguments
+      // instead of making progress — a step cap alone cannot tell that apart
+      // from a genuinely long task.
+      const tracker = createCallTracker();
 
       try {
         for (let step = 0; step < MAX_TURN_STEPS; step++) {
@@ -412,6 +420,24 @@ export function AgentPage() {
           // answer is what the user actually asked for, and dropping it made the
           // agent look like it had said nothing.
           if (result.text.trim()) parts.push({ type: "text", text: result.text });
+
+          // No-progress guard: stop before re-running an identical call. The
+          // model's prose so far is kept so the turn does not end on silence,
+          // and Continue stays available in case a retry unblocks it.
+          const stalled = callsToRun.find(
+            (call) =>
+              tracker.record(call.function.name, call.function.arguments) > MAX_IDENTICAL_CALLS,
+          );
+          if (stalled) {
+            if (parts.length) {
+              await addMessage(conversationId, "assistant", parts, { provider, model });
+            }
+            setCanContinue(true);
+            setError(
+              `The agent called ${stalled.function.name} with the same arguments ${MAX_IDENTICAL_CALLS + 1} times without new information, so it stopped. Ask it to try a different approach, or press Continue.`,
+            );
+            return;
+          }
 
           const toolParts: MessagePart[] = [];
           let awaitingConfirm = false;
@@ -520,7 +546,10 @@ export function AgentPage() {
           }
           return;
         }
-        setError("The agent reached its step limit for this turn.");
+        setCanContinue(true);
+        setError(
+          `The agent used its ${MAX_TURN_STEPS}-step budget for this turn before finishing. Everything so far is saved — press Continue to pick up where it left off.`,
+        );
       } catch (error) {
         // Without this, any fetch/IndexedDB failure ended the turn silently:
         // the spinner cleared in `finally` and the user saw no answer and no
@@ -786,6 +815,15 @@ export function AgentPage() {
           error={error}
           onConfirmTool={(id, call) => void onConfirmTool(id, call)}
           onCancelTool={(id, call) => void onCancelTool(id, call)}
+          onContinue={
+            canContinue && activeId
+              ? () => {
+                  setError(null);
+                  void runTurn(activeId);
+                }
+              : undefined
+          }
+          continuing={!!streaming}
           emptyHint={
             !aiReady && (
               <a

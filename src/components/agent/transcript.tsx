@@ -12,9 +12,12 @@ interface TranscriptProps {
   emptyHint?: React.ReactNode;
   onConfirmTool?: (messageId: string, call: ToolCallData) => void;
   onCancelTool?: (messageId: string, call: ToolCallData) => void;
+  /** Shown with the error when the turn stopped early but can be resumed. */
+  onContinue?: () => void;
+  continuing?: boolean;
 }
 
-export function Transcript({ messages, streaming, error, emptyHint, onConfirmTool, onCancelTool }: TranscriptProps) {
+export function Transcript({ messages, streaming, error, emptyHint, onConfirmTool, onCancelTool, onContinue, continuing }: TranscriptProps) {
   const endRef = React.useRef<HTMLDivElement>(null);
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const stickRef = React.useRef(true);
@@ -65,6 +68,16 @@ export function Transcript({ messages, streaming, error, emptyHint, onConfirmToo
         {error && (
           <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] leading-relaxed text-danger">
             {error}
+            {onContinue && (
+              <button
+                type="button"
+                onClick={onContinue}
+                disabled={continuing}
+                className="mt-2 block rounded-md bg-forest px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
+              >
+                {continuing ? "Continuing…" : "Continue"}
+              </button>
+            )}
           </div>
         )}
         <div ref={endRef} />

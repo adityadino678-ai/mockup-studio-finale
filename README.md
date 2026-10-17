@@ -128,7 +128,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 123 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
+- 129 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 

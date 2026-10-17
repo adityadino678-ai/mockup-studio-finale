@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 123 unit tests
+npm run test          # 129 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -162,10 +162,24 @@ Both must pass. The production run has caught bugs the local run missed.
   the honesty rule in the system prompt still holds: the agent never claims an
   action the transcript does not show. The loop is client-driven: the model's
   streamed `tool_calls` come back on the SSE `tool_calls` frame, the browser runs
-  each tool, replays assistant/tool messages, and re-calls the endpoint (max 6
-  steps per turn). `toApiMessages` omits tool calls that never got a result so
-  the replayed history stays valid. Threads are auto-titled by the active model
-  via **`/api/ai/title`**.
+  each tool, replays assistant/tool messages, and re-calls the endpoint
+  (`MAX_TURN_STEPS`, 30 per turn). `toApiMessages` omits tool calls that never got
+  a result so the replayed history stays valid. Threads are auto-titled by the
+  active model via **`/api/ai/title`**.
+- **A turn pause is not a turn failure.** The step budget was 6, which is shorter
+  than a single Printify listing (blueprint → print provider → variants → propose
+  is five steps before the user even sees a confirm card), so legitimate turns
+  used to die on `"The agent reached its step limit for this turn."` with no way
+  forward. `src/lib/ai/step-limits.ts` now holds the pacing policy:
+  `MAX_TURN_STEPS = 30`, plus a no-progress guard that stops the turn when the
+  same tool+arguments signature repeats more than `MAX_IDENTICAL_CALLS` (3) times
+  — the thing a step cap alone cannot distinguish from real progress. Both stops
+  keep the full history and set `canContinue`, which renders a **Continue** button
+  in the transcript; clicking it re-runs `runTurn` from the persisted messages, so
+  the turn resumes instead of dead-ending. Verified live: one turn ran **9**
+  steps (eight `browse_printify_catalog` calls plus a proposal), and the guard
+  fired on a 4th byte-identical `list_library` call with Continue shown and
+  resuming. Covered by `tests/step-limits.test.ts`.
 - **Agent reliability (M4).** Free/weak models often answer in prose and never
   emit a tool call. `routeIntent()` in `src/lib/ai/tools.ts` is a keyword fallback
   the client runs when the model requested no tool, so the agent still acts.
