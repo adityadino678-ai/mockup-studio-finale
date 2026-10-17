@@ -78,6 +78,54 @@ function authFor(provider: string, apiKey: string): Record<string, string> {
   return authHeaders(def, apiKey);
 }
 
+/** Default completion budget, raised for reasoning turns so thinking cannot starve the answer. */
+const DEFAULT_MAX_TOKENS = 1400;
+const REASONING_MAX_TOKENS = 3000;
+
+/**
+ * OpenAI's newer models reject `max_tokens` in favour of `max_completion_tokens`.
+ * We send the documented parameter per provider and still recover via `retryFix`
+ * when a provider disagrees.
+ */
+function tokenParam(provider: string): "max_tokens" | "max_completion_tokens" {
+  return provider === "openai" ? "max_completion_tokens" : "max_tokens";
+}
+
+/**
+ * Given a provider's error text, returns an adjusted request body for a single
+ * retry — dropping or renaming the parameter the provider rejected — or null
+ * when the error is not something we can fix by changing the request shape.
+ * Exported so the recovery rules are unit-testable without a network.
+ */
+export function retryFix(body: Record<string, unknown>, message: string): Record<string, unknown> | null {
+  const lower = message.toLowerCase();
+  const next: Record<string, unknown> = { ...body };
+  let changed = false;
+  if (lower.includes("reasoning_effort") && "reasoning_effort" in next) {
+    delete next.reasoning_effort;
+    changed = true;
+  }
+  if (lower.includes("temperature") && "temperature" in next) {
+    delete next.temperature;
+    changed = true;
+  }
+  if (lower.includes("max_completion_tokens") && "max_tokens" in next) {
+    next.max_completion_tokens = next.max_tokens;
+    delete next.max_tokens;
+    changed = true;
+  } else if (lower.includes("max_tokens") && "max_completion_tokens" in next) {
+    next.max_tokens = next.max_completion_tokens;
+    delete next.max_completion_tokens;
+    changed = true;
+  }
+  if (/\btools?\b|\bfunctions?\b/.test(lower) && "tools" in next) {
+    delete next.tools;
+    delete next.tool_choice;
+    changed = true;
+  }
+  return changed ? next : null;
+}
+
 export async function complete(
   messages: AiMessage[],
   options: AiCompletionOptions = {},
@@ -99,7 +147,7 @@ export async function complete(
       model,
       messages,
       temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 1400,
+      [tokenParam(provider)]: options.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
     }),
     signal: options.signal,
@@ -205,26 +253,35 @@ export async function* streamChat(
   const apiKey = creds?.apiKey ?? serverEnv.aiApiKey() ?? serverEnv.openaiApiKey() ?? "";
   const def = getProvider(provider);
   const chatPath = def?.chatPath ?? "/chat/completions";
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}${chatPath}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authFor(provider, apiKey),
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: true,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 1400,
-      ...(options.effort ? { reasoning_effort: options.effort } : {}),
-      ...(options.tools?.length ? { tools: options.tools, tool_choice: "auto" } : {}),
-    }),
-    signal: options.signal,
-    cache: "no-store",
-  });
+  const url = `${baseUrl.replace(/\/$/, "")}${chatPath}`;
+  const headers = { "Content-Type": "application/json", ...authFor(provider, apiKey) };
+  const budget = options.maxTokens ?? (options.effort ? REASONING_MAX_TOKENS : DEFAULT_MAX_TOKENS);
+  const initial: Record<string, unknown> = {
+    model,
+    messages,
+    stream: true,
+    temperature: options.temperature ?? 0.7,
+    [tokenParam(provider)]: budget,
+    ...(options.effort ? { reasoning_effort: options.effort } : {}),
+    ...(options.tools?.length ? { tools: options.tools, tool_choice: "auto" } : {}),
+  };
+  const post = (body: Record<string, unknown>) =>
+    fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: options.signal,
+      cache: "no-store",
+    });
 
-  if (!res.ok) throw new Error(await readAiError(res));
+  let res = await post(initial);
+  if (!res.ok) {
+    const message = await readAiError(res);
+    const retry = retryFix(initial, message);
+    if (!retry) throw new Error(message);
+    res = await post(retry);
+    if (!res.ok) throw new Error(await readAiError(res));
+  }
   if (!res.body) throw new Error("AI provider returned no response stream");
 
   const reader = res.body.getReader();

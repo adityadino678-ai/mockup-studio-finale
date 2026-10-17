@@ -7,18 +7,27 @@ import { toOpenAiTools } from "@/lib/ai/tools";
 
 export const prerender = false;
 
-const SYSTEM_PROMPT = `You are the agent inside Mockup Studio, a local-first print-on-demand workspace.
+const SYSTEM_PROMPT = `You are the agent inside Mockup Studio, a local-first print-on-demand workspace for sellers.
+
+You act through tools. When the user's request matches a tool below, CALL THE TOOL — do not merely
+describe what a tool could do, and do not ask for permission to use a read-only tool. Tools this turn:
+- explain_howto(topic): look up how a Mockup Studio workflow works (uploading, the editor, batch
+  generation, background removal, ink variants, templates, ZIP exports, products, listings, SEO).
+  Use it for any "how do I…", "how to…", "where do I…", or "walk me through…" question.
+- summarize_workspace(): read the real counts of the user's local library. Use it whenever the user asks
+  what they have, "how many designs/mockups", or for an overview of their workspace.
+- draft_listing(concept, audience?, keywords?): draft Etsy listing copy (title, description, tags,
+  keywords). Use it for titles, descriptions, tags, keywords, or "write me a listing".
+- create_batch_job(designs?, mockups?, variant?, skipExisting?): propose a batch render across designs
+  and mockups. This only prepares a job — the user confirms before anything is created. Use it for
+  "generate/combine/render all designs and mockups".
 
 Rules:
-- You may explain, plan, and draft copy. You must never claim to have uploaded, edited, generated,
-  saved, exported, or published anything unless a tool result in this conversation shows it happened.
-- Real capabilities in this app: uploading designs and mockups (stored in the browser), the mockup
-  editor, batch generation, background removal, ink variants, templates, ZIP exports, product drafts,
-  Etsy listing drafts, and AI SEO research.
+- Call the tools you need, then answer the user in plain language grounded in the tool results.
 - Never invent search volume, sales figures, rankings, or revenue.
-- Be concise and practical. Prefer short paragraphs and numbered steps for workflows.
-- When a tool is available and the user asks for something it does, call the tool instead of guessing.
-  Some tools (like creating a batch job) only prepare a proposal; the user confirms before anything runs.`;
+- Never claim to have uploaded, edited, generated, saved, exported, or published anything unless a tool
+  result in this conversation shows it happened.
+- If no tool fits the request, answer directly. Be concise and practical; use numbered steps for workflows.`;
 
 interface ChatRequest {
   messages?: AiMessage[];
@@ -27,6 +36,8 @@ interface ChatRequest {
   /** Names of the agent tools this turn may use. */
   tools?: string[];
   maxTokens?: number;
+  /** When true, emit a `debug` frame describing exactly what was sent upstream. */
+  debug?: boolean;
 }
 
 const SSE_HEADERS: Record<string, string> = {
@@ -73,8 +84,11 @@ export const POST: APIRoute = async ({ request }) => {
 
   const messages: AiMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
   const effort = typeof body.effort === "string" && body.effort.trim() ? body.effort.trim() : undefined;
-  const tools = toOpenAiTools(Array.isArray(body.tools) ? body.tools : []);
-  const model = aiConfig(creds.ai).model;
+  const toolNames = Array.isArray(body.tools) ? body.tools : [];
+  const tools = toOpenAiTools(toolNames);
+  const ai = aiConfig(creds.ai);
+  const model = ai.model;
+  const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 1400;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -82,6 +96,18 @@ export const POST: APIRoute = async ({ request }) => {
       const send = (event: string, data: unknown) =>
         controller.enqueue(encoder.encode(encodeSse(event, data)));
       try {
+        if (body.debug) {
+          send("debug", {
+            provider: ai.provider,
+            model: ai.model,
+            baseUrl: ai.baseUrl,
+            effort: effort ?? null,
+            maxTokens,
+            tools: toolNames,
+            toolCount: tools.length,
+            messageCount: messages.length,
+          });
+        }
         for await (const event of streamChat(
           messages,
           { effort, tools, maxTokens: body.maxTokens, signal: request.signal },

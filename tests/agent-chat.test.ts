@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SseParser, decodeSseData, encodeSse } from "@/lib/ai/sse";
 import { modelCapabilities, modelReasoning } from "@/lib/ai/providers";
-import { parseProviderStreamLine } from "@/lib/server/ai";
+import { parseProviderStreamLine, retryFix } from "@/lib/server/ai";
 import {
   addMessage,
   consumeStream,
@@ -16,7 +16,7 @@ import {
   toApiMessages,
 } from "@/lib/client/chat";
 import { executeTool } from "@/lib/client/tools";
-import { agentTool, parseToolArguments, toOpenAiTools } from "@/lib/ai/tools";
+import { agentTool, parseToolArguments, routeIntent, toOpenAiTools } from "@/lib/ai/tools";
 import { db } from "@/lib/db/schema";
 import type { ChatMessage } from "@/types/domain";
 
@@ -212,11 +212,25 @@ describe("consumeStream", () => {
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls?.[0].function.name).toBe("summarize_workspace");
   });
+
+  it("passes every raw frame to onFrame in order", async () => {
+    const seen: string[] = [];
+    await consumeStream(
+      sseResponse([
+        encodeSse("debug", { model: "m", tools: [] }),
+        encodeSse("delta", { text: "hi" }),
+        encodeSse("done", { model: "m" }),
+      ]),
+      { onFrame: (frame) => seen.push(frame.event) },
+    );
+    expect(seen).toEqual(["debug", "delta", "done"]);
+  });
 });
 
 describe("agent tools", () => {
   it("marks only the writing tool as needing confirmation", () => {
     expect(agentTool("create_batch_job")?.confirm).toBe(true);
+    expect(agentTool("create_printify_product")?.confirm).toBe(true);
     expect(agentTool("explain_howto")?.confirm).toBeFalsy();
     expect(agentTool("summarize_workspace")?.confirm).toBeFalsy();
     expect(agentTool("draft_listing")?.confirm).toBeFalsy();
@@ -234,6 +248,49 @@ describe("agent tools", () => {
     expect(parseToolArguments("")).toEqual({});
     expect(parseToolArguments("not json")).toEqual({});
     expect(parseToolArguments("[1,2]")).toEqual({});
+  });
+
+  it("routes obvious requests to the right tool", () => {
+    expect(routeIntent("how do I upload a design")?.name).toBe("explain_howto");
+    expect(routeIntent("how many designs do I have")?.name).toBe("summarize_workspace");
+    expect(routeIntent("draft me an Etsy listing for cat mugs")?.name).toBe("draft_listing");
+    expect(routeIntent("generate a batch of all designs and mockups")?.name).toBe("create_batch_job");
+    expect(routeIntent("list this design on printify")?.name).toBe("create_printify_product");
+    expect(routeIntent("create a printify product for my art")?.name).toBe("create_printify_product");
+  });
+
+  it("returns null when nothing matches an intent", () => {
+    expect(routeIntent("hello there")).toBeNull();
+    expect(routeIntent("")).toBeNull();
+  });
+
+  it("carries the user text into explain_howto args", () => {
+    const routed = routeIntent("how do I remove a background?");
+    expect(routed?.name).toBe("explain_howto");
+    expect(String(routed?.args.topic)).toContain("background");
+  });
+});
+
+describe("provider request recovery", () => {
+  it("renames max_tokens to max_completion_tokens when the provider requires it", () => {
+    const fixed = retryFix({ model: "m", max_tokens: 100 }, "Unsupported parameter: max_completion_tokens");
+    expect(fixed).toEqual({ model: "m", max_completion_tokens: 100 });
+  });
+
+  it("drops reasoning_effort when the model rejects it", () => {
+    expect(retryFix({ model: "m", reasoning_effort: "high" }, "reasoning_effort is not supported")).toEqual({
+      model: "m",
+    });
+  });
+
+  it("drops tools when the model cannot call functions", () => {
+    expect(
+      retryFix({ model: "m", tools: [], tool_choice: "auto", temperature: 0.7 }, "This model does not support tools"),
+    ).toEqual({ model: "m", temperature: 0.7 });
+  });
+
+  it("returns null when the error cannot be fixed by changing the request", () => {
+    expect(retryFix({ model: "m" }, "Incorrect API key provided")).toBeNull();
   });
 });
 
@@ -365,6 +422,71 @@ describe("tool executors", () => {
     expect(result.confirmation?.payload.total).toBe(1);
     expect(result.confirmation?.payload.variant).toBe("white");
     expect(await db.batchJobs.count()).toBe(0);
+  });
+
+  it("refuses to propose a Printify product without a design", async () => {
+    const result = await executeTool("create_printify_product", {});
+    expect(result.error).toBeDefined();
+    expect(result.confirmation).toBeUndefined();
+  });
+
+  it("asks for a blueprint instead of inventing one", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const result = await executeTool("create_printify_product", { design: "sunset", price: 1999 });
+    expect(result.summary).toContain("Blueprint");
+    expect(result.confirmation).toBeUndefined();
+  });
+
+  it("proposes a Printify product once ids and a price are given", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            configured: true,
+            blueprint: {
+              id: 6,
+              title: "Tee",
+              variants: [
+                { id: 1, available: true },
+                { id: 2, available: true },
+                { id: 3, available: false },
+              ],
+              print_areas: [{ id: "front" }],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeTool("create_printify_product", {
+      design: "sunset",
+      blueprintId: 6,
+      printProviderId: 99,
+      price: 1999,
+    });
+    vi.unstubAllGlobals();
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.variantIds).toEqual([1, 2]);
+    expect(result.confirmation?.payload.printArea).toBe("front");
+    expect(result.confirmation?.payload.price).toBe(1999);
+    expect(await db.productDrafts.count()).toBe(0);
   });
 
   it("reports an unknown tool instead of guessing", async () => {

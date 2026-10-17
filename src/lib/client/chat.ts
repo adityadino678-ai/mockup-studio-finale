@@ -226,6 +226,8 @@ export interface StreamCallbacks {
   onDelta?(text: string): void;
   onReasoning?(text: string): void;
   onUsage?(usage: Record<string, unknown>): void;
+  /** Receives every raw SSE frame, in order. Used by the `?debug=1` capture. */
+  onFrame?(frame: SseFrame): void;
 }
 
 export interface StreamResult {
@@ -245,6 +247,7 @@ function applyFrame(
   callbacks: StreamCallbacks,
   startedAt: number,
 ): boolean {
+  callbacks.onFrame?.(frame);
   if (frame.event === "done") return true;
   const data = decodeSseData<Record<string, unknown>>(frame);
   if (frame.event === "delta" && typeof data?.text === "string") {
@@ -303,7 +306,7 @@ export async function consumeStream(res: Response, callbacks: StreamCallbacks = 
 /** Posts message history to `/api/ai/chat` and streams the reply. */
 export async function streamReply(
   messages: ApiMessage[],
-  options: { effort?: string; tools?: string[]; signal?: AbortSignal } & StreamCallbacks = {},
+  options: { effort?: string; tools?: string[]; signal?: AbortSignal; debug?: boolean } & StreamCallbacks = {},
 ): Promise<StreamResult> {
   const res = await authedFetch("/api/ai/chat", {
     method: "POST",
@@ -312,6 +315,7 @@ export async function streamReply(
       messages,
       effort: options.effort,
       ...(options.tools?.length ? { tools: options.tools } : {}),
+      ...(options.debug ? { debug: true } : {}),
     }),
     signal: options.signal,
   });

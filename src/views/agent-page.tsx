@@ -23,6 +23,7 @@ import {
   deleteConversation,
   loadFavorites,
   messageTokens,
+  newId,
   patchToolCall,
   renameConversation,
   saveFavorites,
@@ -32,8 +33,8 @@ import {
   toApiMessages,
   touchConversation,
 } from "@/lib/client/chat";
-import { confirmBatchJob, executeTool } from "@/lib/client/tools";
-import { AGENT_TOOL_NAMES, parseToolArguments } from "@/lib/ai/tools";
+import { confirmBatchJob, confirmPrintifyProduct, executeTool } from "@/lib/client/tools";
+import { AGENT_TOOL_NAMES, parseToolArguments, routeIntent } from "@/lib/ai/tools";
 import {
   favoriteKey,
   modelCapabilities,
@@ -57,6 +58,7 @@ import { Composer, type SlashCommand } from "@/components/agent/composer";
 import { ModelPicker, type ProviderModels } from "@/components/agent/model-picker";
 import { EffortPill } from "@/components/agent/effort-pill";
 import { StatusBar } from "@/components/agent/status-bar";
+import { DebugPanel, type DebugEntry } from "@/components/agent/debug-panel";
 import type { ChatMessage, ImagePartData, MessagePart, ToolCallData } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
@@ -96,6 +98,12 @@ export function AgentPage() {
   const [listening, setListening] = React.useState(false);
   const [speakReplies, setSpeakReplies] = React.useState(false);
   const [queue, setQueue] = React.useState<string[]>([]);
+  const debug = React.useMemo(
+    () => (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug")),
+    [],
+  );
+  const [debugEntries, setDebugEntries] = React.useState<DebugEntry[]>([]);
+  const [debugOpen, setDebugOpen] = React.useState(true);
   const abortRef = React.useRef<AbortController | null>(null);
   const busyRef = React.useRef(false);
   const dictationRef = React.useRef<Dictation | null>(null);
@@ -256,6 +264,13 @@ export function AgentPage() {
     if (title && title !== conversation.title) await renameConversation(conversationId, title);
   }, []);
 
+  const logDebug = React.useCallback((kind: DebugEntry["kind"], label: string, body?: string) => {
+    setDebugEntries((prev) => {
+      const next = [...prev, { id: newId(), kind, label, body }];
+      return next.length > 600 ? next.slice(next.length - 600) : next;
+    });
+  }, []);
+
   const runTurn = React.useCallback(
     async (conversationId: string, titleSeed?: string) => {
       if (!config || busyRef.current) return;
@@ -267,6 +282,27 @@ export function AgentPage() {
       const toolNames = caps.tools ? AGENT_TOOL_NAMES : undefined;
       let titled = false;
       let spoken = "";
+      // Fallback state: a turn the user started may run a routed tool or a
+      // one-shot nudge when the model answers without calling anything.
+      const userInitiated = !!titleSeed;
+      let routed = false;
+      let nudged = false;
+      let nudge: string | undefined;
+      let lastUserText = "";
+      if (userInitiated) {
+        const seedMessages = await db.messages
+          .where("conversationId")
+          .equals(conversationId)
+          .sortBy("createdAt");
+        const lastUser = [...seedMessages].reverse().find((m) => m.role === "user");
+        lastUserText =
+          lastUser?.parts
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join(" ")
+            .trim() ?? "";
+      }
+      if (debug) logDebug("turn", `turn · ${provider} · ${model} · tools: ${toolNames?.length ?? 0}`);
 
       try {
         for (let step = 0; step < MAX_TURN_STEPS; step++) {
@@ -275,23 +311,76 @@ export function AgentPage() {
             .equals(conversationId)
             .sortBy("createdAt");
           const apiMessages = toApiMessages(stored);
+          if (nudge) {
+            apiMessages.push({ role: "user", content: nudge });
+            nudge = undefined;
+          }
+
+          if (debug) {
+            logDebug(
+              "request",
+              `step ${step + 1} · ${apiMessages.length} messages`,
+              JSON.stringify(
+                {
+                  provider,
+                  model,
+                  effort: caps.reasoning ? effort : null,
+                  tools: toolNames ?? [],
+                  messages: apiMessages.length,
+                },
+                null,
+                2,
+              ),
+            );
+          }
 
           setStreaming({ text: "", reasoning: "" });
           const result = await streamReply(apiMessages, {
             effort: caps.reasoning ? effort : undefined,
             tools: toolNames,
             signal: controller.signal,
+            debug,
+            onFrame: debug
+              ? (frame) => logDebug("frame", `event: ${frame.event}`, frame.data)
+              : undefined,
             onDelta: (t) => setStreaming((s) => (s ? { ...s, text: s.text + t } : s)),
             onReasoning: (t) => setStreaming((s) => (s ? { ...s, reasoning: s.reasoning + t } : s)),
           });
 
+          // Decide what to run: the model's own tool calls, or — when it asked
+          // for none on a user-initiated turn — the tool the router matched.
+          // This is what makes the agent act on models that only chat.
+          let callsToRun = result.toolCalls ?? [];
+          let routedThisStep = false;
+          if (
+            !callsToRun.length &&
+            !result.error &&
+            !result.aborted &&
+            userInitiated &&
+            !routed &&
+            toolNames?.length
+          ) {
+            const intent = routeIntent(lastUserText);
+            if (intent && toolNames.includes(intent.name)) {
+              callsToRun = [
+                {
+                  id: `route_${newId()}`,
+                  type: "function",
+                  function: { name: intent.name, arguments: JSON.stringify(intent.args) },
+                },
+              ];
+              routed = true;
+              routedThisStep = true;
+            }
+          }
+
           const parts: MessagePart[] = [];
           if (result.reasoning.trim()) parts.push({ type: "reasoning", text: result.reasoning });
-          if (result.text.trim()) parts.push({ type: "text", text: result.text });
+          if (result.text.trim() && !routedThisStep) parts.push({ type: "text", text: result.text });
 
           const toolParts: MessagePart[] = [];
           let awaitingConfirm = false;
-          for (const call of result.toolCalls ?? []) {
+          for (const call of callsToRun) {
             const args = parseToolArguments(call.function.arguments);
             const exec = await executeTool(call.function.name, args);
             if (exec.confirmation) {
@@ -331,6 +420,28 @@ export function AgentPage() {
           setTokensPerSecond(result.tokensPerSecond);
           spoken = result.text;
 
+          if (debug) {
+            logDebug(
+              "summary",
+              `step ${step + 1} result`,
+              JSON.stringify(
+                {
+                  textLen: result.text.length,
+                  reasoningLen: result.reasoning.length,
+                  toolCalls: result.toolCalls?.length ?? 0,
+                  ran: callsToRun.length,
+                  routed: routedThisStep,
+                  error: result.error ?? null,
+                  aborted: result.aborted,
+                  firstTokenMs: result.firstTokenMs ?? null,
+                  tokensPerSecond: result.tokensPerSecond ?? null,
+                },
+                null,
+                2,
+              ),
+            );
+          }
+
           if (!titled && titleSeed) {
             titled = true;
             void retitle(conversationId, titleSeed, result.text);
@@ -342,7 +453,26 @@ export function AgentPage() {
             return;
           }
           if (awaitingConfirm) return;
-          if (!result.toolCalls?.length) return;
+          // A tool ran this step — loop so the model can use the result.
+          if (callsToRun.length) continue;
+
+          // No tool ran. Guard against the "reasoning-only" and empty answers
+          // that make the agent look like it said nothing.
+          if (!result.text.trim() && result.reasoning.trim() && !nudged) {
+            nudged = true;
+            nudge =
+              "You produced reasoning but no visible answer. Give your final answer now as plain text, and do not repeat the reasoning.";
+            continue;
+          }
+          if (!result.text.trim() && result.reasoning.trim()) {
+            setError("The model produced reasoning but no answer. Try again or switch to a different model.");
+            return;
+          }
+          if (!result.text.trim()) {
+            setError("The model returned an empty response. Try again or switch to a different model.");
+            return;
+          }
+          return;
         }
         setError("The agent reached its step limit for this turn.");
       } finally {
@@ -359,7 +489,7 @@ export function AgentPage() {
         }
       }
     },
-    [config, caps.reasoning, caps.tools, effort, retitle, speakReplies],
+    [config, caps.reasoning, caps.tools, effort, retitle, speakReplies, debug, logDebug],
   );
 
   const sendText = React.useCallback(
@@ -444,8 +574,14 @@ export function AgentPage() {
   const onConfirmTool = React.useCallback(
     async (messageId: string, call: ToolCallData) => {
       if (!activeId || busyRef.current) return;
-      await patchToolCall(messageId, call.id, { status: "running", summary: "Creating the batch job…" });
-      const exec = await confirmBatchJob(call.args);
+      const isPrintify = call.name === "create_printify_product";
+      await patchToolCall(messageId, call.id, {
+        status: "running",
+        summary: isPrintify ? "Creating the Printify product…" : "Creating the batch job…",
+      });
+      const exec = isPrintify
+        ? await confirmPrintifyProduct(call.args)
+        : await confirmBatchJob(call.args);
       await patchToolCall(messageId, call.id, {
         status: exec.error ? "error" : "done",
         summary: exec.summary,
@@ -457,13 +593,19 @@ export function AgentPage() {
     [activeId, runTurn],
   );
 
-  const onCancelTool = React.useCallback(async (messageId: string, call: ToolCallData) => {
-    await patchToolCall(messageId, call.id, {
-      status: "error",
-      summary: "Cancelled before anything was created",
-      error: "The user cancelled this batch job.",
-    });
-  }, []);
+  const onCancelTool = React.useCallback(
+    async (messageId: string, call: ToolCallData) => {
+      await patchToolCall(messageId, call.id, {
+        status: "error",
+        summary: "Cancelled before anything was created",
+        error:
+          call.name === "create_printify_product"
+            ? "The user cancelled this Printify product."
+            : "The user cancelled this batch job.",
+      });
+    },
+    [],
+  );
 
   const stop = React.useCallback(() => {
     abortRef.current?.abort();
@@ -561,6 +703,20 @@ export function AgentPage() {
             >
               <PanelRight className="h-3.5 w-3.5" />
             </button>
+            {debug && (
+              <button
+                type="button"
+                onClick={() => setDebugOpen((v) => !v)}
+                className={cn(
+                  "rounded-md border border-border-subtle px-2 py-1.5 text-[11px]",
+                  debugOpen ? "text-forest" : "text-ink-muted hover:text-ink",
+                )}
+                title="Toggle SSE debug capture"
+                aria-pressed={debugOpen}
+              >
+                Debug
+              </button>
+            )}
             <a
               href="/settings"
               className="flex items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[11px] text-ink-muted hover:bg-surface-muted hover:text-ink"
@@ -637,6 +793,14 @@ export function AgentPage() {
         <div className="hidden xl:flex">
           <ArtifactRail onClose={() => setArtifactsOpen(false)} />
         </div>
+      )}
+
+      {debug && debugOpen && (
+        <DebugPanel
+          entries={debugEntries}
+          onClear={() => setDebugEntries([])}
+          onClose={() => setDebugOpen(false)}
+        />
       )}
     </div>
   );
