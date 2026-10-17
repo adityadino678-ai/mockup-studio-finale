@@ -12,7 +12,10 @@
 
 import { db } from "@/lib/db/schema";
 import { authedFetch } from "@/lib/client/integrations";
+import { artworkToBase64, MAX_ARTWORK_BYTES } from "@/lib/client/artwork";
 import { createBatchJob, runBatchJob } from "@/lib/batch/runner";
+import { getAssetBlob, logActivity, uid } from "@/lib/db/repo";
+import type { ProductDraft } from "@/types/domain";
 import type { InkVariant } from "@/types/domain";
 
 export interface ToolConfirmation {
@@ -76,7 +79,7 @@ const HOWTO: Array<{ match: RegExp; answer: string }> = [
   {
     match: /printify|product|publish/i,
     answer:
-      "Printify drafts can be created from Settings once your Printify key is set. Product creation is a draft flow and pricing is not handled yet, so review before publishing.",
+      "Create a Printify product from the Products page: pick a design, choose a blueprint and print provider, set a price, then click Create on Printify. The agent can do it too — ask it to list a design and confirm on the tool card. Pricing is required (integer cents) and the artwork is uploaded to Printify.",
   },
   {
     match: /key|settings|provider|api/i,
@@ -188,6 +191,80 @@ async function proposeBatchJob(args: Record<string, unknown>): Promise<ToolExecR
   };
 }
 
+interface BlueprintDetailResponse {
+  configured?: boolean;
+  error?: string;
+  blueprint?: {
+    id: number;
+    title: string;
+    variants?: Array<{ id: number; title?: string; available?: boolean }>;
+    print_areas?: Array<{ id: string; title?: string }>;
+  };
+}
+
+async function proposePrintifyProduct(args: Record<string, unknown>): Promise<ToolExecResult> {
+  const designs = await db.designs.toArray();
+  if (!designs.length) {
+    return { summary: "No designs to list", error: "Upload a design first, then I can list it on Printify." };
+  }
+  const wanted = String(args.design ?? "").trim().toLowerCase();
+  const design =
+    (wanted && designs.find((d) => d.name.toLowerCase().includes(wanted))) || designs[0];
+
+  const blueprintId = Math.trunc(Number(args.blueprintId)) || 0;
+  const printProviderId = Math.trunc(Number(args.printProviderId)) || 0;
+  const price = Math.round(Number(args.price)) || 0;
+  if (!blueprintId) {
+    return {
+      summary: "Blueprint needed",
+      error:
+        "A Printify blueprint (product type) id is required. Pick one in Product Builder → Create product draft, then ask again.",
+    };
+  }
+  if (!printProviderId) {
+    return {
+      summary: "Print provider needed",
+      error: "A Printify print provider id is required for that blueprint. Choose one in Product Builder, then ask again.",
+    };
+  }
+  if (!(price > 0)) {
+    return { summary: "Price needed", error: "Set a price in integer cents (e.g. 1999 for $19.99)." };
+  }
+
+  const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}`);
+  const data = (await res.json().catch(() => null)) as BlueprintDetailResponse | null;
+  if (!res.ok || !data?.blueprint) {
+    return {
+      summary: "Could not load that blueprint",
+      error: data?.error ?? `Printify catalog request failed (HTTP ${res.status}).`,
+    };
+  }
+  const variants = (data.blueprint.variants ?? []).filter((v) => v.available !== false);
+  if (!variants.length) {
+    return { summary: "No variants on that blueprint", error: "That blueprint has no available variants." };
+  }
+  const printArea = data.blueprint.print_areas?.[0]?.id ?? "front";
+  const title = String(args.title ?? "").trim() || design.name;
+
+  return {
+    summary: `Ready to create “${title}” on Printify at $${(price / 100).toFixed(2)}`,
+    confirmation: {
+      detail: `${variants.length} variants · $${(price / 100).toFixed(2)} each · blueprint ${blueprintId} · provider ${printProviderId} · artwork: ${design.name}.`,
+      payload: {
+        designId: design.id,
+        designName: design.name,
+        title,
+        description: String(args.description ?? "").trim(),
+        blueprintId,
+        printProviderId,
+        price,
+        variantIds: variants.map((v) => v.id),
+        printArea,
+      },
+    },
+  };
+}
+
 export async function executeTool(name: string, args: Record<string, unknown>): Promise<ToolExecResult> {
   try {
     switch (name) {
@@ -199,6 +276,8 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
         return await draftListing(args);
       case "create_batch_job":
         return await proposeBatchJob(args);
+      case "create_printify_product":
+        return await proposePrintifyProduct(args);
       default:
         return { summary: `Unknown tool “${name}”`, error: `No tool named ${name}.` };
     }
@@ -237,6 +316,105 @@ export async function confirmBatchJob(payload: Record<string, unknown>): Promise
     return {
       summary: "Batch job failed to start",
       error: error instanceof Error ? error.message : "Batch job failed.",
+    };
+  }
+}
+
+interface CreateProductResponse {
+  configured?: boolean;
+  error?: string;
+  product?: { id: string; title?: string; status?: string };
+}
+
+/**
+ * Runs a confirmed Printify proposal for real: uploads the artwork and creates
+ * the product. Writes a `ProductDraft` so the creation is visible on the
+ * Products page. The user's confirm click is what triggers this — the agent
+ * never creates a product on its own.
+ */
+export async function confirmPrintifyProduct(payload: Record<string, unknown>): Promise<ToolExecResult> {
+  const designId = String(payload.designId ?? "");
+  const design = designId ? await db.designs.get(designId) : undefined;
+  const blueprintId = Math.trunc(Number(payload.blueprintId)) || 0;
+  const printProviderId = Math.trunc(Number(payload.printProviderId)) || 0;
+  const price = Math.round(Number(payload.price)) || 0;
+  const variantIds = Array.isArray(payload.variantIds) ? payload.variantIds.map(Number) : [];
+  const title = String(payload.title ?? "").trim() || design?.name || "Untitled product";
+  const description = String(payload.description ?? "").trim();
+  const printArea = String(payload.printArea ?? "front");
+
+  if (!design) return { summary: "Design not found", error: "That design is no longer in this browser." };
+  if (!blueprintId || !printProviderId || !(price > 0) || !variantIds.length) {
+    return { summary: "Missing product details", error: "The proposal was incomplete; try again." };
+  }
+
+  try {
+    const assetId = design.originalAssetId;
+    const blob = assetId ? await getAssetBlob(assetId) : undefined;
+    let artwork: { base64: string; filename: string; printAreaId: string } | undefined;
+    if (blob) {
+      artwork = {
+        base64: await artworkToBase64(blob, MAX_ARTWORK_BYTES),
+        filename: `${design.name || "artwork"}.png`,
+        printAreaId: printArea,
+      };
+    }
+
+    const res = await authedFetch("/api/printify/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirm: true,
+        title,
+        description: description || undefined,
+        blueprintId,
+        printProviderId,
+        price,
+        variants: { [String(blueprintId)]: variantIds },
+        artwork,
+      }),
+    });
+    const data = (await res.json().catch(() => null)) as CreateProductResponse | null;
+    if (!res.ok || !data?.product?.id) {
+      return {
+        summary: "Printify rejected the product",
+        error: data?.error ?? `Printify request failed (HTTP ${res.status}).`,
+      };
+    }
+
+    const now = Date.now();
+    const draft: ProductDraft = {
+      id: uid(),
+      name: title,
+      designId: design.id,
+      designAssetId: assetId ?? "",
+      blueprintId,
+      printProviderId,
+      description: description || undefined,
+      priceCents: price,
+      variantSelection: { [String(blueprintId)]: variantIds },
+      printAreaConfig: {},
+      status: "created-remote",
+      remoteProductId: data.product.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.productDrafts.put(draft);
+    await logActivity("product.create", `Created Printify product “${title}”`, {
+      productId: data.product.id,
+      blueprintId,
+      printProviderId,
+      price,
+    });
+
+    return {
+      summary: `Created Printify product “${title}” (${data.product.id})`,
+      result: { productId: data.product.id, title, blueprintId, printProviderId, price, variants: variantIds.length },
+    };
+  } catch (error) {
+    return {
+      summary: "Printify product creation failed",
+      error: error instanceof Error ? error.message : "Printify product creation failed.",
     };
   }
 }

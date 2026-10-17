@@ -9,27 +9,33 @@ interface CreateProductBody {
   title: string;
   description?: string;
   blueprintId: number;
+  /** Print provider that fulfils the blueprint. Required by Printify. */
   printProviderId?: number;
   variants: Record<string, number[]>;
+  /** Price in cents applied to every selected variant. */
+  price?: number;
+  /** Optional per-variant price overrides, in cents. */
+  prices?: Record<string, number>;
   printAreas?: Record<string, string>;
   /** Base64 artwork to upload and attach to the print area. */
   artwork?: { base64: string; filename: string; printAreaId: string };
 }
 
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/**
+ * Keep well under the Workers memory ceiling. A 25 MB base64 body plus its
+ * decoded buffer can exceed the 128 MB limit; the client downscales artwork to
+ * stay under this cap before uploading.
+ */
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /**
- * Decodes base64 without `Buffer`, which does not exist in the Workers
- * runtime. `atob` is available in Workers and in every browser. Used only to
- * enforce the upload size limit before handing the base64 to Printify.
+ * Estimates decoded byte length from a base64 string without allocating a
+ * buffer. `Buffer` does not exist in the Workers runtime, and decoding 8 MB just
+ * to measure it would double the peak memory for no reason.
  */
-function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+function base64Bytes(base64: string): number {
+  const clean = base64.replace(/^data:[^,]+,/, "").replace(/\s+/g, "").replace(/=+$/, "");
+  return Math.floor((clean.length * 3) / 4);
 }
 
 export const prerender = false;
@@ -70,21 +76,42 @@ export const POST: APIRoute = async ({ request }) => {
   if (!body.variants || Object.keys(body.variants).length === 0) {
     return json({ error: "At least one variant (size/color) must be selected" }, 400);
   }
+  if (!body.printProviderId) {
+    return json(
+      { error: "A print provider must be selected — Printify requires print_provider_id." },
+      400,
+    );
+  }
+
+  const variantIds = Object.values(body.variants).flat();
+  if (variantIds.length === 0) {
+    return json({ error: "Select at least one size/color variant" }, 400);
+  }
+  const basePrice = typeof body.price === "number" ? body.price : undefined;
+  const prices: Record<number, number> = {};
+  for (const id of variantIds) {
+    prices[id] = Math.round(body.prices?.[id] ?? basePrice ?? 0);
+  }
+  if (variantIds.some((id) => !(prices[id] > 0))) {
+    return json(
+      { error: "Set a price (in cents) — Printify requires a price for every selected variant." },
+      400,
+    );
+  }
 
   try {
-    let assetId: number | undefined;
+    let assetId: string | undefined;
     if (body.artwork) {
-      const bytes = base64ToBytes(body.artwork.base64);
-      if (bytes.byteLength > MAX_UPLOAD_BYTES) {
-        return json({ error: "Artwork exceeds the 25 MB upload limit" }, 413);
+      if (base64Bytes(body.artwork.base64) > MAX_UPLOAD_BYTES) {
+        return json({ error: "Artwork exceeds the 8 MB upload limit after processing" }, 413);
       }
       const uploaded = await client.uploadImage(body.artwork.base64, body.artwork.filename);
-      assetId = uploaded.id;
+      assetId = String(uploaded.id);
     }
 
     const printAreas = { ...(body.printAreas ?? {}) };
     if (assetId && body.artwork?.printAreaId) {
-      printAreas[body.artwork.printAreaId] = String(assetId);
+      printAreas[body.artwork.printAreaId] = assetId;
     }
 
     const product = await client.createProduct({
@@ -93,8 +120,8 @@ export const POST: APIRoute = async ({ request }) => {
       blueprintId: body.blueprintId,
       printProviderId: body.printProviderId,
       variants: body.variants,
+      prices,
       printAreas: Object.keys(printAreas).length > 0 ? printAreas : undefined,
-      assets: assetId ? [{ id: assetId, type: "default" }] : undefined,
     });
 
     return json({ product });

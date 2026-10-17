@@ -6,6 +6,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db/schema";
 import { designMainAssetId, getAssetBlob, logActivity, uid } from "@/lib/db/repo";
 import { authedFetch } from "@/lib/client/integrations";
+import { artworkToBase64, MAX_ARTWORK_BYTES } from "@/lib/client/artwork";
 import { Link } from "@/lib/client/nav";
 import type { Design, ProductDraft } from "@/types/domain";
 import { PageHeader } from "@/components/layout/page-header";
@@ -234,6 +235,7 @@ export function ProductBuilderPage() {
                         </div>
                         <div className="text-[11px] text-ink-subtle">
                           {d.blueprintId ? `blueprint ${d.blueprintId}` : "no blueprint selected"} ·{" "}
+                          {d.priceCents ? `$${(d.priceCents / 100).toFixed(2)} · ` : ""}
                           {Object.keys(d.variantSelection).length} variant groups · updated{" "}
                           {formatDateTime(d.updatedAt)}
                         </div>
@@ -315,10 +317,15 @@ function DraftEditor({
   onSave: (d: ProductDraft) => Promise<void>;
 }) {
   const [name, setName] = React.useState(draft.name);
-  const [description, setDescription] = React.useState("");
+  const [description, setDescription] = React.useState(draft.description ?? "");
+  const [priceInput, setPriceInput] = React.useState(
+    draft.priceCents ? String(draft.priceCents / 100) : "19.99",
+  );
   const [blueprints, setBlueprints] = React.useState<Blueprint[]>([]);
   const [detail, setDetail] = React.useState<BlueprintDetail | null>(null);
   const [blueprintId, setBlueprintId] = React.useState<number | null>(draft.blueprintId ?? null);
+  const [providers, setProviders] = React.useState<Array<{ id: number; title: string }>>([]);
+  const [printProviderId, setPrintProviderId] = React.useState<number | null>(draft.printProviderId ?? null);
   const [printArea, setPrintArea] = React.useState<string>("front");
   const [selectedVariants, setSelectedVariants] = React.useState<Record<number, boolean>>({});
   const [sizeOptions, setSizeOptions] = React.useState<number[]>([]);
@@ -359,8 +366,25 @@ function DraftEditor({
     })();
   }, [blueprintId]);
 
+  // Print providers are required by Printify, so load them for the blueprint.
+  React.useEffect(() => {
+    if (!blueprintId || !catalogConfigured) return;
+    (async () => {
+      const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&providers=1`);
+      const data = await res.json();
+      const list: Array<{ id: number; title: string }> = Array.isArray(data.providers) ? data.providers : [];
+      setProviders(list);
+      setPrintProviderId((current) => current ?? list[0]?.id ?? null);
+    })();
+  }, [blueprintId, catalogConfigured]);
+
   const createRemote = async () => {
-    if (!blueprintId || !detail) return;
+    if (!blueprintId || !detail || !printProviderId) return;
+    const priceCents = Math.round(Number(priceInput) * 100);
+    if (!(priceCents > 0)) {
+      setApiError("Enter a price greater than zero before creating the product.");
+      return;
+    }
     setCreating(true);
     setApiError(null);
     try {
@@ -368,13 +392,8 @@ function DraftEditor({
       const blob = await getAssetBlob(draft.designAssetId);
       let artwork: { base64: string; filename: string; printAreaId: string } | undefined;
       if (blob && design) {
-        const buf = new Uint8Array(await blob.arrayBuffer());
-        let binary = "";
-        const chunk = 0x8000;
-        for (let i = 0; i < buf.length; i += chunk) {
-          binary += String.fromCharCode(...buf.subarray(i, i + chunk));
-        }
-        artwork = { base64: btoa(binary), filename: `${design.name}.png`, printAreaId: printArea };
+        const base64 = await artworkToBase64(blob, MAX_ARTWORK_BYTES);
+        artwork = { base64, filename: `${design.name}.png`, printAreaId: printArea };
       }
       const res = await authedFetch("/api/printify/products", {
         method: "POST",
@@ -384,7 +403,9 @@ function DraftEditor({
           title: name,
           description,
           blueprintId,
+          printProviderId,
           variants: { [String(blueprintId)]: Object.keys(selectedVariants).map(Number) },
+          price: priceCents,
           printAreas: printArea ? { [printArea]: "pending" } : undefined,
           artwork,
         }),
@@ -399,6 +420,9 @@ function DraftEditor({
         ...draft,
         name,
         blueprintId,
+        printProviderId,
+        description,
+        priceCents,
         variantSelection: Object.fromEntries(Object.entries(selectedVariants).map(([k, v]) => [k, v])),
         status: "created-remote",
         remoteProductId: data.product?.id,
@@ -438,6 +462,19 @@ function DraftEditor({
             <Label>Description</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[70px]" />
           </div>
+          <div className="space-y-1.5">
+            <Label>Price (USD)</Label>
+            <Input
+              type="number"
+              min="0.5"
+              step="0.01"
+              value={priceInput}
+              onChange={(e) => setPriceInput(e.target.value)}
+            />
+            <p className="text-[11px] text-ink-subtle">
+              Applied to every selected variant. Printify requires a price per variant.
+            </p>
+          </div>
 
           {!catalogConfigured ? (
             <div className="rounded-md bg-surface-muted px-3 py-2.5 text-[12px] leading-relaxed text-ink-muted">
@@ -461,6 +498,29 @@ function DraftEditor({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Print provider</Label>
+                <Select
+                  value={printProviderId ? String(printProviderId) : "none"}
+                  onValueChange={(v) => setPrintProviderId(v === "none" ? null : Number(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={providers.length ? "Choose a print provider" : "Loading providers…"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {providers.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-ink-subtle">
+                  Printify requires a print provider for every product.
+                </p>
               </div>
 
               {apiError && (
@@ -521,12 +581,33 @@ function DraftEditor({
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button variant="secondary" size="sm" onClick={() => onSave({ ...draft, name })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              onSave({
+                ...draft,
+                name,
+                description,
+                priceCents: Math.round(Number(priceInput) * 100) || undefined,
+                blueprintId: blueprintId ?? undefined,
+                printProviderId: printProviderId ?? undefined,
+              })
+            }
+          >
             Save locally
           </Button>
           <Button
             size="sm"
-            disabled={!catalogConfigured || !blueprintId || !detail || selectedCount === 0 || creating}
+            disabled={
+              !catalogConfigured ||
+              !blueprintId ||
+              !detail ||
+              !printProviderId ||
+              !(Number(priceInput) > 0) ||
+              selectedCount === 0 ||
+              creating
+            }
             onClick={createRemote}
           >
             {creating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}

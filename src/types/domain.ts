@@ -281,6 +281,10 @@ export interface ProductDraft {
   /** Printify blueprint id, once selected. */
   blueprintId?: number;
   printProviderId?: number;
+  /** Product description carried into the Printify product. */
+  description?: string;
+  /** Price in cents applied to every enabled variant (Printify requires one). */
+  priceCents?: number;
   variantSelection: Record<string, unknown>;
   printAreaConfig: Record<string, unknown>;
   status: ProductDraftStatus;

@@ -72,14 +72,18 @@ export interface PrintifyProductCreated {
 
 export interface CreatePrintifyProductInput {
   title: string;
-  description: string;
+  description?: string;
   blueprintId: number;
-  printProviderId?: number;
-  /** variant ids grouped by variant group (the app's own shape) */
+  /** Print provider that fulfils the blueprint. Required by Printify. */
+  printProviderId: number;
+  /** Variant ids grouped by variant group (the app's own shape). */
   variants: Record<string, number[]>;
-  /** print area id → uploaded asset id */
+  /** Variant id → price in cents. Required by Printify for every enabled variant. */
+  prices: Record<number, number>;
+  /** Print area position → uploaded image id. */
   printAreas?: Record<string, string>;
-  assets?: Array<{ id: number; type?: string }>;
+  /** Optional storefront images (Printify also generates mockups automatically). */
+  images?: Array<{ src: string; position?: string; is_default?: boolean }>;
   shopId?: number;
 }
 
@@ -171,8 +175,8 @@ export function createPrintifyClient(explicitKey?: string) {
     },
 
     /** POST /uploads/images.json — uploads base64 artwork, returns the asset id. */
-    uploadImage(base64: string, filename: string): Promise<{ id: number }> {
-      return request<{ id: number }>("/uploads/images.json", {
+    uploadImage(base64: string, filename: string): Promise<{ id: string }> {
+      return request<{ id: string }>("/uploads/images.json", {
         method: "POST",
         body: JSON.stringify({ file_name: filename, contents: base64 }),
       });
@@ -181,32 +185,49 @@ export function createPrintifyClient(explicitKey?: string) {
     resolveShopId,
 
     /**
-     * POST /shops/{shop_id}/products.json. The app's `variants` record and
-     * `print_areas` map are converted to Printify's documented array shapes.
+     * POST /shops/{shop_id}/products.json. Builds the documented payload:
+     * every enabled variant carries a `price` in cents, `print_provider_id` is
+     * required, and print-area image ids are the strings Printify returns from
+     * the upload endpoint (not numbers).
      */
     async createProduct(input: CreatePrintifyProductInput): Promise<PrintifyProductCreated> {
+      if (!input.printProviderId) {
+        throw new PrintifyError("A print provider is required to create a product", 400);
+      }
       const shopId = input.shopId ?? (await resolveShopId());
       const variantIds = Object.values(input.variants).flat();
+      if (variantIds.length === 0) {
+        throw new PrintifyError("At least one variant must be selected", 400);
+      }
+      const missingPrice = variantIds.filter((id) => !(input.prices[id] > 0));
+      if (missingPrice.length > 0) {
+        throw new PrintifyError(
+          "Every selected variant needs a price. Printify requires a price in cents per variant.",
+          400,
+        );
+      }
       const printAreas = Object.entries(input.printAreas ?? {})
-        .filter(([, assetId]) => assetId && assetId !== "pending")
-        .map(([position, assetId]) => ({
+        .filter(([, imageId]) => imageId && imageId !== "pending")
+        .map(([position, imageId]) => ({
           variant_ids: variantIds,
           placeholders: [
-            { position, images: [{ id: Number(assetId), x: 0.5, y: 0.5, scale: 1, angle: 0 }] },
+            { position, images: [{ id: String(imageId), x: 0.5, y: 0.5, scale: 1, angle: 0 }] },
           ],
         }));
 
+      const body: Record<string, unknown> = {
+        title: input.title,
+        description: input.description ?? "",
+        blueprint_id: input.blueprintId,
+        print_provider_id: input.printProviderId,
+        variants: variantIds.map((id) => ({ id, price: input.prices[id], is_enabled: true })),
+      };
+      if (printAreas.length > 0) body.print_areas = printAreas;
+      if (input.images?.length) body.images = input.images;
+
       return request<PrintifyProductCreated>(`/shops/${shopId}/products.json`, {
         method: "POST",
-        body: JSON.stringify({
-          title: input.title,
-          description: input.description,
-          blueprint_id: input.blueprintId,
-          print_provider_id: input.printProviderId,
-          variants: variantIds.map((id) => ({ id, is_enabled: true })),
-          print_areas: printAreas,
-          ...(input.assets ? { assets: input.assets } : {}),
-        }),
+        body: JSON.stringify(body),
       });
     },
 

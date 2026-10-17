@@ -89,6 +89,36 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: [],
     },
   },
+  {
+    name: "create_printify_product",
+    description:
+      "Propose a real Printify product from one of the user's designs. Requires a blueprint id (product type), a print provider id, and a price in cents. Ask the user for any missing value or send them to the Product Builder to choose it — never invent ids. Nothing is uploaded or created until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        design: {
+          type: "string",
+          description: "Name of the design to use as the artwork. Omit to use the first design.",
+        },
+        blueprintId: {
+          type: "number",
+          description: "Printify blueprint id for the product type (e.g. 6 for a t-shirt).",
+        },
+        printProviderId: {
+          type: "number",
+          description: "Printify print provider id for that blueprint.",
+        },
+        price: {
+          type: "number",
+          description: "Price in integer cents applied to every variant (e.g. 1999 for $19.99).",
+        },
+        title: { type: "string", description: "Optional product title. Defaults to the design name." },
+        description: { type: "string", description: "Optional product description." },
+      },
+      required: [],
+    },
+  },
 ];
 
 const BY_NAME = new Map(AGENT_TOOLS.map((t) => [t.name, t]));
@@ -125,4 +155,81 @@ export function parseToolArguments(raw: string | undefined): Record<string, unkn
   } catch {
     return {};
   }
+}
+
+// ---------------------------------------------------------------------------
+// Intent router (fallback)
+//
+// Some models — and many free ones — answer in prose without ever emitting a
+// tool call. This keyword router lets the client run the obvious tool anyway so
+// the agent still acts, instead of only talking. Order matters: action-like
+// intents are checked before the generic how-to intent.
+// ---------------------------------------------------------------------------
+
+export interface RoutedIntent {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+const INTENT_RULES: Array<{ name: string; patterns: RegExp[] }> = [
+  {
+    name: "create_printify_product",
+    patterns: [
+      /\bprintify\b[^.?!]*\b(product|listing|item)\b/i,
+      /\b(create|make|list|publish|send|upload)\b[^.?!]*\bprintify\b/i,
+      /\b(list|publish) (it|this|my design|the design)\b/i,
+    ],
+  },
+  {
+    name: "create_batch_job",
+    patterns: [
+      /\b(batch|bulk)\b/i,
+      /\bgenerate (all|every|the|my)\b/i,
+      /\bcombine (all|every|my)\b/i,
+      /\brender (all|every|my)\b/i,
+      /\bcreate (a )?(batch|job|jobs)\b/i,
+    ],
+  },
+  {
+    name: "draft_listing",
+    patterns: [
+      /\b(listing|titles?|descriptions?|tags?|etsy|seo|keyword)\b/i,
+      /\b(write|draft|brainstorm) (me )?(copy|listing)\b/i,
+    ],
+  },
+  {
+    name: "summarize_workspace",
+    patterns: [
+      /\b(how many|count my|overview of my|summar(y|ise|ize))\b/i,
+      /\bwhat('?s| is) in my (library|workspace|store)\b/i,
+      /\bmy (designs|mockups|library|workspace|exports|listings)\b/i,
+    ],
+  },
+  {
+    name: "explain_howto",
+    patterns: [
+      /\bhow (do|can|should|would) i\b/i,
+      /\bhow to\b/i,
+      /\bwhere (do|can) i\b/i,
+      /\bwalk me through\b/i,
+      /\bexplain how\b/i,
+      /\bguide me\b/i,
+    ],
+  },
+];
+
+/**
+ * Maps a user message to the tool that most obviously serves it, or null when
+ * nothing matches. Used only when the model itself requested no tool.
+ */
+export function routeIntent(text: string): RoutedIntent | null {
+  const clean = (text ?? "").trim();
+  if (!clean) return null;
+  for (const rule of INTENT_RULES) {
+    if (!rule.patterns.some((pattern) => pattern.test(clean))) continue;
+    if (rule.name === "explain_howto") return { name: rule.name, args: { topic: clean.slice(0, 200) } };
+    if (rule.name === "draft_listing") return { name: rule.name, args: { concept: clean.slice(0, 200) } };
+    return { name: rule.name, args: {} };
+  }
+  return null;
 }
