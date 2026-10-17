@@ -516,8 +516,9 @@ describe("tool executors", () => {
     });
     vi.unstubAllGlobals();
     expect(result.error).toBeUndefined();
-    expect(result.confirmation?.payload.variantIds).toHaveLength(100);
-    expect(result.confirmation?.payload.variantIds[99]).toBe(100);
+    const variantIds = result.confirmation?.payload.variantIds as number[];
+    expect(variantIds).toHaveLength(100);
+    expect(variantIds[99]).toBe(100);
     expect(result.confirmation?.detail).toContain("caps a product at 100 variants");
   });
 
