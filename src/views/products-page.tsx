@@ -355,6 +355,7 @@ function DraftEditor({
   const [areas, setAreas] = React.useState<PrintAreaOption[]>([]);
   const [printArea, setPrintArea] = React.useState<string>("front");
   const [selectedVariants, setSelectedVariants] = React.useState<Record<number, boolean>>({});
+  const [variantFilter, setVariantFilter] = React.useState("");
   const [sizeLabels, setSizeLabels] = React.useState<string[]>([]);
   const [colorLabels, setColorLabels] = React.useState<string[]>([]);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
@@ -532,11 +533,16 @@ function DraftEditor({
   };
 
   const selectedCount = Object.values(selectedVariants).filter(Boolean).length;
+  const selectableVariants = variants.filter((v) => v.available !== false);
+  const variantQuery = variantFilter.trim().toLowerCase();
+  const shownVariants = variantQuery
+    ? selectableVariants.filter((v) => v.title.toLowerCase().includes(variantQuery))
+    : selectableVariants;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] max-w-xl flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Product draft</DialogTitle>
           <DialogDescription>
             Stored locally. Creating a product on Printify uploads your artwork to Printify — you must
@@ -544,7 +550,7 @@ function DraftEditor({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="scroll-thin -mr-2 flex-1 space-y-3 overflow-y-auto pr-2">
           <div className="space-y-1.5">
             <Label>Product title</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -626,28 +632,53 @@ function DraftEditor({
                 <>
                   <Separator />
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Variants ({selectedCount} selected)</Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Variants ({selectedCount} of {selectableVariants.length})</Label>
                       <span className="text-[11px] text-ink-subtle">
                         {sizeLabels.length > 0 ? `${sizeLabels.length} sizes · ` : ""}
                         {colorLabels.length > 0 ? `${colorLabels.length} colors` : ""}
                       </span>
                     </div>
-                    <div className="scroll-thin flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                      {variants.map((v) => (
-                        <Button
-                          key={v.id}
-                          size="sm"
-                          variant={selectedVariants[v.id] ? "default" : "outline"}
-                          disabled={v.available === false}
-                          onClick={() =>
-                            setSelectedVariants((s) => ({ ...s, [v.id]: !s[v.id] }))
-                          }
-                        >
-                          {v.title}
-                        </Button>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={variantFilter}
+                        onChange={(e) => setVariantFilter(e.target.value)}
+                        placeholder="Filter variants (e.g. White / M)"
+                        className="h-8 text-[12px]"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setSelectedVariants(
+                            Object.fromEntries(selectableVariants.map((v) => [v.id, true])),
+                          )
+                        }
+                      >
+                        All
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setSelectedVariants({})}>
+                        None
+                      </Button>
                     </div>
+                    {shownVariants.length === 0 ? (
+                      <p className="text-[12px] text-ink-subtle">No variants match that filter.</p>
+                    ) : (
+                      <div className="scroll-thin flex max-h-56 flex-wrap gap-1.5 overflow-y-auto">
+                        {shownVariants.map((v) => (
+                          <Button
+                            key={v.id}
+                            size="sm"
+                            variant={selectedVariants[v.id] ? "default" : "outline"}
+                            onClick={() =>
+                              setSelectedVariants((s) => ({ ...s, [v.id]: !s[v.id] }))
+                            }
+                          >
+                            {v.title}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {areas.length > 0 && (
@@ -673,7 +704,7 @@ function DraftEditor({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border-subtle pt-3">
           <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
           <Button
             variant="secondary"

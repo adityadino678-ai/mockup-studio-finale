@@ -127,7 +127,11 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ product });
   } catch (error) {
     if (error instanceof PrintifyError) {
-      return json({ error: error.message, status: error.status }, 502);
+      const detail =
+        error.detail === undefined
+          ? undefined
+          : (typeof error.detail === "string" ? error.detail : JSON.stringify(error.detail)).slice(0, 400);
+      return json({ error: error.message, detail, status: error.status }, 502);
     }
     return json(
       { error: error instanceof Error ? error.message : "Unexpected error creating product" },

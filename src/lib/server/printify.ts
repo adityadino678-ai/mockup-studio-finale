@@ -98,11 +98,26 @@ export interface CreatePrintifyProductInput {
 }
 
 function extractError(data: unknown, status: number): string {
-  const candidate =
-    (data as { error?: { message?: string } })?.error?.message ??
-    (data as { message?: string })?.message ??
-    (data as { error?: string })?.error;
-  return typeof candidate === "string" && candidate ? candidate : `Printify request failed with HTTP ${status}`;
+  const root = (data ?? {}) as { error?: unknown; message?: string };
+  const raw = root.error;
+  const obj = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const nested = (typeof obj.errors === "object" && obj.errors !== null ? obj.errors : {}) as Record<
+    string,
+    unknown
+  >;
+  // Printify nests the useful text in `error.errors.reason` for some failures
+  // (e.g. an image its pipeline rejects) and only says "Operation failed." at
+  // the top level, so prefer the deepest specific message available.
+  const candidates = [
+    nested.reason,
+    nested.message,
+    obj.reason,
+    obj.message,
+    typeof raw === "string" ? raw : undefined,
+    root.message,
+  ];
+  const message = candidates.find((c): c is string => typeof c === "string" && c.trim().length > 0);
+  return message ?? `Printify request failed with HTTP ${status}`;
 }
 
 /**
@@ -115,10 +130,12 @@ export function createPrintifyClient(explicitKey?: string) {
   const configured = !!key;
 
   function authHeaders(): HeadersInit {
-    // Printify accepts the personal access token as a bearer token; the
-    // X-API-Key header is kept for older integrations. Sending both is harmless.
+    // Printify requires a User-Agent on every request (see API usage
+    // guidelines) and accepts the token as a bearer token. The X-API-Key header
+    // is kept for older integrations. Sending all three is harmless.
     return {
       "Content-Type": "application/json",
+      "User-Agent": "MockupStudio/0.2 (+https://mockup-studio.adityadino678.workers.dev)",
       Authorization: `Bearer ${key}`,
       "X-API-Key": key,
     };
