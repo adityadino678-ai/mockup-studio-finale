@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 82 unit tests
+npm run test          # 93 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -140,18 +140,30 @@ Both must pass. The production run has caught bugs the local run missed.
   models flagged as reasoning models. The floating `AssistantPanel` is now just a
   launcher for `/agent`.
 - **Agent tools (M2) are real, and only real.** `src/lib/ai/tools.ts` is the
-  isomorphic registry of four tools: `explain_howto`, `summarize_workspace`,
-  `draft_listing` (calls the existing `/api/ai/seo`), and `create_batch_job`.
-  `create_batch_job` is marked `confirm` and **writes nothing** until the user
-  clicks Create on the tool card; only then does `src/lib/client/tools.ts` call
-  `createBatchJob` + `runBatchJob` for real. Execution happens in the browser
-  against IndexedDB, so the honesty rule in the system prompt still holds: the
-  agent never claims an action the transcript does not show. The loop is
-  client-driven: the model's streamed `tool_calls` come back on the SSE
-  `tool_calls` frame, the browser runs each tool, replays assistant/tool messages,
-  and re-calls the endpoint (max 4 steps per turn). `toApiMessages` omits tool
-  calls that never got a result so the replayed history stays valid. Threads are
-  auto-titled by the active model via **`/api/ai/title`**.
+  isomorphic registry of five tools: `explain_howto`, `summarize_workspace`,
+  `draft_listing` (calls the existing `/api/ai/seo`), `create_batch_job`, and
+  `create_printify_product` (uploads artwork and creates a live Printify product
+  via `/api/printify/products`). Both writing tools are marked `confirm` and
+  **write nothing** until the user clicks Create on the tool card; only then does
+  `src/lib/client/tools.ts` run the real work (`confirmBatchJob` /
+  `confirmPrintifyProduct`). `create_printify_product` refuses to invent a
+  blueprint/provider id — it asks the user, or sends them to Product Builder.
+  Execution happens in the browser against IndexedDB, so the honesty rule in the
+  system prompt still holds: the agent never claims an action the transcript does
+  not show. The loop is client-driven: the model's streamed `tool_calls` come back
+  on the SSE `tool_calls` frame, the browser runs each tool, replays
+  assistant/tool messages, and re-calls the endpoint (max 4 steps per turn).
+  `toApiMessages` omits tool calls that never got a result so the replayed
+  history stays valid. Threads are auto-titled by the active model via
+  **`/api/ai/title`**.
+- **Agent reliability (M4).** Free/weak models often answer in prose and never
+  emit a tool call. `routeIntent()` in `src/lib/ai/tools.ts` is a keyword fallback
+  the client runs when the model requested no tool, so the agent still acts.
+  `src/lib/server/ai.ts` retries a fixable 400 once (`retryFix`: drops
+  `reasoning_effort`/`temperature`, renames `max_tokens`↔`max_completion_tokens`,
+  drops `tools`) and caps output (`1400` tokens; `3000` for reasoning models).
+  `?debug=1` on `/agent` opens a raw-SSE capture drawer
+  (`src/components/agent/debug-panel.tsx`) — use it to reproduce provider issues.
 - **Agent voice, steering, and the rail (M3).** `src/lib/client/speech.ts` wraps the
   Web Speech API with feature detection (nothing throws when unsupported); the
   composer shows a mic (dictation → draft) and a speaker toggle (read replies
@@ -161,14 +173,18 @@ Both must pass. The production run has caught bugs the local run missed.
   turn). The right-hand **`ArtifactRail`** reads IndexedDB live (batch jobs,
   exports, listing drafts, render count) and is a toggle in the header. The
   sessions rail is a drawer below `lg` and static above it; the artifact rail is
-  `xl` only. All four milestones are now shipped.
-- **Printify endpoints now use the documented paths** (`/v1/catalog/blueprints.json`,
-  `/v1/catalog/blueprints/{id}.json`, `/v1/catalog/blueprints/{id}/print_providers.json`,
-  `/v1/uploads/images.json`, `/v1/shops/{shop_id}/products.json`). Product creation
-  is still **not verified live** and has no price handling — treat it as a draft flow.
-- **The 25 MB base64 artwork upload in `api/printify/products.ts` exceeds the
-  Workers 128 MB memory limit.** Unreachable while no keys are set, but that cap
-  must come down before anyone enables Printify.
+  `xl` only. M1–M4 are now shipped.
+- **Printify product creation now sends every required field.** `POST /v1/shops/{shop_id}/products.json`
+  requires `blueprint_id`, `print_provider_id`, and an integer-cent `price` per
+  variant; artwork is uploaded first (`POST /v1/uploads/images.json`) and its id
+  (a **string**) is attached to the print area. The client sends all of these
+  (`src/lib/server/printify.ts`, `src/pages/api/printify/products.ts`), the
+  Product Builder collects a price and print provider, and artwork is downscaled
+  to fit an **8 MB** upload cap (base64 inflates ~33%). Creation is still **not
+  verified against a live shop** — review before publishing.
+- **The base64 artwork upload is capped at 8 MB.** A larger body plus its decoded
+  buffer can exceed the Workers 128 MB memory ceiling; the client downscales PNGs
+  until they fit (`src/lib/client/artwork.ts`).
 - **Data is per-origin.** A library created on `localhost:3000` does not appear on
   `workers.dev`. Export a ZIP from the local app first if the data matters.
 - **Cloudflare calls `workers.dev` "not business-critical"** — a custom domain is
