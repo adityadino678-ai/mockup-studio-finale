@@ -22,6 +22,7 @@ function fail(error: unknown) {
 
 /**
  * GET /api/printify/catalog?category=...            -> blueprint list
+ * GET /api/printify/catalog?q=tee&limit=25         -> blueprint list filtered by tokens
  * GET /api/printify/catalog?id=123                 -> blueprint detail (identity only)
  * GET /api/printify/catalog?id=123&providers=1     -> print providers for a blueprint
  * GET /api/printify/catalog?id=123&provider=29     -> variants (sizes/colors + print areas)
@@ -49,10 +50,23 @@ export const GET: APIRoute = async ({ url, request }) => {
   const category = url.searchParams.get("category") ?? undefined;
   const wantsProviders = url.searchParams.get("providers") === "1";
   const provider = url.searchParams.get("provider");
+  const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
+  const limit = Math.trunc(Number(url.searchParams.get("limit"))) || 0;
 
   try {
     if (!id) {
-      return json({ configured: true, blueprints: await client.listBlueprints(category) });
+      let blueprints = await client.listBlueprints(category);
+      if (q) {
+        // Every whitespace-separated token must appear somewhere in the row, so
+        // "unisex tee" narrows rather than widens. Keeps big result sets small.
+        const tokens = q.split(/\s+/).filter(Boolean).slice(0, 8);
+        blueprints = blueprints.filter((b) => {
+          const haystack = `${b.title} ${b.brand} ${b.model} ${b.category ?? ""}`.toLowerCase();
+          return tokens.every((token) => haystack.includes(token));
+        });
+      }
+      if (limit > 0) blueprints = blueprints.slice(0, limit);
+      return json({ configured: true, blueprints });
     }
     if (wantsProviders) {
       return json({ configured: true, ...(await client.listProviders(Number(id))) });

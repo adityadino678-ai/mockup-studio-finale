@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 95 unit tests
+npm run test          # 106 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -140,22 +140,32 @@ Both must pass. The production run has caught bugs the local run missed.
   models flagged as reasoning models. The floating `AssistantPanel` is now just a
   launcher for `/agent`.
 - **Agent tools (M2) are real, and only real.** `src/lib/ai/tools.ts` is the
-  isomorphic registry of five tools: `explain_howto`, `summarize_workspace`,
-  `draft_listing` (calls the existing `/api/ai/seo`), `create_batch_job`, and
-  `create_printify_product` (uploads artwork and creates a live Printify product
-  via `/api/printify/products`). Both writing tools are marked `confirm` and
-  **write nothing** until the user clicks Create on the tool card; only then does
-  `src/lib/client/tools.ts` run the real work (`confirmBatchJob` /
-  `confirmPrintifyProduct`). `create_printify_product` refuses to invent a
-  blueprint/provider id — it asks the user, or sends them to Product Builder.
-  Execution happens in the browser against IndexedDB, so the honesty rule in the
-  system prompt still holds: the agent never claims an action the transcript does
-  not show. The loop is client-driven: the model's streamed `tool_calls` come back
-  on the SSE `tool_calls` frame, the browser runs each tool, replays
-  assistant/tool messages, and re-calls the endpoint (max 4 steps per turn).
-  `toApiMessages` omits tool calls that never got a result so the replayed
-  history stays valid. Threads are auto-titled by the active model via
-  **`/api/ai/title`**.
+  isomorphic registry of twelve tools. Five are read-only: `explain_howto`,
+  `summarize_workspace`, `list_library` (designs/mockups by name), and
+  `browse_printify_catalog` (product types / print providers / variants),
+  plus `draft_listing` (calls the existing `/api/ai/seo`). Seven write:
+  `create_batch_job`, `create_printify_product`, `create_mockup_render`,
+  `save_placement`, `create_ink_variant`, `remove_background`, and
+  `save_chat_image`. Every writing tool is marked `confirm` and **writes nothing**
+  until the user clicks Create on the tool card; only then does
+  `src/lib/client/tools.ts` run the real work through `CONFIRM_TOOL_RUNNERS`
+  (`confirmBatchJob`, `confirmPrintifyProduct`, `confirmMockupRender`,
+  `confirmSavePlacement`, `confirmInkVariant`, `confirmRemoveBackground`,
+  `confirmSaveChatImage`). `create_printify_product` auto-resolves the blueprint
+  from a product type (catalog keyword search), then a print provider and up to
+  100 variants, but never invents ids — with no product type it asks. `create_ink_variant`
+  and `remove_background` reuse the editor's own canvas code
+  (`createInkVariantBlob`, `removeBackground`); `create_mockup_render` reuses the
+  batch engine's `renderComposition`, so a single render and a batch render are
+  pixel-identical. `save_chat_image` reads images the user attached in the
+  current conversation. Execution happens in the browser against IndexedDB, so
+  the honesty rule in the system prompt still holds: the agent never claims an
+  action the transcript does not show. The loop is client-driven: the model's
+  streamed `tool_calls` come back on the SSE `tool_calls` frame, the browser runs
+  each tool, replays assistant/tool messages, and re-calls the endpoint (max 6
+  steps per turn). `toApiMessages` omits tool calls that never got a result so
+  the replayed history stays valid. Threads are auto-titled by the active model
+  via **`/api/ai/title`**.
 - **Agent reliability (M4).** Free/weak models often answer in prose and never
   emit a tool call. `routeIntent()` in `src/lib/ai/tools.ts` is a keyword fallback
   the client runs when the model requested no tool, so the agent still acts.

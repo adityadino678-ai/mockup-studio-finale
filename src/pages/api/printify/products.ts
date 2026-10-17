@@ -8,6 +8,8 @@ interface CreateProductBody {
   confirm: boolean;
   title: string;
   description?: string;
+  /** Search/listing tags for the product. */
+  tags?: string[];
   blueprintId: number;
   /** Print provider that fulfils the blueprint. Required by Printify. */
   printProviderId?: number;
@@ -30,6 +32,22 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /** Printify rejects a product with more than this many enabled variants. */
 const MAX_VARIANTS = 100;
+
+/** Trims and dedupes tags; drops empties and anything past Printify's limit. */
+function sanitizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of value) {
+    const tag = String(raw).trim().slice(0, 255);
+    const key = tag.toLowerCase();
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= 13) break;
+  }
+  return out;
+}
 
 /**
  * Estimates decoded byte length from a base64 string without allocating a
@@ -128,6 +146,7 @@ export const POST: APIRoute = async ({ request }) => {
     const product = await client.createProduct({
       title: body.title.trim(),
       description: body.description ?? "",
+      tags: sanitizeTags(body.tags),
       blueprintId: body.blueprintId,
       printProviderId: body.printProviderId,
       variants: body.variants,

@@ -33,7 +33,7 @@ import {
   toApiMessages,
   touchConversation,
 } from "@/lib/client/chat";
-import { confirmBatchJob, confirmPrintifyProduct, executeTool } from "@/lib/client/tools";
+import { CONFIRM_TOOL_RUNNERS, executeTool } from "@/lib/client/tools";
 import { AGENT_TOOL_NAMES, parseToolArguments, routeIntent } from "@/lib/ai/tools";
 import {
   favoriteKey,
@@ -62,7 +62,7 @@ import { DebugPanel, type DebugEntry } from "@/components/agent/debug-panel";
 import type { ChatMessage, ImagePartData, MessagePart, ToolCallData } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
-const MAX_TURN_STEPS = 4;
+const MAX_TURN_STEPS = 6;
 
 interface StreamState {
   text: string;
@@ -70,6 +70,20 @@ interface StreamState {
 }
 
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
+/** Images the user attached on the latest user turn of a conversation. */
+async function attachmentsFromConversation(conversationId: string): Promise<ImagePartData[]> {
+  const stored = await db.messages
+    .where("conversationId")
+    .equals(conversationId)
+    .sortBy("createdAt");
+  const lastUser = [...stored].reverse().find((m) => m.role === "user");
+  return (
+    lastUser?.parts
+      .filter((p): p is { type: "image"; image: ImagePartData } => p.type === "image")
+      .map((p) => p.image) ?? []
+  );
+}
 
 function readAsDataUrl(file: File): Promise<ImagePartData> {
   return new Promise((resolve, reject) => {
@@ -289,6 +303,7 @@ export function AgentPage() {
       let nudged = false;
       let nudge: string | undefined;
       let lastUserText = "";
+      let turnAttachments: ImagePartData[] = [];
       if (userInitiated) {
         const seedMessages = await db.messages
           .where("conversationId")
@@ -301,6 +316,10 @@ export function AgentPage() {
             .map((p) => p.text)
             .join(" ")
             .trim() ?? "";
+        turnAttachments =
+          lastUser?.parts
+            .filter((p): p is { type: "image"; image: ImagePartData } => p.type === "image")
+            .map((p) => p.image) ?? [];
       }
       if (debug) logDebug("turn", `turn · ${provider} · ${model} · tools: ${toolNames?.length ?? 0}`);
 
@@ -382,7 +401,7 @@ export function AgentPage() {
           let awaitingConfirm = false;
           for (const call of callsToRun) {
             const args = parseToolArguments(call.function.arguments);
-            const exec = await executeTool(call.function.name, args);
+            const exec = await executeTool(call.function.name, args, { attachments: turnAttachments });
             if (exec.confirmation) {
               awaitingConfirm = true;
               toolParts.push({
@@ -574,14 +593,18 @@ export function AgentPage() {
   const onConfirmTool = React.useCallback(
     async (messageId: string, call: ToolCallData) => {
       if (!activeId || busyRef.current) return;
-      const isPrintify = call.name === "create_printify_product";
-      await patchToolCall(messageId, call.id, {
-        status: "running",
-        summary: isPrintify ? "Creating the Printify product…" : "Creating the batch job…",
-      });
-      const exec = isPrintify
-        ? await confirmPrintifyProduct(call.args)
-        : await confirmBatchJob(call.args);
+      const runner = CONFIRM_TOOL_RUNNERS[call.name];
+      if (!runner) {
+        await patchToolCall(messageId, call.id, {
+          status: "error",
+          summary: "Nothing to confirm",
+          error: `No confirmation handler for "${call.name}".`,
+        });
+        return;
+      }
+      await patchToolCall(messageId, call.id, { status: "running", summary: "Working…" });
+      const ctx = { attachments: await attachmentsFromConversation(activeId) };
+      const exec = await runner(call.args, ctx);
       await patchToolCall(messageId, call.id, {
         status: exec.error ? "error" : "done",
         summary: exec.summary,
@@ -598,10 +621,7 @@ export function AgentPage() {
       await patchToolCall(messageId, call.id, {
         status: "error",
         summary: "Cancelled before anything was created",
-        error:
-          call.name === "create_printify_product"
-            ? "The user cancelled this Printify product."
-            : "The user cancelled this batch job.",
+        error: `The user cancelled this ${call.name.replace(/_/g, " ")}.`,
       });
     },
     [],

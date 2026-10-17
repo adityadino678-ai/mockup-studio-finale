@@ -89,6 +89,8 @@ export interface PrintifyProductCreated {
 export interface CreatePrintifyProductInput {
   title: string;
   description?: string;
+  /** Search/listing tags for the product. */
+  tags?: string[];
   blueprintId: number;
   /** Print provider that fulfils the blueprint. Required by Printify. */
   printProviderId: number;
@@ -296,6 +298,7 @@ export function createPrintifyClient(explicitKey?: string) {
         variants: variantIds.map((id) => ({ id, price: input.prices[id], is_enabled: true })),
       };
       if (printAreas.length > 0) body.print_areas = printAreas;
+      if (input.tags?.length) body.tags = input.tags;
       if (input.images?.length) body.images = input.images;
 
       return request<PrintifyProductCreated>(`/shops/${shopId}/products.json`, {

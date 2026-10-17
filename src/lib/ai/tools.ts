@@ -45,6 +45,37 @@ export const AGENT_TOOLS: AgentTool[] = [
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "list_library",
+    description:
+      "List the user's designs or mockups by name (id + name), optionally filtered. Read-only. Use it to find the exact name of a design or mockup before an action.",
+    parameters: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["designs", "mockups"],
+          description: "Which library to list. Defaults to designs.",
+        },
+        query: { type: "string", description: "Optional case-insensitive filter on the name." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "browse_printify_catalog",
+    description:
+      "Look up the live Printify catalog. Read-only. Pass query (e.g. \"t-shirt\") to search product types, blueprintId to list its print providers, or blueprintId + printProviderId to list variants (sizes/colors + print areas). Use it when the user wants to see options before creating a product.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Product-type keywords, e.g. \"t-shirt\" or \"mug\"." },
+        blueprintId: { type: "number", description: "A Printify blueprint id to inspect." },
+        printProviderId: { type: "number", description: "A print provider id for that blueprint." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "draft_listing",
     description:
       "Draft Etsy listing copy (keyword ideas, title drafts, description, tags) for a print-on-demand concept. Returns editable ideas; fabricates no search volume or sales data.",
@@ -90,9 +121,124 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
   },
   {
+    name: "create_mockup_render",
+    description:
+      "Make a single mockup: composite one design onto one mockup photo using its saved placement (or a default). This prepares the render — nothing is created until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        design: { type: "string", description: "Design name to place. Omit to use the first design." },
+        mockup: { type: "string", description: "Mockup name to use. Omit to use the first mockup." },
+        ink: {
+          type: "string",
+          enum: ["main", "white", "black"],
+          description: "Which artwork variant to place. Defaults to main.",
+        },
+        behindMockup: {
+          type: "boolean",
+          description: "Draw the design behind a transparent mockup PNG. Defaults to the saved setting.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "save_placement",
+    description:
+      "Save where a design sits on a mockup (its transform), so future renders reuse it. Optionally also save it as a reusable placement template. Nothing is written until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        design: { type: "string", description: "Design name. Omit to use the first design." },
+        mockup: { type: "string", description: "Mockup name. Omit to use the first mockup." },
+        transform: {
+          type: "object",
+          description:
+            "Placement as fractions: { x, y, scale, rotation, flipX, flipY, opacity, stretch }. x/y/scale are 0..1 fractions of the mockup.",
+          properties: {
+            x: { type: "number" },
+            y: { type: "number" },
+            scale: { type: "number" },
+            rotation: { type: "number" },
+            flipX: { type: "boolean" },
+            flipY: { type: "boolean" },
+            opacity: { type: "number" },
+            stretch: { type: "number" },
+          },
+        },
+        asTemplate: { type: "boolean", description: "Also save this placement as a reusable template." },
+        templateName: { type: "string", description: "Name for the template when asTemplate is true." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "create_ink_variant",
+    description:
+      "Generate a white-ink or black-ink version of a design (alpha-preserving recolor). The original is kept. Nothing is created until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        design: { type: "string", description: "Design name. Omit to use the first design." },
+        ink: {
+          type: "string",
+          enum: ["white", "black"],
+          description: "Which ink color to generate. Defaults to white.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "remove_background",
+    description:
+      "Remove the background from a design. Uses the flood-key engine for solid backgrounds (default) or AI segmentation for photos/complex images. The original is kept. Nothing is created until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        design: { type: "string", description: "Design name. Omit to use the first design." },
+        engine: {
+          type: "string",
+          enum: ["flood-key", "ai-segmenter"],
+          description:
+            "flood-key (instant, solid backgrounds) or ai-segmenter (photos; first run downloads ~25 MB).",
+        },
+        tolerance: { type: "number", description: "Flood-key color tolerance (5–120). Defaults to the app default." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "save_chat_image",
+    description:
+      "Save an image the user attached in this chat as a new design or mockup in their local library. Nothing is written until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["design", "mockup"],
+          description: "Save it as a design (artwork) or a mockup (product photo). Defaults to design.",
+        },
+        name: { type: "string", description: "Optional name. Defaults to the attached file name." },
+        index: { type: "number", description: "Which attached image to use (0-based). Defaults to the first." },
+        category: {
+          type: "string",
+          description: "Mockup category when kind is mockup (tshirt, hoodie, mug, poster, tote, sticker, other).",
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: "create_printify_product",
     description:
-      "Propose a real Printify product from one of the user's designs. Requires a blueprint id (product type), a print provider id, and a price in cents. Ask the user for any missing value or send them to the Product Builder to choose it — never invent ids. Nothing is uploaded or created until the user confirms.",
+      "Create a real Printify product from one of the user's designs. Give a productType (e.g. \"t-shirt\", \"hoodie\", \"mug\") and it finds the blueprint, print provider and variants itself. Optionally pass blueprintId/printProviderId, a price, tags, and variant filters for control. Nothing is uploaded or created until the user confirms.",
     confirm: true,
     parameters: {
       type: "object",
@@ -101,17 +247,48 @@ export const AGENT_TOOLS: AgentTool[] = [
           type: "string",
           description: "Name of the design to use as the artwork. Omit to use the first design.",
         },
+        productType: {
+          type: "string",
+          description: "Product type to list, e.g. \"t-shirt\", \"hoodie\", \"mug\", \"poster\". Used to resolve the blueprint when blueprintId is omitted.",
+        },
         blueprintId: {
           type: "number",
-          description: "Printify blueprint id for the product type (e.g. 6 for a t-shirt).",
+          description: "Optional explicit Printify blueprint id (overrides productType resolution).",
         },
         printProviderId: {
           type: "number",
-          description: "Printify print provider id for that blueprint.",
+          description: "Optional explicit print provider id. Omit to let the agent pick one that has variants.",
         },
         price: {
           type: "number",
-          description: "Price in integer cents applied to every variant (e.g. 1999 for $19.99).",
+          description: "Price in integer cents for every variant (e.g. 1999 for $19.99). Defaults to a standard price when omitted.",
+        },
+        prices: {
+          type: "object",
+          description: "Optional per-variant price overrides in cents, keyed by variant id.",
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Listing tags for the product.",
+        },
+        variantFilters: {
+          type: "object",
+          description:
+            "Optional subset selection, e.g. { colors: [\"Black\",\"White\"], sizes: [\"M\",\"L\"] }. Omit to enable the first 100 available variants.",
+          properties: {
+            colors: { type: "array", items: { type: "string" } },
+            sizes: { type: "array", items: { type: "string" } },
+          },
+        },
+        ink: {
+          type: "string",
+          enum: ["main", "white", "black"],
+          description: "Which artwork variant to upload. Defaults to main.",
+        },
+        printArea: {
+          type: "string",
+          description: "Print area position to attach the artwork to (e.g. front). Defaults to the first available.",
         },
         title: { type: "string", description: "Optional product title. Defaults to the design name." },
         description: { type: "string", description: "Optional product description." },
@@ -191,6 +368,47 @@ const INTENT_RULES: Array<{ name: string; patterns: RegExp[] }> = [
     ],
   },
   {
+    name: "create_mockup_render",
+    patterns: [
+      /(^|[.!?]\s*)(make|create|render|put|compose|place)\b[^.?!]*\bmockups?\b/i,
+      /(^|[.!?]\s*)(make|render|put|place)\b[^.?!]*\bon (the )?(mockup|shirt|tee|hoodie|mug|poster|tote)\b/i,
+    ],
+  },
+  {
+    name: "create_ink_variant",
+    patterns: [
+      /(^|[.!?]\s*)(make|create|generate|add|convert)\b[^.?!]*\b(white|black)[ -]?ink\b/i,
+      /(^|[.!?]\s*)\b(white|black)[ -]ink (variant|version)\b/i,
+    ],
+  },
+  {
+    name: "remove_background",
+    patterns: [
+      /(^|[.!?]\s*)(remove|delete|cut out|erase)\b[^.?!]*\b(background|bg)\b/i,
+      /(^|[.!?]\s*)\bcut ?out\b/i,
+    ],
+  },
+  {
+    name: "save_chat_image",
+    patterns: [
+      /(^|[.!?]\s*)(save|use|add)\b[^.?!]*\b(this|the|attached|my)\b[^.?!]*\b(image|picture|photo|attachment)\b/i,
+    ],
+  },
+  {
+    name: "save_placement",
+    patterns: [/(^|[.!?]\s*)(save|set|remember)\b[^.?!]*\bplacement\b/i],
+  },
+  {
+    name: "browse_printify_catalog",
+    patterns: [
+      /\b(browse|show|search|find|what)\b[^.?!]*\b(printify|catalog|blueprint|product type|print provider)s?\b/i,
+    ],
+  },
+  {
+    name: "list_library",
+    patterns: [/(^|[.!?]\s*)(list|show)\b[^.?!]*\b(designs?|mockups?)\b/i],
+  },
+  {
     name: "draft_listing",
     patterns: [
       /\b(listing|titles?|descriptions?|tags?|etsy|seo|keyword)\b/i,
@@ -218,6 +436,42 @@ const INTENT_RULES: Array<{ name: string; patterns: RegExp[] }> = [
   },
 ];
 
+/** Product words the router recognises so a fallback listing has a real type. */
+const PRODUCT_WORDS = [
+  "t-shirt",
+  "tshirt",
+  "tee shirt",
+  "tee",
+  "shirt",
+  "hoodie",
+  "sweatshirt",
+  "mug",
+  "poster",
+  "tote",
+  "bag",
+  "sticker",
+  "hat",
+  "cap",
+  "leggings",
+  "phone case",
+  "notebook",
+  "blanket",
+  "pillow",
+  "canvas",
+];
+
+function detectProductType(text: string): string {
+  const lower = text.toLowerCase();
+  return PRODUCT_WORDS.find((word) => lower.includes(word)) ?? "";
+}
+
+function detectPriceCents(text: string): number | undefined {
+  const match = text.match(/\$\s?(\d+(?:\.\d{1,2})?)/);
+  if (!match) return undefined;
+  const cents = Math.round(Number(match[1]) * 100);
+  return cents > 0 ? cents : undefined;
+}
+
 /**
  * Maps a user message to the tool that most obviously serves it, or null when
  * nothing matches. Used only when the model itself requested no tool.
@@ -227,9 +481,33 @@ export function routeIntent(text: string): RoutedIntent | null {
   if (!clean) return null;
   for (const rule of INTENT_RULES) {
     if (!rule.patterns.some((pattern) => pattern.test(clean))) continue;
-    if (rule.name === "explain_howto") return { name: rule.name, args: { topic: clean.slice(0, 200) } };
-    if (rule.name === "draft_listing") return { name: rule.name, args: { concept: clean.slice(0, 200) } };
-    return { name: rule.name, args: {} };
+    const lower = clean.toLowerCase();
+    switch (rule.name) {
+      case "explain_howto":
+        return { name: rule.name, args: { topic: clean.slice(0, 200) } };
+      case "draft_listing":
+        return { name: rule.name, args: { concept: clean.slice(0, 200) } };
+      case "create_printify_product": {
+        const args: Record<string, unknown> = {};
+        const productType = detectProductType(clean);
+        if (productType) args.productType = productType;
+        const price = detectPriceCents(clean);
+        if (price) args.price = price;
+        return { name: rule.name, args };
+      }
+      case "create_ink_variant":
+        return { name: rule.name, args: { ink: /\bwhite\b/i.test(lower) ? "white" : "black" } };
+      case "browse_printify_catalog": {
+        const query = detectProductType(clean) || clean.slice(0, 60);
+        return { name: rule.name, args: { query } };
+      }
+      case "list_library":
+        return { name: rule.name, args: { kind: /\bmockups?\b/i.test(lower) ? "mockups" : "designs" } };
+      case "save_chat_image":
+        return { name: rule.name, args: { kind: /\bmockups?\b/i.test(lower) ? "mockup" : "design" } };
+      default:
+        return { name: rule.name, args: {} };
+    }
   }
   return null;
 }

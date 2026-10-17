@@ -15,7 +15,15 @@ import {
   setConversationPinned,
   toApiMessages,
 } from "@/lib/client/chat";
-import { executeTool } from "@/lib/client/tools";
+import {
+  CONFIRM_TOOL_RUNNERS,
+  confirmInkVariant,
+  confirmMockupRender,
+  confirmRemoveBackground,
+  confirmSaveChatImage,
+  confirmSavePlacement,
+  executeTool,
+} from "@/lib/client/tools";
 import { agentTool, parseToolArguments, routeIntent, toOpenAiTools } from "@/lib/ai/tools";
 import { db } from "@/lib/db/schema";
 import type { ChatMessage } from "@/types/domain";
@@ -228,12 +236,21 @@ describe("consumeStream", () => {
 });
 
 describe("agent tools", () => {
-  it("marks only the writing tool as needing confirmation", () => {
-    expect(agentTool("create_batch_job")?.confirm).toBe(true);
-    expect(agentTool("create_printify_product")?.confirm).toBe(true);
-    expect(agentTool("explain_howto")?.confirm).toBeFalsy();
-    expect(agentTool("summarize_workspace")?.confirm).toBeFalsy();
-    expect(agentTool("draft_listing")?.confirm).toBeFalsy();
+  it("marks every writing tool as needing confirmation", () => {
+    for (const name of [
+      "create_batch_job",
+      "create_mockup_render",
+      "save_placement",
+      "create_ink_variant",
+      "remove_background",
+      "save_chat_image",
+      "create_printify_product",
+    ]) {
+      expect(agentTool(name)?.confirm, name).toBe(true);
+    }
+    for (const name of ["explain_howto", "summarize_workspace", "list_library", "browse_printify_catalog", "draft_listing"]) {
+      expect(agentTool(name)?.confirm, name).toBeFalsy();
+    }
     expect(agentTool("nope")).toBeUndefined();
   });
 
@@ -257,6 +274,20 @@ describe("agent tools", () => {
     expect(routeIntent("generate a batch of all designs and mockups")?.name).toBe("create_batch_job");
     expect(routeIntent("list this design on printify")?.name).toBe("create_printify_product");
     expect(routeIntent("create a printify product for my art")?.name).toBe("create_printify_product");
+    expect(routeIntent("make a mockup of my design")?.name).toBe("create_mockup_render");
+    expect(routeIntent("remove the background from my design")?.name).toBe("remove_background");
+    expect(routeIntent("make a white ink version of the sunset")?.name).toBe("create_ink_variant");
+    expect(routeIntent("save the placement for this design")?.name).toBe("save_placement");
+    expect(routeIntent("save this image as a design")?.name).toBe("save_chat_image");
+    expect(routeIntent("list my designs")?.name).toBe("list_library");
+    expect(routeIntent("browse the printify catalog")?.name).toBe("browse_printify_catalog");
+  });
+
+  it("pulls a product type and price out of a printify request", () => {
+    const routed = routeIntent("create a printify hoodie for my art at $32");
+    expect(routed?.name).toBe("create_printify_product");
+    expect(routed?.args.productType).toBe("hoodie");
+    expect(routed?.args.price).toBe(3200);
   });
 
   it("returns null when nothing matches an intent", () => {
@@ -430,7 +461,7 @@ describe("tool executors", () => {
     expect(result.confirmation).toBeUndefined();
   });
 
-  it("asks for a blueprint instead of inventing one", async () => {
+  it("asks for a product type instead of inventing a blueprint", async () => {
     await db.designs.put({
       id: "d1",
       name: "Sunset",
@@ -441,8 +472,59 @@ describe("tool executors", () => {
       updatedAt: 1,
     });
     const result = await executeTool("create_printify_product", { design: "sunset", price: 1999 });
-    expect(result.summary).toContain("Blueprint");
+    expect(result.summary).toContain("Product type");
+    expect(result.error).toBeDefined();
     expect(result.confirmation).toBeUndefined();
+  });
+
+  it("resolves blueprint, provider and variants from a product type", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      let payload: unknown = { configured: true };
+      if (u.includes("q=")) {
+        payload = { configured: true, blueprints: [{ id: 6, title: "Unisex Tee", brand: "Gildan" }] };
+      } else if (u.includes("providers=1")) {
+        payload = { configured: true, providers: [{ id: 30, title: "Provider A" }] };
+      } else {
+        payload = {
+          configured: true,
+          variants: [
+            { id: 11, available: true, options: { color: "Black", size: "M" }, placeholders: [{ position: "front" }] },
+            { id: 12, available: true, options: { color: "White", size: "L" }, placeholders: [{ position: "front" }] },
+          ],
+        };
+      }
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeTool("create_printify_product", {
+      design: "sunset",
+      productType: "t-shirt",
+      tags: ["cat", "cat", "gift"],
+    });
+    vi.unstubAllGlobals();
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("q=tee"))).toBe(true);
+    expect(urls.some((u) => u.includes("providers=1"))).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.blueprintId).toBe(6);
+    expect(result.confirmation?.payload.printProviderId).toBe(30);
+    expect(result.confirmation?.payload.variantIds).toEqual([11, 12]);
+    expect(result.confirmation?.payload.price).toBe(2499);
+    expect(result.confirmation?.payload.tags).toEqual(["cat", "gift"]);
+    expect(await db.productDrafts.count()).toBe(0);
   });
 
   it("proposes a Printify product once ids and a price are given", async () => {
@@ -525,6 +607,136 @@ describe("tool executors", () => {
   it("reports an unknown tool instead of guessing", async () => {
     const result = await executeTool("delete_everything", {});
     expect(result.error).toContain("No tool named");
+  });
+});
+
+describe("mockup + library tools", () => {
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  async function seedLibrary() {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await db.mockups.put({
+      id: "m1",
+      name: "Tee mockup",
+      category: "tshirt",
+      tags: [],
+      favorite: false,
+      assetId: "a2",
+      width: 100,
+      height: 100,
+      source: "user",
+      createdAt: 1,
+    });
+  }
+
+  it("lists designs from the local library", async () => {
+    await seedLibrary();
+    const all = await executeTool("list_library", {});
+    expect((all.result as { items: unknown[] }).items).toHaveLength(1);
+    const filtered = await executeTool("list_library", { kind: "designs", query: "nope" });
+    expect((filtered.result as { items: unknown[] }).items).toHaveLength(0);
+  });
+
+  it("browses the Printify catalog by query", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string) =>
+        new Response(JSON.stringify({ configured: true, blueprints: [{ id: 6, title: "Tee", brand: "G" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeTool("browse_printify_catalog", { query: "mug" });
+    vi.unstubAllGlobals();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("q=mug");
+    expect(result.error).toBeUndefined();
+    expect((result.result as { blueprints: unknown[] }).blueprints).toHaveLength(1);
+  });
+
+  it("proposes a single mockup render without writing anything", async () => {
+    await seedLibrary();
+    const result = await executeTool("create_mockup_render", { design: "sunset" });
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.designId).toBe("d1");
+    expect(result.confirmation?.payload.mockupId).toBe("m1");
+    expect(await db.assets.where("kind").equals("mockup-render").count()).toBe(0);
+  });
+
+  it("errors when confirming a mockup render whose blobs are missing", async () => {
+    await seedLibrary();
+    const result = await confirmMockupRender({ designId: "d1", mockupId: "m1", ink: "main" });
+    expect(result.error).toBeDefined();
+  });
+
+  it("saves a placement and a template on confirm", async () => {
+    await seedLibrary();
+    const proposal = await executeTool("save_placement", {
+      design: "sunset",
+      mockup: "tee",
+      transform: { x: 2, y: 0.5, scale: 0.4 },
+      asTemplate: true,
+      templateName: "Chest print",
+    });
+    expect(proposal.confirmation).toBeDefined();
+    const executed = await confirmSavePlacement(proposal.confirmation!.payload);
+    expect(executed.error).toBeUndefined();
+    const placement = await db.placements.where("designId").equals("d1").first();
+    expect(placement?.transform.x).toBe(1);
+    expect(await db.templates.count()).toBe(1);
+  });
+
+  it("proposes an ink variant and reports missing artwork on confirm", async () => {
+    await seedLibrary();
+    const proposal = await executeTool("create_ink_variant", { design: "sunset", ink: "black" });
+    expect(proposal.confirmation?.payload.ink).toBe("black");
+    const executed = await confirmInkVariant({ designId: "d1", ink: "black" });
+    expect(executed.error).toBeDefined();
+  });
+
+  it("proposes background removal and reports missing artwork on confirm", async () => {
+    await seedLibrary();
+    const proposal = await executeTool("remove_background", { design: "sunset", engine: "flood-key" });
+    expect(proposal.confirmation?.payload.engine).toBe("flood-key");
+    const executed = await confirmRemoveBackground({ designId: "d1", engine: "flood-key" });
+    expect(executed.error).toBeDefined();
+  });
+
+  it("needs an attached image before saving one from chat", async () => {
+    const none = await executeTool("save_chat_image", { kind: "design" });
+    expect(none.error).toBeDefined();
+    const withImage = await executeTool(
+      "save_chat_image",
+      { kind: "design", name: "New art" },
+      { attachments: [{ name: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,AAAA" }] },
+    );
+    expect(withImage.confirmation?.payload.name).toBe("New art");
+    const missing = await confirmSaveChatImage({ kind: "design" }, { attachments: [] });
+    expect(missing.error).toBeDefined();
+  });
+
+  it("registers a confirm runner for every writing tool", () => {
+    for (const name of [
+      "create_batch_job",
+      "create_mockup_render",
+      "save_placement",
+      "create_ink_variant",
+      "remove_background",
+      "save_chat_image",
+      "create_printify_product",
+    ]) {
+      expect(CONFIRM_TOOL_RUNNERS[name], name).toBeTypeOf("function");
+    }
   });
 });
 

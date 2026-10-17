@@ -30,35 +30,45 @@ interface RunState {
 
 const running = new Map<string, RunState>();
 
-async function renderItem(item: BatchItem): Promise<string> {
-  const mockup = await db.mockups.get(item.mockupId);
+/**
+ * Composes one design onto one mockup and stores the result as a
+ * `mockup-render` asset. This is the same code path the batch engine uses, so
+ * a single render and a batch render are pixel-identical.
+ */
+export async function renderComposition(params: {
+  designId: string;
+  mockupId: string;
+  designAssetId: string;
+  transform: Transform;
+  behindMockup?: boolean;
+}): Promise<string> {
+  const mockup = await db.mockups.get(params.mockupId);
   if (!mockup) throw new Error("Mockup no longer exists");
   const [mockupBlob, designBlob] = await Promise.all([
     getAssetBlob(mockup.assetId),
-    getAssetBlob(item.designAssetId),
+    getAssetBlob(params.designAssetId),
   ]);
   if (!mockupBlob || !designBlob) throw new Error("Source image missing from storage");
 
   const [mockupBmp, designBmp] = await Promise.all([decodeImage(mockupBlob), decodeImage(designBlob)]);
   try {
     const canvas = document.createElement("canvas");
-    const placement = await getPlacement(item.designId, item.mockupId);
-    const composed = composeToCanvas(canvas, mockupBmp, designBmp, item.transform, {
-      drawDesignFirst: placement?.behindMockup ?? false,
+    const composed = composeToCanvas(canvas, mockupBmp, designBmp, params.transform, {
+      drawDesignFirst: params.behindMockup ?? false,
     });
     if (!composed) throw new Error("Compositing failed");
     const blob = await canvasToBlob(canvas, "image/png");
     canvas.width = 0;
     canvas.height = 0;
-    const design = await db.designs.get(item.designId);
+    const design = await db.designs.get(params.designId);
     const asset = await storeAsset(
       blob,
       `${design?.name ?? "design"}-${mockup.name}.png`,
       "mockup-render",
       {
-        parentId: item.designAssetId,
-        sourceDesignId: item.designId,
-        sourceMockupId: item.mockupId,
+        parentId: params.designAssetId,
+        sourceDesignId: params.designId,
+        sourceMockupId: params.mockupId,
       },
     );
     return asset.id;
@@ -66,6 +76,17 @@ async function renderItem(item: BatchItem): Promise<string> {
     mockupBmp.close();
     designBmp.close();
   }
+}
+
+async function renderItem(item: BatchItem): Promise<string> {
+  const placement = await getPlacement(item.designId, item.mockupId);
+  return renderComposition({
+    designId: item.designId,
+    mockupId: item.mockupId,
+    designAssetId: item.designAssetId,
+    transform: item.transform,
+    behindMockup: placement?.behindMockup ?? false,
+  });
 }
 
 async function resolveTransform(
