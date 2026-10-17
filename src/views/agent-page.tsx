@@ -64,6 +64,12 @@ import { cn } from "@/lib/utils";
 
 const MAX_TURN_STEPS = 6;
 
+// Mirror the server's output budgets (src/lib/server/ai.ts) so a truncated
+// reasoning reply can be retried with more room.
+const DEFAULT_BUDGET = 2000;
+const REASONING_BUDGET = 8000;
+const MAX_ESCALATED_BUDGET = 16000;
+
 interface StreamState {
   text: string;
   reasoning: string;
@@ -302,6 +308,12 @@ export function AgentPage() {
       let routed = false;
       let nudged = false;
       let nudge: string | undefined;
+      // Reasoning turns can burn the whole output budget while still thinking
+      // (finish_reason "length") and never emit an answer. Track the budget and
+      // effort per turn so a truncated reasoning-only reply can be retried with
+      // more room and the reasoning hint dropped.
+      let turnEffort: string | undefined = caps.reasoning ? effort : undefined;
+      let turnMaxTokens = caps.reasoning ? REASONING_BUDGET : DEFAULT_BUDGET;
       let lastUserText = "";
       let turnAttachments: ImagePartData[] = [];
       if (userInitiated) {
@@ -355,7 +367,8 @@ export function AgentPage() {
 
           setStreaming({ text: "", reasoning: "" });
           const result = await streamReply(apiMessages, {
-            effort: caps.reasoning ? effort : undefined,
+            effort: turnEffort,
+            maxTokens: turnMaxTokens,
             tools: toolNames,
             signal: controller.signal,
             debug,
@@ -475,16 +488,27 @@ export function AgentPage() {
           // A tool ran this step — loop so the model can use the result.
           if (callsToRun.length) continue;
 
-          // No tool ran. Guard against the "reasoning-only" and empty answers
-          // that make the agent look like it said nothing.
+          // No tool ran. A reasoning model can spend the entire output budget
+          // thinking and never emit an answer (finish_reason "length"). Retry
+          // once with a bigger budget and no reasoning hint so it must answer.
           if (!result.text.trim() && result.reasoning.trim() && !nudged) {
             nudged = true;
+            turnMaxTokens = Math.min(MAX_ESCALATED_BUDGET, turnMaxTokens * 2);
+            turnEffort = undefined;
             nudge =
-              "You produced reasoning but no visible answer. Give your final answer now as plain text, and do not repeat the reasoning.";
+              "You produced reasoning but no visible answer. Reply now with your final answer only, as plain text. Do not include or repeat your reasoning.";
+            if (debug) {
+              logDebug(
+                "turn",
+                `reasoning-only reply (finish_reason: ${result.finishReason ?? "unknown"}) — retrying with maxTokens ${turnMaxTokens}, reasoning off`,
+              );
+            }
             continue;
           }
           if (!result.text.trim() && result.reasoning.trim()) {
-            setError("The model produced reasoning but no answer. Try again or switch to a different model.");
+            setError(
+              "The model used its whole reply thinking and produced no answer. Try again, raise the reasoning effort, or switch to a different model.",
+            );
             return;
           }
           if (!result.text.trim()) {

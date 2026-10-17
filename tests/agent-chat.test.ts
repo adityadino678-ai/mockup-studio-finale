@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SseParser, decodeSseData, encodeSse } from "@/lib/ai/sse";
 import { modelCapabilities, modelReasoning } from "@/lib/ai/providers";
-import { parseProviderStreamLine, retryFix } from "@/lib/server/ai";
+import { parseProviderStreamLine, outputTokenBudget, retryFix } from "@/lib/server/ai";
 import {
   addMessage,
   consumeStream,
@@ -13,6 +13,7 @@ import {
   renameConversation,
   saveFavorites,
   setConversationPinned,
+  streamReply,
   toApiMessages,
 } from "@/lib/client/chat";
 import {
@@ -86,6 +87,59 @@ describe("provider streaming line parsing", () => {
     expect(parseProviderStreamLine("data: [DONE]")).toEqual([{ type: "done" }]);
     expect(parseProviderStreamLine(": keep-alive")).toEqual([]);
     expect(parseProviderStreamLine("event: ping")).toEqual([]);
+  });
+
+  it("surfaces finish_reason so a truncated reply is detectable", () => {
+    const events = parseProviderStreamLine('data: {"choices":[{"delta":{},"finish_reason":"length"}]}');
+    expect(events).toContainEqual({ type: "finish", reason: "length" });
+    expect(parseProviderStreamLine('data: {"choices":[{"delta":{"content":"hi"}}]}')).toHaveLength(1);
+  });
+});
+
+describe("reasoning replies", () => {
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  it("gives reasoning turns more output room so thinking cannot starve the answer", () => {
+    expect(outputTokenBudget({ effort: "medium" })).toBe(8000);
+    expect(outputTokenBudget({})).toBe(2000);
+  });
+
+  it("honours an explicit budget so the client can escalate a truncated reply", () => {
+    expect(outputTokenBudget({ maxTokens: 16000, effort: "medium" })).toBe(16000);
+    expect(outputTokenBudget({ maxTokens: 0 })).toBe(2000);
+  });
+
+  it("records finish_reason from the stream", async () => {
+    const result = await consumeStream(
+      sseResponse([
+        encodeSse("reasoning", { text: "thinking hard" }),
+        encodeSse("finish", { reason: "length" }),
+        encodeSse("done", { model: "m" }),
+      ]),
+    );
+    expect(result.finishReason).toBe("length");
+    expect(result.reasoning).toBe("thinking hard");
+    expect(result.text).toBe("");
+  });
+
+  it("forwards an explicit maxTokens when escalating", async () => {
+    let sent: Record<string, unknown> = {};
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return sseResponse([encodeSse("delta", { text: "answer" }), encodeSse("done", { model: "m" })]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await streamReply([{ role: "user", content: "hi" }], {
+      effort: "medium",
+      maxTokens: 16000,
+    });
+    vi.unstubAllGlobals();
+    expect(sent.maxTokens).toBe(16000);
+    expect(sent.effort).toBe("medium");
+    expect(result.text).toBe("answer");
   });
 });
 
@@ -322,6 +376,17 @@ describe("provider request recovery", () => {
 
   it("returns null when the error cannot be fixed by changing the request", () => {
     expect(retryFix({ model: "m" }, "Incorrect API key provided")).toBeNull();
+  });
+
+  it("clamps a budget that exceeds the provider's cap", () => {
+    expect(retryFix({ model: "m", max_tokens: 8000 }, "max_tokens is too large for this model")).toEqual({
+      model: "m",
+      max_tokens: 4096,
+    });
+    expect(retryFix({ model: "m", max_completion_tokens: 16000 }, "maximum max_completion_tokens is 8192")).toEqual({
+      model: "m",
+      max_completion_tokens: 4096,
+    });
   });
 });
 

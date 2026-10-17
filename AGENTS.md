@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 106 unit tests
+npm run test          # 112 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -171,8 +171,14 @@ Both must pass. The production run has caught bugs the local run missed.
   the client runs when the model requested no tool, so the agent still acts.
   `src/lib/server/ai.ts` retries a fixable 400 once (`retryFix`: drops
   `reasoning_effort`/`temperature`, renames `max_tokens`↔`max_completion_tokens`,
-  drops `tools`) and caps output (`1400` tokens; `3000` for reasoning models).
-  `?debug=1` on `/agent` opens a raw-SSE capture drawer
+  clamps a budget over the provider's cap, drops `tools`) and caps output
+  (`2000` tokens; `8000` for reasoning models — the budget covers reasoning
+  *and* the answer, so too small a value makes a reasoning model think and never
+  answer). `parseProviderStreamLine` emits the provider's `finish_reason` as a
+  `finish` frame; when a turn comes back reasoning-only the client retries once
+  with double the budget and the reasoning hint off
+  (`outputTokenBudget` in `src/lib/server/ai.ts`). `?debug=1` on `/agent` opens a
+  raw-SSE capture drawer
   (`src/components/agent/debug-panel.tsx`) — use it to reproduce provider issues.
 - **Agent voice, steering, and the rail (M3).** `src/lib/client/speech.ts` wraps the
   Web Speech API with feature detection (nothing throws when unsupported); the

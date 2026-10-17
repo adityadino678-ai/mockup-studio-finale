@@ -233,6 +233,8 @@ export interface StreamCallbacks {
 export interface StreamResult {
   text: string;
   reasoning: string;
+  /** Why the provider stopped: "stop", "length" (truncated), "tool_calls"… */
+  finishReason?: string;
   /** Tool calls the model requested this turn, if any. */
   toolCalls?: ApiToolCall[];
   firstTokenMs?: number;
@@ -259,6 +261,8 @@ function applyFrame(
     callbacks.onReasoning?.(data.text);
   } else if (frame.event === "usage" && data) {
     callbacks.onUsage?.(data);
+  } else if (frame.event === "finish") {
+    if (typeof data?.reason === "string") result.finishReason = data.reason;
   } else if (frame.event === "tool_calls") {
     const calls = (data as { calls?: ApiToolCall[] } | null)?.calls;
     if (Array.isArray(calls) && calls.length > 0) result.toolCalls = calls;
@@ -306,7 +310,14 @@ export async function consumeStream(res: Response, callbacks: StreamCallbacks = 
 /** Posts message history to `/api/ai/chat` and streams the reply. */
 export async function streamReply(
   messages: ApiMessage[],
-  options: { effort?: string; tools?: string[]; signal?: AbortSignal; debug?: boolean } & StreamCallbacks = {},
+  options: {
+    effort?: string;
+    tools?: string[];
+    /** Explicit output-token budget; used to retry a truncated reply with more room. */
+    maxTokens?: number;
+    signal?: AbortSignal;
+    debug?: boolean;
+  } & StreamCallbacks = {},
 ): Promise<StreamResult> {
   const res = await authedFetch("/api/ai/chat", {
     method: "POST",
@@ -314,6 +325,7 @@ export async function streamReply(
     body: JSON.stringify({
       messages,
       effort: options.effort,
+      ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
       ...(options.tools?.length ? { tools: options.tools } : {}),
       ...(options.debug ? { debug: true } : {}),
     }),

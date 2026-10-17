@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
-import { aiConfig, streamChat, type AiMessage } from "@/lib/server/ai";
+import { aiConfig, outputTokenBudget, streamChat, type AiMessage } from "@/lib/server/ai";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { encodeSse } from "@/lib/ai/sse";
 import { toOpenAiTools } from "@/lib/ai/tools";
@@ -108,7 +108,9 @@ export const POST: APIRoute = async ({ request }) => {
   const tools = toOpenAiTools(toolNames);
   const ai = aiConfig(creds.ai);
   const model = ai.model;
-  const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 1400;
+  // One budget for the whole turn: reasoning turns get more room so thinking
+  // cannot consume the whole output and leave `content` empty.
+  const maxTokens = outputTokenBudget({ maxTokens: body.maxTokens, effort });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -130,12 +132,13 @@ export const POST: APIRoute = async ({ request }) => {
         }
         for await (const event of streamChat(
           messages,
-          { effort, tools, maxTokens: body.maxTokens, signal: request.signal },
+          { effort, tools, maxTokens, signal: request.signal },
           creds.ai,
         )) {
           if (event.type === "delta") send("delta", { text: event.text });
           else if (event.type === "reasoning") send("reasoning", { text: event.text });
           else if (event.type === "tool_calls") send("tool_calls", { calls: event.calls });
+          else if (event.type === "finish") send("finish", { reason: event.reason });
           else if (event.type === "usage") send("usage", event.usage);
           else if (event.type === "done") {
             send("done", { model });

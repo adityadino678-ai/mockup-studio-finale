@@ -88,9 +88,22 @@ function authFor(provider: string, apiKey: string): Record<string, string> {
   return authHeaders(def, apiKey);
 }
 
-/** Default completion budget, raised for reasoning turns so thinking cannot starve the answer. */
-const DEFAULT_MAX_TOKENS = 1400;
-const REASONING_MAX_TOKENS = 3000;
+// Reasoning models stream their chain of thought into a separate `reasoning`
+// channel and the real answer into `content`. The token budget counts BOTH, so
+// a reasoning turn needs far more headroom than a plain answer — otherwise the
+// model spends the whole budget thinking and never produces visible text.
+const DEFAULT_MAX_TOKENS = 2000;
+const REASONING_MAX_TOKENS = 8000;
+
+/**
+ * The output token budget for a turn. An explicit `maxTokens` (the client
+ * escalating after a truncated reply) always wins; otherwise reasoning turns
+ * get the larger budget so thinking cannot starve the answer.
+ */
+export function outputTokenBudget(options: { maxTokens?: number; effort?: string } = {}): number {
+  if (typeof options.maxTokens === "number" && options.maxTokens > 0) return options.maxTokens;
+  return options.effort ? REASONING_MAX_TOKENS : DEFAULT_MAX_TOKENS;
+}
 
 /**
  * OpenAI's newer models reject `max_tokens` in favour of `max_completion_tokens`.
@@ -132,6 +145,20 @@ export function retryFix(body: Record<string, unknown>, message: string): Record
     delete next.tools;
     delete next.tool_choice;
     changed = true;
+  }
+  // A raised reasoning budget can exceed a provider's own cap; clamp it down so
+  // the turn still answers instead of failing outright.
+  const tokenKey = "max_completion_tokens" in next ? "max_completion_tokens" : "max_tokens" in next ? "max_tokens" : null;
+  if (
+    tokenKey &&
+    /max[_ ]?(completion_)?tokens/.test(lower) &&
+    /(too (large|long|big|high)|greater|at most|maximum|exceed|limit|reduce|lower|fewer)/.test(lower)
+  ) {
+    const value = Number(next[tokenKey]);
+    if (Number.isFinite(value) && value > 4096) {
+      next[tokenKey] = 4096;
+      changed = true;
+    }
   }
   return changed ? next : null;
 }
@@ -202,6 +229,7 @@ export type AiStreamEvent =
   | { type: "tool_delta"; index: number; id?: string; name?: string; args?: string }
   | { type: "tool_calls"; calls: AiToolCall[] }
   | { type: "usage"; usage: Record<string, unknown> }
+  | { type: "finish"; reason: string }
   | { type: "done" };
 
 /**
@@ -219,12 +247,19 @@ export function parseProviderStreamLine(line: string): AiStreamEvent[] {
   } catch {
     return [];
   }
-  const choice = (data as { choices?: Array<{ delta?: Record<string, unknown> }> })?.choices?.[0];
+  const choice = (data as {
+    choices?: Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }>;
+  })?.choices?.[0];
   const delta = (choice?.delta ?? {}) as Record<string, unknown>;
   const events: AiStreamEvent[] = [];
   const reasoning = delta.reasoning_content ?? delta.reasoning;
   if (typeof reasoning === "string" && reasoning) events.push({ type: "reasoning", text: reasoning });
   if (typeof delta.content === "string" && delta.content) events.push({ type: "delta", text: delta.content });
+  // `finish_reason` tells the client why the turn ended. "length" means the
+  // budget was exhausted — the usual cause of a reasoning-only, answerless reply.
+  if (typeof choice?.finish_reason === "string" && choice.finish_reason) {
+    events.push({ type: "finish", reason: choice.finish_reason });
+  }
   const calls = delta.tool_calls;
   if (Array.isArray(calls)) {
     for (const call of calls) {
@@ -265,7 +300,7 @@ export async function* streamChat(
   const chatPath = def?.chatPath ?? "/chat/completions";
   const url = `${baseUrl.replace(/\/$/, "")}${chatPath}`;
   const headers = { "Content-Type": "application/json", ...authFor(provider, apiKey) };
-  const budget = options.maxTokens ?? (options.effort ? REASONING_MAX_TOKENS : DEFAULT_MAX_TOKENS);
+  const budget = outputTokenBudget(options);
   const initial: Record<string, unknown> = {
     model,
     messages,
