@@ -75,6 +75,9 @@ function titleCase(value: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Printify rejects a product with more than this many enabled variants. */
+const MAX_VARIANTS = 100;
+
 export function ProductBuilderPage() {
   const designs = useLiveQuery(() => db.designs.orderBy("name").toArray(), []);
   const drafts = useLiveQuery(() => db.productDrafts.orderBy("updatedAt").reverse().toArray(), []);
@@ -261,18 +264,21 @@ export function ProductBuilderPage() {
                         <div className="text-[11px] text-ink-subtle">
                           {d.blueprintId ? `blueprint ${d.blueprintId}` : "no blueprint selected"} ·{" "}
                           {d.priceCents ? `$${(d.priceCents / 100).toFixed(2)} · ` : ""}
-                          {Object.keys(d.variantSelection).length} variant groups · updated{" "}
+                          {Object.values(d.variantSelection).filter(Boolean).length} variants · updated{" "}
                           {formatDateTime(d.updatedAt)}
                         </div>
-                        {d.remotePermalink && (
-                          <a
-                            href={d.remotePermalink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-forest underline"
-                          >
-                            {d.remotePermalink}
-                          </a>
+                        {d.remoteProductId && (
+                          <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-ink-subtle">
+                            <span className="font-mono">Printify {d.remoteProductId}</span>
+                            <a
+                              href={d.remotePermalink || "https://printify.com/app/products"}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-forest underline"
+                            >
+                              {d.remotePermalink ? "Open listing" : "View in Printify"}
+                            </a>
+                          </div>
                         )}
                         {d.error && <div className="text-[11px] text-danger">{d.error}</div>}
                       </div>
@@ -437,7 +443,12 @@ function DraftEditor({
       }
       setVariants(list);
       setSelectedVariants(
-        Object.fromEntries(list.filter((v) => v.available !== false).map((v) => [v.id, true])),
+        Object.fromEntries(
+          list
+            .filter((v) => v.available !== false)
+            .slice(0, MAX_VARIANTS)
+            .map((v) => [v.id, true]),
+        ),
       );
 
       const sizes = new Set<string>();
@@ -475,6 +486,14 @@ function DraftEditor({
     const priceCents = Math.round(Number(priceInput) * 100);
     if (!(priceCents > 0)) {
       setApiError("Enter a price greater than zero before creating the product.");
+      return;
+    }
+    if (selectedCount > MAX_VARIANTS) {
+      setApiError(
+        `Printify allows at most ${MAX_VARIANTS} variants per product — deselect ${
+          selectedCount - MAX_VARIANTS
+        } and try again.`,
+      );
       return;
     }
     setCreating(true);
@@ -538,6 +557,11 @@ function DraftEditor({
   const shownVariants = variantQuery
     ? selectableVariants.filter((v) => v.title.toLowerCase().includes(variantQuery))
     : selectableVariants;
+  const overVariantCap = selectedCount > MAX_VARIANTS;
+  const selectUpToCap = () =>
+    setSelectedVariants(
+      Object.fromEntries(selectableVariants.slice(0, MAX_VARIANTS).map((v) => [v.id, true])),
+    );
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -646,21 +670,19 @@ function DraftEditor({
                         placeholder="Filter variants (e.g. White / M)"
                         className="h-8 text-[12px]"
                       />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setSelectedVariants(
-                            Object.fromEntries(selectableVariants.map((v) => [v.id, true])),
-                          )
-                        }
-                      >
+                      <Button size="sm" variant="outline" onClick={selectUpToCap}>
                         All
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => setSelectedVariants({})}>
                         None
                       </Button>
                     </div>
+                    {overVariantCap && (
+                      <p className="text-[11px] text-danger">
+                        Printify allows at most {MAX_VARIANTS} variants per product — {selectedCount} are
+                        selected. Deselect {selectedCount - MAX_VARIANTS} to continue.
+                      </p>
+                    )}
                     {shownVariants.length === 0 ? (
                       <p className="text-[12px] text-ink-subtle">No variants match that filter.</p>
                     ) : (
@@ -730,6 +752,7 @@ function DraftEditor({
               !detail ||
               !printProviderId ||
               variants.length === 0 ||
+              overVariantCap ||
               !(Number(priceInput) > 0) ||
               selectedCount === 0 ||
               creating

@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 93 unit tests
+npm run test          # 95 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -174,14 +174,37 @@ Both must pass. The production run has caught bugs the local run missed.
   exports, listing drafts, render count) and is a toggle in the header. The
   sessions rail is a drawer below `lg` and static above it; the artifact rail is
   `xl` only. M1–M4 are now shipped.
-- **Printify product creation now sends every required field.** `POST /v1/shops/{shop_id}/products.json`
-  requires `blueprint_id`, `print_provider_id`, and an integer-cent `price` per
-  variant; artwork is uploaded first (`POST /v1/uploads/images.json`) and its id
-  (a **string**) is attached to the print area. The client sends all of these
+- **Printify product creation now sends every required field, and was verified
+  against a live shop.** `POST /v1/shops/{shop_id}/products.json` requires
+  `blueprint_id`, `print_provider_id`, and an integer-cent `price` per variant;
+  artwork is uploaded first (`POST /v1/uploads/images.json`) and its id (a
+  **string**) is attached to the print area. The client sends all of these
   (`src/lib/server/printify.ts`, `src/pages/api/printify/products.ts`), the
   Product Builder collects a price and print provider, and artwork is downscaled
-  to fit an **8 MB** upload cap (base64 inflates ~33%). Creation is still **not
-  verified against a live shop** — review before publishing.
+  to fit an **8 MB** upload cap (base64 inflates ~33%). A live run created
+  product `6ad322422a5e991891032a2b` (blueprint 6, provider 30, 100 variants,
+  visible, 666 auto-generated mockups), so the path is proven end to end.
+- **Printify caps a product at 100 enabled variants.** Sending more fails with
+  code `8251` / "Too many variants enabled. Maximum allowed: 100". The client
+  default-selects the first 100 (`MAX_VARIANTS` in `src/views/products-page.tsx`),
+  the `All` button stops at the cap, the Create button disables past it, the
+  `create_printify_product` tool sends at most 100, and
+  `src/pages/api/printify/products.ts` rejects a larger payload with 400 before
+  calling Printify. Selecting all 132 variants is what surfaced this.
+- **Printify's gateway has returned a bare 502 on a large upload that a retry
+  then completed** (128 s failed, 13 s succeeded). `request()` in
+  `src/lib/server/printify.ts` retries once on 502/503/504 and on a dropped
+  connection; the body is always a string, so replaying the request is safe.
+- **Printify rejects artwork it cannot decode, and its top-level message is only
+  "Operation failed.".** The real text lives in `error.errors.reason`
+  ("Failed to upload image…"), so `extractError()` prefers the deepest message
+  available. A 16×16 PNG whose final chunk was `END®` instead of a valid `IEND`
+  decoded fine in the browser yet Printify refused it — the endpoint now reports
+  Printify's reason instead of a generic failure.
+- **Printify does not return a `permalink` when creating a product.** The draft
+  card therefore shows the product id and links to the Printify products page.
+- **The blueprint `<Select>` renders every blueprint (~2886 options) with no
+  search**, slow enough to stall an automation client. Not yet fixed.
 - **The base64 artwork upload is capped at 8 MB.** A larger body plus its decoded
   buffer can exceed the Workers 128 MB memory ceiling; the client downscales PNGs
   until they fit (`src/lib/client/artwork.ts`).

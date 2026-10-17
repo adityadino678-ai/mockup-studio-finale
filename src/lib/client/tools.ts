@@ -240,20 +240,25 @@ async function proposePrintifyProduct(args: Record<string, unknown>): Promise<To
       error: data?.error ?? `Printify catalog request failed (HTTP ${res.status}).`,
     };
   }
-  const variants = (data?.variants ?? []).filter((v) => v.available !== false);
-  if (!variants.length) {
+  const available = (data?.variants ?? []).filter((v) => v.available !== false);
+  if (!available.length) {
     return {
       summary: "No variants for that provider",
       error: "That print provider has no available variants for this blueprint. Pick another provider.",
     };
   }
+  // Printify rejects a product with more than this many enabled variants.
+  const variants = available.slice(0, 100);
+  const capped = available.length - variants.length;
   const printArea = variants.find((v) => v.placeholders?.length)?.placeholders?.[0]?.position ?? "front";
   const title = String(args.title ?? "").trim() || design.name;
 
   return {
     summary: `Ready to create “${title}” on Printify at $${(price / 100).toFixed(2)}`,
     confirmation: {
-      detail: `${variants.length} variants · $${(price / 100).toFixed(2)} each · blueprint ${blueprintId} · provider ${printProviderId} · artwork: ${design.name}.`,
+      detail: `${variants.length} variants · $${(price / 100).toFixed(2)} each · blueprint ${blueprintId} · provider ${printProviderId} · artwork: ${design.name}.${
+        capped > 0 ? ` Printify caps a product at 100 variants, so ${capped} more were left out.` : ""
+      }`,
       payload: {
         designId: design.id,
         designName: design.name,

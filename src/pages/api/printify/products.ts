@@ -28,6 +28,9 @@ interface CreateProductBody {
  */
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
+/** Printify rejects a product with more than this many enabled variants. */
+const MAX_VARIANTS = 100;
+
 /**
  * Estimates decoded byte length from a base64 string without allocating a
  * buffer. `Buffer` does not exist in the Workers runtime, and decoding 8 MB just
@@ -86,6 +89,14 @@ export const POST: APIRoute = async ({ request }) => {
   const variantIds = Object.values(body.variants).flat();
   if (variantIds.length === 0) {
     return json({ error: "Select at least one size/color variant" }, 400);
+  }
+  if (variantIds.length > MAX_VARIANTS) {
+    return json(
+      {
+        error: `Printify allows at most ${MAX_VARIANTS} variants per product — ${variantIds.length} were selected. Deselect some and try again.`,
+      },
+      400,
+    );
   }
   const basePrice = typeof body.price === "number" ? body.price : undefined;
   const prices: Record<number, number> = {};

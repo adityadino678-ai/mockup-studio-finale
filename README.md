@@ -51,7 +51,7 @@ A browser-saved key takes precedence over a server key when both are present.
 | `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
-| `npm run test` | Unit/integration tests (93 tests) |
+| `npm run test` | Unit/integration tests (95 tests) |
 | `npm run test:e2e` | End-to-end acceptance tests (17 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
 
@@ -96,7 +96,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 5. **Ink variants** — white-ink and black-ink versions per design: auto-generated as alpha-preserving flat recolors (presented for review, replaceable with your own file), independently stored and selectable in the editor and batches.
 6. **Batch Studio** — pick N designs × M mockups, see the exact combination count, choose variant rule and placement template, run with live per-item status (real counts, never estimates), cancel, retry single items, and skip combinations that already have renders. Interrupted jobs recover as retryable failures.
 7. **Templates** — placement templates (from the editor or built manually), mockup collections, ink rules, listing and SEO templates. Create, rename, edit, duplicate, version, search, apply to many designs with a preview of the settings.
-8. **Product Builder** — local product drafts; with `PRINTIFY_API_KEY` the live Printify blueprint catalog loads (real variants, print areas, providers). Product creation requires an explicit confirm step; nothing is published automatically.
+8. **Product Builder** — local product drafts; with `PRINTIFY_API_KEY` the live Printify blueprint catalog loads (real variants, print areas, providers). Product creation requires an explicit confirm step; nothing is published automatically. Printify's 100-variant-per-product limit is enforced in the UI, the agent tool, and the endpoint.
 9. **Listings** — Etsy-ready drafts with validation against Etsy's documented limits (title ≤ 140 chars, ≤ 13 tags of ≤ 20 chars, price rules). Bulk-generate drafts from designs; duplicate; status-separated views.
 10. **AI SEO Studio** — with an AI key: keyword ideas by intent, product/audience/seasonal angles, title drafts, description, tags — all editable, never fabricating search volume or sales data; save as template or spin into a listing draft. Without a key: honest setup instructions.
 11. **Export Center** — real ZIP (fflate) with `MockupStudio_Export/<Design>/original.png`, ink variants, `mockups/`, `listing/`, and a `manifest.json`. The archive is re-read and verified before success is reported; missing assets are listed, not hidden.
@@ -128,7 +128,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; alpha preserved; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - Template: created → survived refresh → applied to another design (placement width changed 20% → template's 35%).
-- 93 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
+- 95 unit/integration tests + 17 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built server verified on every route.
 
 ## Known limitations (honest)
 

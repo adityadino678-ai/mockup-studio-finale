@@ -485,6 +485,42 @@ describe("tool executors", () => {
     expect(await db.productDrafts.count()).toBe(0);
   });
 
+  it("caps the proposed selection at Printify's 100-variant limit", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const many = Array.from({ length: 130 }, (_, i) => ({
+      id: i + 1,
+      available: true,
+      placeholders: [{ position: "front" }],
+    }));
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ configured: true, variants: many }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeTool("create_printify_product", {
+      design: "sunset",
+      blueprintId: 6,
+      printProviderId: 99,
+      price: 1999,
+    });
+    vi.unstubAllGlobals();
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.variantIds).toHaveLength(100);
+    expect(result.confirmation?.payload.variantIds[99]).toBe(100);
+    expect(result.confirmation?.detail).toContain("caps a product at 100 variants");
+  });
+
   it("reports an unknown tool instead of guessing", async () => {
     const result = await executeTool("delete_everything", {});
     expect(result.error).toContain("No tool named");

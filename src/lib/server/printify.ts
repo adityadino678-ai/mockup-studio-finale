@@ -8,6 +8,12 @@ import { serverEnv } from "@/lib/server/env";
 
 const PRINTIFY_BASE = "https://api.printify.com/v1";
 
+/** Gateway statuses Printify has returned transiently (a retry then succeeded). */
+const TRANSIENT_STATUS = [502, 503, 504];
+const RETRY_DELAY_MS = 1500;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class PrintifyError extends Error {
   constructor(
     message: string,
@@ -141,15 +147,26 @@ export function createPrintifyClient(explicitKey?: string) {
     };
   }
 
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function request<T>(path: string, init: RequestInit = {}, attempt = 0): Promise<T> {
     if (!configured) {
       throw new PrintifyError("Printify API key is not configured", 501);
     }
-    const res = await fetch(`${PRINTIFY_BASE}${path}`, {
-      ...init,
-      headers: { ...authHeaders(), ...(init.headers ?? {}) },
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${PRINTIFY_BASE}${path}`, {
+        ...init,
+        headers: { ...authHeaders(), ...(init.headers ?? {}) },
+        cache: "no-store",
+      });
+    } catch (error) {
+      // A dropped connection is retried once; the body is always a string, so
+      // replaying the request is safe.
+      if (attempt < 1) {
+        await sleep(RETRY_DELAY_MS);
+        return request<T>(path, init, attempt + 1);
+      }
+      throw error;
+    }
     const text = await res.text();
     let data: unknown = null;
     try {
@@ -158,6 +175,12 @@ export function createPrintifyClient(explicitKey?: string) {
       data = text;
     }
     if (!res.ok) {
+      // Printify's gateway has answered a large upload with a bare 502 that a
+      // retry then completed, so give transient failures one more chance.
+      if (TRANSIENT_STATUS.includes(res.status) && attempt < 1) {
+        await sleep(RETRY_DELAY_MS);
+        return request<T>(path, init, attempt + 1);
+      }
       throw new PrintifyError(extractError(data, res.status), res.status, data);
     }
     return data as T;

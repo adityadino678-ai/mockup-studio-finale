@@ -210,3 +210,27 @@ describe("provider registry", () => {
     expect(groqModels[0].free).toBe(true);
   });
 });
+
+describe("POST /api/printify/products", () => {
+  it("refuses more than Printify's 100-variant limit before calling Printify", async () => {
+    const { POST } = await import("@/pages/api/printify/products");
+    const ids = Array.from({ length: 130 }, (_, i) => i + 1);
+    const request = new Request("http://localhost/api/printify/products", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-printify-key": "test-key" },
+      body: JSON.stringify({
+        confirm: true,
+        title: "Too many",
+        blueprintId: 6,
+        printProviderId: 30,
+        variants: { "6": ids },
+        price: 1999,
+      }),
+    });
+    const response = await POST({ request } as never);
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain("at most 100 variants");
+    expect(body.error).toContain("130");
+  });
+});
