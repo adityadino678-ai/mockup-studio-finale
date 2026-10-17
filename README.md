@@ -19,7 +19,7 @@ Or from the folder one level up, without touching the terminal commands yourself
 Optional integrations can be connected two ways:
 
 1. **In the app (recommended):** open **Settings → API connections**. Paste your
-   Printify key, then pick an AI **provider** (OpenCode Zen, NVIDIA NIM,
+   Printify key, then pick an AI **provider** (NVIDIA NIM,
    OpenRouter, Groq, Cerebras, Together, Google Gemini, Mistral, DeepSeek,
    Fireworks, xAI, OpenAI, Anthropic, a local Ollama server, or any custom
    OpenAI-compatible endpoint). The **Load models** button fetches that

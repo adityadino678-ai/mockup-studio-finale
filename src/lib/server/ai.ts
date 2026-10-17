@@ -27,6 +27,12 @@ export interface AiMessage {
   tool_calls?: AiToolCall[];
   /** Present on `role: "tool"` messages; ties the result back to its call. */
   tool_call_id?: string;
+  /**
+   * DeepSeek-style providers require the assistant's reasoning to be echoed back
+   * on every later request that carries `tools`. Only such providers receive it;
+   * the endpoint strips it for everyone else.
+   */
+  reasoning_content?: string;
 }
 
 export interface AiCompletionOptions {
@@ -174,22 +180,36 @@ export async function complete(
   const apiKey = creds?.apiKey ?? serverEnv.aiApiKey() ?? serverEnv.openaiApiKey() ?? "";
   const def = getProvider(provider);
   const chatPath = def?.chatPath ?? "/chat/completions";
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}${chatPath}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authFor(provider, apiKey),
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: options.temperature ?? 0.7,
-      [tokenParam(provider)]: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-      ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
-    }),
-    signal: options.signal,
-    cache: "no-store",
-  });
+  const url = `${baseUrl.replace(/\/$/, "")}${chatPath}`;
+  const headers = { "Content-Type": "application/json", ...authFor(provider, apiKey) };
+  const initial: Record<string, unknown> = {
+    model,
+    messages,
+    temperature: options.temperature ?? 0.7,
+    [tokenParam(provider)]: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+    ...(options.jsonMode ? { response_format: { type: "json_object" } } : {}),
+  };
+  const post = (body: Record<string, unknown>) =>
+    fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: options.signal,
+      cache: "no-store",
+    });
+
+  // Same multi-attempt fixup as streamChat: a provider can reject more than one
+  // field at once, so keep repairing the request until it is accepted.
+  let request = initial;
+  let res = await post(request);
+  for (let tries = 0; !res.ok && tries < 4; tries++) {
+    const message = await readAiError(res);
+    const fixed = retryFix(request, message);
+    if (!fixed) throw new Error(message);
+    request = fixed;
+    res = await post(request);
+  }
+  if (!res.ok) throw new Error(await readAiError(res));
 
   const text = await res.text();
   let data: unknown = null;
@@ -197,12 +217,6 @@ export async function complete(
     data = text ? JSON.parse(text) : null;
   } catch {
     data = text;
-  }
-  if (!res.ok) {
-    throw new Error(
-      (data as { error?: { message?: string } })?.error?.message ??
-        `AI request failed with HTTP ${res.status}`,
-    );
   }
   const content = (data as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content;
   if (!content) throw new Error("AI provider returned an empty response");
@@ -319,21 +333,47 @@ export async function* streamChat(
       cache: "no-store",
     });
 
-  let res = await post(initial);
-  if (!res.ok) {
+  // A single 400 can name more than one rejected field (OpenAI, for example,
+  // rejects both `temperature` and `max_tokens` on its reasoning models), so
+  // keep fixing and retrying until the provider accepts the request or the error
+  // stops being something we can fix by changing the request shape.
+  let request = initial;
+  let res = await post(request);
+  for (let tries = 0; !res.ok && tries < 4; tries++) {
     const message = await readAiError(res);
-    const retry = retryFix(initial, message);
-    if (!retry) throw new Error(message);
-    res = await post(retry);
-    if (!res.ok) throw new Error(await readAiError(res));
+    const fixed = retryFix(request, message);
+    if (!fixed) throw new Error(message);
+    request = fixed;
+    res = await post(request);
   }
+  if (!res.ok) throw new Error(await readAiError(res));
   if (!res.body) throw new Error("AI provider returned no response stream");
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   const toolCalls = new Map<number, { id: string; name: string; args: string }>();
   let buffer = "";
-  let finished = false;
+
+  // Tool-call deltas arrive as fragments, so they are accumulated here rather
+  // than yielded; everything else is passed through. The terminal `done` is
+  // swallowed too — it is re-emitted once, after the tool calls.
+  const absorb = (events: AiStreamEvent[]): AiStreamEvent[] => {
+    const out: AiStreamEvent[] = [];
+    for (const event of events) {
+      if (event.type === "done") continue;
+      if (event.type === "tool_delta") {
+        const current = toolCalls.get(event.index) ?? { id: "", name: "", args: "" };
+        if (event.id) current.id = event.id;
+        if (event.name) current.name = event.name;
+        if (event.args) current.args += event.args;
+        toolCalls.set(event.index, current);
+        continue;
+      }
+      out.push(event);
+    }
+    return out;
+  };
+
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -343,23 +383,22 @@ export async function* streamChat(
       while ((index = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 1);
-        for (const event of parseProviderStreamLine(line)) {
-          if (event.type === "done") finished = true;
-          if (event.type === "tool_delta") {
-            const current = toolCalls.get(event.index) ?? { id: "", name: "", args: "" };
-            if (event.id) current.id = event.id;
-            if (event.name) current.name = event.name;
-            if (event.args) current.args += event.args;
-            toolCalls.set(event.index, current);
-            continue;
-          }
-          yield event;
-        }
+        for (const event of absorb(parseProviderStreamLine(line))) yield event;
       }
     }
+    // A provider that closes without a trailing newline would otherwise lose its
+    // final line (usually the one carrying `finish_reason`).
+    const tail = buffer.trim();
+    if (tail) for (const event of absorb(parseProviderStreamLine(tail))) yield event;
   } finally {
     await reader.cancel().catch(() => {});
   }
+
+  // ORDER MATTERS: the client and the API route both stop at `done`, so the
+  // accumulated tool calls must be emitted *before* it. Previously they were
+  // flushed after the loop while `done` was yielded from inside it, which meant
+  // the tool_calls frame was never sent for any provider that ends with
+  // `data: [DONE]` — the agent silently ran on the keyword fallback alone.
   const calls: AiToolCall[] = [...toolCalls.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([index, call]) => ({
@@ -369,7 +408,7 @@ export async function* streamChat(
     }))
     .filter((call) => call.function.name);
   if (calls.length) yield { type: "tool_calls", calls };
-  if (!finished) yield { type: "done" };
+  yield { type: "done" };
 }
 
 export interface AiProbe {

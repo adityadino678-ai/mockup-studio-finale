@@ -360,7 +360,8 @@ const INTENT_RULES: Array<{ name: string; patterns: RegExp[] }> = [
   {
     name: "create_batch_job",
     patterns: [
-      /\b(batch|bulk)\b/i,
+      /(^|[.!?]\s*)(create|make|run|start|generate|build)\b[^.?!]*\b(batch|bulk)\b/i,
+      /\b(batch|bulk)\b[^.?!]*\b(render|generate|create|job|jobs|them|it)\b/i,
       /\bgenerate (all|every|the|my)\b/i,
       /\bcombine (all|every|my)\b/i,
       /\brender (all|every|my)\b/i,
@@ -479,6 +480,15 @@ function detectPriceCents(text: string): number | undefined {
 export function routeIntent(text: string): RoutedIntent | null {
   const clean = (text ?? "").trim();
   if (!clean) return null;
+  // A "how…" question wants an explanation, never a write. Check this before
+  // the action rules so "How do I publish my design to Printify?" explains
+  // instead of proposing a real product.
+  if (
+    /(^|[.!?]\s*)how\b(?!\s+(many|much|long|often|far|old)\b)/i.test(clean) ||
+    /\bwhere (do|can) i\b|\bwalk me through\b|\bexplain how\b/i.test(clean)
+  ) {
+    return { name: "explain_howto", args: { topic: clean.slice(0, 200) } };
+  }
   for (const rule of INTENT_RULES) {
     if (!rule.patterns.some((pattern) => pattern.test(clean))) continue;
     const lower = clean.toLowerCase();

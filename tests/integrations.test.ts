@@ -77,7 +77,7 @@ describe("credentialsFromRequest", () => {
 
   it("defaults the base URL and model for a bare AI key", () => {
     const creds = credentialsFromRequest(req({ "x-ai-key": "k" }));
-    expect(creds.ai?.provider).toBe("openai");
+    expect(creds.ai?.provider).toBe("custom");
     expect(creds.ai?.baseUrl).toBe(DEFAULT_AI_BASE_URL);
     expect(creds.ai?.model).toBe(DEFAULT_AI_MODEL);
   });
@@ -89,7 +89,7 @@ describe("credentialsFromRequest", () => {
       apiKey: "server-ai",
       baseUrl: DEFAULT_AI_BASE_URL,
       model: DEFAULT_AI_MODEL,
-      provider: "openai",
+      provider: "custom",
       source: "server",
     });
   });
@@ -98,8 +98,7 @@ describe("credentialsFromRequest", () => {
 describe("integrationHeaders", () => {
   it("emits the active provider even with no keys", () => {
     expect(integrationHeaders(EMPTY_INTEGRATIONS)).toEqual({
-      "x-ai-provider": "openai",
-      "x-ai-model": DEFAULT_AI_MODEL,
+      "x-ai-provider": "custom",
     });
   });
 
@@ -175,10 +174,10 @@ describe("selectModel", () => {
 });
 
 describe("provider registry", () => {
-  it("ships the 15 providers in priority order", () => {
+  it("ships the 14 providers in priority order", () => {
     const ids = providerList().map((p) => p.id);
-    expect(ids).toHaveLength(15);
-    expect(ids.slice(0, 3)).toEqual(["opencode", "nvidia", "openrouter"]);
+    expect(ids).toHaveLength(14);
+    expect(ids.slice(0, 3)).toEqual(["nvidia", "openrouter", "groq"]);
     expect(ids.at(-1)).toBe("custom");
   });
 

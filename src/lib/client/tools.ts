@@ -765,7 +765,23 @@ async function searchBlueprints(query: string): Promise<BlueprintLite[]> {
   return Array.isArray(data?.blueprints) ? data.blueprints : [];
 }
 
-async function resolveProvider(blueprintId: number): Promise<number> {
+async function fetchVariants(blueprintId: number, printProviderId: number): Promise<VariantLite[]> {
+  const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&provider=${printProviderId}`);
+  const data = (await res.json().catch(() => null)) as { error?: string; variants?: VariantLite[] } | null;
+  if (!res.ok) throw new Error(data?.error ?? `Printify catalog request failed (HTTP ${res.status}).`);
+  return (data?.variants ?? []).filter((v) => v.available !== false);
+}
+
+/**
+ * Picks the first print provider that actually has available variants. Some
+ * blueprints list providers whose variant set is empty, so blindly taking
+ * `providers[0]` produced "no variants" failures for product types another
+ * provider fully supports.
+ */
+async function pickProviderWithVariants(
+  blueprintId: number,
+  limit = 6,
+): Promise<{ printProviderId: number; variants: VariantLite[] } | null> {
   const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&providers=1`);
   const data = (await res.json().catch(() => null)) as {
     providers?: Array<{ id: number; title: string }>;
@@ -773,8 +789,30 @@ async function resolveProvider(blueprintId: number): Promise<number> {
   } | null;
   if (!res.ok) throw new Error(data?.error ?? `Printify catalog request failed (HTTP ${res.status}).`);
   const providers = Array.isArray(data?.providers) ? data.providers : [];
-  if (!providers.length) throw new Error(`No print providers are available for that product type.`);
-  return providers[0].id;
+  for (const provider of providers.slice(0, limit)) {
+    const variants = await fetchVariants(blueprintId, provider.id);
+    if (variants.length) return { printProviderId: provider.id, variants };
+  }
+  return null;
+}
+
+/**
+ * Ranks catalog matches so the closest title wins instead of Printify's raw
+ * catalog order (which made "tee" resolve to an arbitrary blank).
+ */
+function rankBlueprints(candidates: BlueprintLite[], query: string): BlueprintLite[] {
+  const q = query.trim().toLowerCase();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const score = (blueprint: BlueprintLite) => {
+    const title = `${blueprint.title} ${blueprint.brand} ${blueprint.model ?? ""}`.toLowerCase();
+    let value = 0;
+    if (title.includes(q)) value += 6;
+    if (title.startsWith(q)) value += 3;
+    for (const token of tokens) if (title.includes(token)) value += 2;
+    if (/\b(blank|unisex|classic|bella|gildan)\b/.test(title)) value += 1;
+    return value;
+  };
+  return [...candidates].sort((a, b) => score(b) - score(a));
 }
 
 interface CreateProductResponse {
@@ -783,12 +821,43 @@ interface CreateProductResponse {
   product?: { id: string; title?: string; status?: string; permalink?: string };
 }
 
-async function proposePrintifyProduct(args: Record<string, unknown>): Promise<ToolExecResult> {
+async function proposePrintifyProduct(
+  args: Record<string, unknown>,
+  ctx?: ToolContext,
+): Promise<ToolExecResult> {
+  const ink = (["main", "white", "black"] as InkVariant[]).includes(args.ink as InkVariant)
+    ? (args.ink as InkVariant)
+    : "main";
+
   const designs = await db.designs.toArray();
-  if (!designs.length) {
-    return { summary: "No designs to list", error: "Upload a design first, then I can list it on Printify." };
+  const requested = String(args.design ?? "").trim();
+  const design = pickByName(designs, requested) ?? (requested ? undefined : designs[0]);
+  const attachment = (ctx?.attachments ?? []).find((item) => item?.dataUrl);
+
+  // Artwork can come from a saved design or straight from an image the user
+  // attached in this conversation, so a fresh image can be listed without
+  // saving it as a design first.
+  if (!design && !attachment) {
+    return {
+      summary: "No artwork to list",
+      error: designs.length
+        ? `I couldn’t find a design called “${requested}”. Try one of: ${designs
+            .slice(0, 5)
+            .map((item) => item.name)
+            .join(", ")} — or attach the image you want to list.`
+        : "Upload a design, or attach an image here, then I can list it on Printify.",
+    };
   }
-  const design = pickByName(designs, String(args.design ?? "")) ?? designs[0];
+
+  // The bytes are verified again at confirm time (they can be evicted between
+  // proposing and creating); this only guarantees a product is never proposed
+  // with no artwork at all.
+  if (design && !designAssetIdFor(design, ink)) {
+    return {
+      summary: "Artwork missing",
+      error: `“${design.name}” has no artwork attached. Re-upload it, or attach the image here.`,
+    };
+  }
 
   let blueprintId = Math.trunc(Number(args.blueprintId)) || 0;
   let printProviderId = Math.trunc(Number(args.printProviderId)) || 0;
@@ -812,37 +881,32 @@ async function proposePrintifyProduct(args: Record<string, unknown>): Promise<To
           error: `I couldn’t find a Printify product type matching “${productType}”. Try another word, or browse in Product Builder.`,
         };
       }
-      blueprintId = candidates[0].id;
-      blueprintTitle = candidates[0].title;
+      const [best] = rankBlueprints(candidates, productType);
+      blueprintId = best.id;
+      blueprintTitle = best.title;
     } catch (error) {
       return { summary: "Printify lookup failed", error: error instanceof Error ? error.message : "Lookup failed." };
     }
   }
 
-  // Resolve a print provider when none was given.
-  if (!printProviderId) {
-    try {
-      printProviderId = await resolveProvider(blueprintId);
-    } catch (error) {
-      return { summary: "No print provider", error: error instanceof Error ? error.message : "Lookup failed." };
+  // Variants and print areas are provider-scoped, and some providers list no
+  // variants at all — so pick one that actually has them, not just providers[0].
+  let available: VariantLite[] = [];
+  try {
+    if (printProviderId) available = await fetchVariants(blueprintId, printProviderId);
+    if (!available.length) {
+      const picked = await pickProviderWithVariants(blueprintId);
+      if (!picked) {
+        return {
+          summary: "No variants for that product type",
+          error: "That product type has no available variants on any print provider. Try another product type.",
+        };
+      }
+      printProviderId = picked.printProviderId;
+      available = picked.variants;
     }
-  }
-
-  // Variants and print areas are provider-scoped in the Printify catalog.
-  const res = await authedFetch(`/api/printify/catalog?id=${blueprintId}&provider=${printProviderId}`);
-  const data = (await res.json().catch(() => null)) as { error?: string; variants?: VariantLite[] } | null;
-  if (!res.ok) {
-    return {
-      summary: "Could not load variants for that print provider",
-      error: data?.error ?? `Printify catalog request failed (HTTP ${res.status}).`,
-    };
-  }
-  let available = (data?.variants ?? []).filter((v) => v.available !== false);
-  if (!available.length) {
-    return {
-      summary: "No variants for that product type",
-      error: "That product type has no available variants. Try another product type or print provider.",
-    };
+  } catch (error) {
+    return { summary: "No print provider", error: error instanceof Error ? error.message : "Lookup failed." };
   }
 
   const filters = (args.variantFilters && typeof args.variantFilters === "object"
@@ -867,12 +931,9 @@ async function proposePrintifyProduct(args: Record<string, unknown>): Promise<To
     String(args.printArea ?? "").trim() ||
     variants.find((v) => v.placeholders?.length)?.placeholders?.[0]?.position ||
     "front";
-  const title = String(args.title ?? "").trim() || design.name;
+  const title = String(args.title ?? "").trim() || design?.name || attachment?.name || "Untitled product";
   const description = String(args.description ?? "").trim();
   const tags = sanitizeTags(args.tags);
-  const ink = (["main", "white", "black"] as InkVariant[]).includes(args.ink as InkVariant)
-    ? (args.ink as InkVariant)
-    : "main";
 
   const perVariantPrices: Record<number, number> = {};
   if (args.prices && typeof args.prices === "object") {
@@ -887,17 +948,22 @@ async function proposePrintifyProduct(args: Record<string, unknown>): Promise<To
   const appliedDefault = !(explicitPrice > 0);
   const priceLabel = `$${(basePrice / 100).toFixed(2)}${appliedDefault ? " (default)" : ""}`;
 
+  const artworkLabel = design
+    ? `${design.name} (${ink} ink)`
+    : `${attachment?.name ?? "attached image"} (attached image)`;
   return {
     summary: `Ready to create “${title}” on Printify at ${priceLabel}`,
     confirmation: {
       detail: `${variants.length} variants · ${priceLabel} each · blueprint ${blueprintId}${
         blueprintTitle ? ` (${blueprintTitle})` : ""
-      } · print provider ${printProviderId} · artwork: ${design.name} (${ink} ink)${
+      } · print provider ${printProviderId} · artwork: ${artworkLabel}${
         tags.length ? ` · ${tags.length} tags` : ""
       }.${capped > 0 ? ` Printify caps a product at 100 variants, so ${capped} more were left out.` : ""}`,
       payload: {
-        designId: design.id,
-        designName: design.name,
+        designId: design?.id,
+        designName: design?.name,
+        artworkBase64: design ? undefined : (attachment?.dataUrl.split(",")[1] ?? ""),
+        artworkName: design ? undefined : attachment?.name,
         title,
         description,
         tags,
@@ -934,25 +1000,38 @@ export async function confirmPrintifyProduct(payload: Record<string, unknown>): 
     payload.prices && typeof payload.prices === "object"
       ? (payload.prices as Record<string, number>)
       : undefined;
-  const title = String(payload.title ?? "").trim() || design?.name || "Untitled product";
+  const inlineBase64 = String(payload.artworkBase64 ?? "").trim();
+  const inlineName = String(payload.artworkName ?? "").trim() || "artwork";
+  const title = String(payload.title ?? "").trim() || design?.name || inlineName || "Untitled product";
   const description = String(payload.description ?? "").trim();
   const printArea = String(payload.printArea ?? "front");
 
-  if (!design) return { summary: "Design not found", error: "That design is no longer in this browser." };
+  if (!design && !inlineBase64) {
+    return { summary: "Artwork not found", error: "That artwork is no longer in this browser. Attach it again." };
+  }
   if (!blueprintId || !printProviderId || !(price > 0) || !variantIds.length) {
     return { summary: "Missing product details", error: "The proposal was incomplete; try again." };
   }
 
   try {
-    const designAssetId = designAssetIdFor(design, ink);
-    const blob = designAssetId ? await getAssetBlob(designAssetId) : undefined;
+    let designAssetId = "";
     let artwork: { base64: string; filename: string; printAreaId: string } | undefined;
-    if (blob) {
+    if (design) {
+      designAssetId = designAssetIdFor(design, ink);
+      const blob = designAssetId ? await getAssetBlob(designAssetId) : undefined;
+      if (!blob) {
+        return {
+          summary: "Artwork missing",
+          error: `“${design.name}” no longer has its image stored in this browser. Re-upload it, or attach the image here.`,
+        };
+      }
       artwork = {
         base64: await artworkToBase64(blob, MAX_ARTWORK_BYTES),
         filename: `${design.name || "artwork"}.png`,
         printAreaId: printArea,
       };
+    } else {
+      artwork = { base64: inlineBase64, filename: `${inlineName}.png`, printAreaId: printArea };
     }
 
     const res = await authedFetch("/api/printify/products", {
@@ -983,7 +1062,7 @@ export async function confirmPrintifyProduct(payload: Record<string, unknown>): 
     const draft: ProductDraft = {
       id: uid(),
       name: title,
-      designId: design.id,
+      designId: design?.id ?? "",
       designAssetId: designAssetId ?? "",
       blueprintId,
       printProviderId,
@@ -1060,7 +1139,7 @@ export async function executeTool(
       case "save_chat_image":
         return await proposeSaveChatImage(args, ctx);
       case "create_printify_product":
-        return await proposePrintifyProduct(args);
+        return await proposePrintifyProduct(args, ctx);
       default:
         return { summary: `Unknown tool “${name}”`, error: `No tool named ${name}.` };
     }

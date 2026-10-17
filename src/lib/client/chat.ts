@@ -29,6 +29,8 @@ export interface ApiMessage {
   content: string | ApiContentPart[] | null;
   tool_calls?: ApiToolCall[];
   tool_call_id?: string;
+  /** Echoed back for DeepSeek-style providers; stripped server-side otherwise. */
+  reasoning_content?: string;
 }
 
 export function newId(): string {
@@ -164,7 +166,19 @@ export function toApiMessages(messages: ChatMessage[]): ApiMessage[] {
           function: { name: p.call.name, arguments: JSON.stringify(p.call.args ?? {}) },
         }));
       if (calls.length > 0) {
-        out.push({ role: "assistant", content: text || null, tool_calls: calls });
+        // DeepSeek-style providers 400 unless the assistant's reasoning is
+        // replayed alongside tool calls; others ignore it and the server strips
+        // it before forwarding.
+        const reasoningText = message.parts
+          .filter((p): p is { type: "reasoning"; text: string } => p.type === "reasoning")
+          .map((p) => p.text)
+          .join("");
+        out.push({
+          role: "assistant",
+          content: text || null,
+          tool_calls: calls,
+          ...(reasoningText ? { reasoning_content: reasoningText } : {}),
+        });
         for (const part of toolParts) {
           if (part.call.status !== "done" && part.call.status !== "error") continue;
           out.push({

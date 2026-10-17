@@ -111,7 +111,7 @@ Both must pass. The production run has caught bugs the local run missed.
   `npx wrangler secret put PRINTIFY_API_KEY` (and/or `AI_API_KEY`). With no keys
   anywhere, every integration endpoint returns 503 before doing work.
 - **AI is provider-aware.** `src/lib/ai/providers.ts` is the isomorphic registry
-  of 15 providers (OpenCode Zen, NVIDIA NIM, OpenRouter, Groq, Cerebras,
+  of 14 providers (NVIDIA NIM, OpenRouter, Groq, Cerebras,
   Together, Google Gemini, Mistral, DeepSeek, Fireworks, xAI, OpenAI, Anthropic,
   Ollama, custom) — labels, base URLs, auth, key hints, docs, and a free-tagging
   rule (`pricing` for OpenRouter, `suffix` for `:free`/`-free`, `curated`,

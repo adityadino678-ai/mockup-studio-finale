@@ -108,6 +108,12 @@ export const POST: APIRoute = async ({ request }) => {
   const tools = toOpenAiTools(toolNames);
   const ai = aiConfig(creds.ai);
   const model = ai.model;
+  // DeepSeek-style providers require the assistant's `reasoning_content` to be
+  // replayed on every request that carries tools; every other provider 400s on
+  // the unknown field, so drop it unless we are talking to one of them.
+  if (!/deepseek|zhipu|zai|siliconflow|kimi|moonshot/i.test(`${ai.provider} ${ai.model}`)) {
+    for (const message of messages) delete message.reasoning_content;
+  }
   // One budget for the whole turn: reasoning turns get more room so thinking
   // cannot consume the whole output and leave `content` empty.
   const maxTokens = outputTokenBudget({ maxTokens: body.maxTokens, effort });
@@ -140,10 +146,7 @@ export const POST: APIRoute = async ({ request }) => {
           else if (event.type === "tool_calls") send("tool_calls", { calls: event.calls });
           else if (event.type === "finish") send("finish", { reason: event.reason });
           else if (event.type === "usage") send("usage", event.usage);
-          else if (event.type === "done") {
-            send("done", { model });
-            break;
-          }
+          else if (event.type === "done") send("done", { model });
         }
       } catch (error) {
         if (!(error instanceof Error && error.name === "AbortError")) {

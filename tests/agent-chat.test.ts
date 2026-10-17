@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SseParser, decodeSseData, encodeSse } from "@/lib/ai/sse";
 import { modelCapabilities, modelReasoning } from "@/lib/ai/providers";
-import { parseProviderStreamLine, outputTokenBudget, retryFix } from "@/lib/server/ai";
+import { parseProviderStreamLine, outputTokenBudget, retryFix, streamChat } from "@/lib/server/ai";
 import {
   addMessage,
   consumeStream,
@@ -20,6 +20,7 @@ import {
   CONFIRM_TOOL_RUNNERS,
   confirmInkVariant,
   confirmMockupRender,
+  confirmPrintifyProduct,
   confirmRemoveBackground,
   confirmSaveChatImage,
   confirmSavePlacement,
@@ -824,5 +825,218 @@ describe("patchToolCall", () => {
       expect(part.call.status).toBe("done");
       expect(part.call.result).toEqual({ jobId: "j1" });
     }
+  });
+});
+
+const STREAM_CREDS = {
+  apiKey: "test-key",
+  baseUrl: "https://example.test/v1",
+  model: "test-model",
+  provider: "custom",
+  source: "browser" as const,
+};
+
+function streamedResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+}
+
+describe("streamChat transport", () => {
+  it("emits tool_calls before done for a stream that ends with [DONE]", async () => {
+    // The regression: tool deltas were accumulated but only flushed after the
+    // read loop, while `done` was yielded from inside it — and both the API
+    // route and the client stop at `done` — so model-issued tool calls never
+    // reached the browser for any provider that ends with `data: [DONE]`.
+    const chunks = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"list_library","arguments":"{\\"kind\\":"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"designs\\"}"}}]}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n',
+      "data: [DONE]\n\n",
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => streamedResponse(chunks)));
+    const events: Array<{ type: string }> = [];
+    for await (const event of streamChat([{ role: "user", content: "list my designs" }], {}, STREAM_CREDS)) {
+      events.push(event as { type: string });
+    }
+    vi.unstubAllGlobals();
+
+    const types = events.map((event) => event.type);
+    expect(types).toContain("tool_calls");
+    expect(types.indexOf("tool_calls")).toBeLessThan(types.indexOf("done"));
+    expect(types[types.length - 1]).toBe("done");
+    const toolEvent = events.find((event) => event.type === "tool_calls") as unknown as {
+      calls: Array<{ id: string; function: { name: string; arguments: string } }>;
+    };
+    expect(toolEvent.calls).toHaveLength(1);
+    expect(toolEvent.calls[0].function.name).toBe("list_library");
+    expect(toolEvent.calls[0].function.arguments).toBe('{"kind":"designs"}');
+  });
+
+  it("reassembles a tool call split across byte chunks", async () => {
+    const full =
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"list_library","arguments":"{\\"kind\\":\\"designs\\"}"}}]}}]}\n\ndata: [DONE]\n\n';
+    const middle = Math.floor(full.length / 2);
+    vi.stubGlobal("fetch", vi.fn(async () => streamedResponse([full.slice(0, middle), full.slice(middle)])));
+    let count = 0;
+    for await (const event of streamChat([{ role: "user", content: "x" }], {}, STREAM_CREDS)) {
+      if (event.type === "tool_calls") count = event.calls.length;
+    }
+    vi.unstubAllGlobals();
+    expect(count).toBe(1);
+  });
+
+  it("keeps repairing the request until the provider accepts it", async () => {
+    let attempts = 0;
+    const fetchMock = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Response(JSON.stringify({ error: { message: "Unsupported parameter: temperature" } }), {
+          status: 400,
+        });
+      }
+      if (attempts === 2) {
+        return new Response(
+          JSON.stringify({ error: { message: "max_tokens is not supported here, use max_completion_tokens" } }),
+          { status: 400 },
+        );
+      }
+      return streamedResponse(["data: [DONE]\n\n"]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const types: string[] = [];
+    for await (const event of streamChat([{ role: "user", content: "hi" }], {}, STREAM_CREDS)) {
+      types.push(event.type);
+    }
+    vi.unstubAllGlobals();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(types).toContain("done");
+  });
+});
+
+describe("intent router how-to guard", () => {
+  it("explains instead of proposing a write for how-questions", () => {
+    expect(routeIntent("How do I publish my design to Printify?")?.name).toBe("explain_howto");
+    expect(routeIntent("how does the batch studio work")?.name).toBe("explain_howto");
+  });
+
+  it("still routes real actions", () => {
+    expect(routeIntent("create a batch of every design")?.name).toBe("create_batch_job");
+    expect(routeIntent("list my designs")?.name).toBe("list_library");
+  });
+});
+
+describe("reasoning replay", () => {
+  it("echoes assistant reasoning with tool calls for DeepSeek-style providers", () => {
+    const messages: ChatMessage[] = [
+      {
+        id: "m1",
+        conversationId: "c",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "let me check the library" },
+          {
+            type: "tool",
+            call: { id: "c1", name: "list_library", args: { kind: "designs" }, status: "done", summary: "ok", result: {} },
+          },
+        ],
+        createdAt: 1,
+      },
+    ];
+    const out = toApiMessages(messages);
+    expect(out[0].reasoning_content).toBe("let me check the library");
+    expect(out[0].tool_calls?.[0].function.name).toBe("list_library");
+  });
+});
+
+describe("Printify listing hardening", () => {
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  it("refuses to create a product when the design's artwork is gone", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "missing",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const result = await confirmPrintifyProduct({
+      designId: "d1",
+      blueprintId: 6,
+      printProviderId: 99,
+      price: 1999,
+      variantIds: [1],
+    });
+    expect(result.error).toContain("no longer has its image");
+    expect(await db.productDrafts.count()).toBe(0);
+  });
+
+  it("lists an image attached in the conversation without a saved design", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      let payload: unknown = {
+        configured: true,
+        variants: [{ id: 1, available: true, placeholders: [{ position: "front" }] }],
+      };
+      if (u.includes("q=")) payload = { configured: true, blueprints: [{ id: 6, title: "Unisex Tee", brand: "Gildan" }] };
+      else if (u.includes("providers=1")) payload = { configured: true, providers: [{ id: 30, title: "Provider A" }] };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeTool(
+      "create_printify_product",
+      { productType: "t-shirt", price: 1999 },
+      { attachments: [{ name: "cat.png", mime: "image/png", dataUrl: "data:image/png;base64,AAAA" }] },
+    );
+    vi.unstubAllGlobals();
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.designId).toBeUndefined();
+    expect(result.confirmation?.payload.artworkBase64).toBe("AAAA");
+    expect(result.confirmation?.payload.artworkName).toBe("cat.png");
+    expect(result.confirmation?.payload.printProviderId).toBe(30);
+  });
+
+  it("picks a print provider that actually has variants", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      let payload: unknown = { configured: true };
+      if (u.includes("providers=1")) {
+        payload = { configured: true, providers: [{ id: 1, title: "Empty" }, { id: 2, title: "Has variants" }] };
+      } else if (u.includes("provider=1")) {
+        payload = { configured: true, variants: [] };
+      } else if (u.includes("provider=2")) {
+        payload = { configured: true, variants: [{ id: 7, available: true, placeholders: [{ position: "front" }] }] };
+      }
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await executeTool("create_printify_product", {
+      design: "sunset",
+      blueprintId: 6,
+      price: 1999,
+    });
+    vi.unstubAllGlobals();
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload.printProviderId).toBe(2);
+    expect(result.confirmation?.payload.variantIds).toEqual([7]);
   });
 });

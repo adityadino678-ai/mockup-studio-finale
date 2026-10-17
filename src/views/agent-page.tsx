@@ -408,7 +408,10 @@ export function AgentPage() {
 
           const parts: MessagePart[] = [];
           if (result.reasoning.trim()) parts.push({ type: "reasoning", text: result.reasoning });
-          if (result.text.trim() && !routedThisStep) parts.push({ type: "text", text: result.text });
+          // Keep the model's prose even when the router also ran a tool: its
+          // answer is what the user actually asked for, and dropping it made the
+          // agent look like it had said nothing.
+          if (result.text.trim()) parts.push({ type: "text", text: result.text });
 
           const toolParts: MessagePart[] = [];
           let awaitingConfirm = false;
@@ -518,6 +521,13 @@ export function AgentPage() {
           return;
         }
         setError("The agent reached its step limit for this turn.");
+      } catch (error) {
+        // Without this, any fetch/IndexedDB failure ended the turn silently:
+        // the spinner cleared in `finally` and the user saw no answer and no
+        // explanation.
+        if (!(error instanceof Error && error.name === "AbortError")) {
+          setError(error instanceof Error ? error.message : "Something went wrong during this turn.");
+        }
       } finally {
         setStreaming(null);
         busyRef.current = false;

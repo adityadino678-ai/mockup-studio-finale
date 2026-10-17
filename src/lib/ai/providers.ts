@@ -82,7 +82,7 @@ export interface ModelInfo {
   contextLength?: number;
 }
 
-export const DEFAULT_PROVIDER_ID = "openai";
+export const DEFAULT_PROVIDER_ID = "custom";
 export const DEFAULT_MODEL = "gpt-4o-mini";
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
@@ -91,20 +91,6 @@ const NON_CHAT =
   /(embedding|embed\b|whisper|(^|[-_/])tts|audio|speech|rerank|moderation|dall-e|gpt-image|stable-diffusion|(^|[-_/])flux)/i;
 
 export const PROVIDERS: ProviderDef[] = [
-  {
-    id: "opencode",
-    label: "OpenCode Zen",
-    blurb: "Curated, verified coding models served by the OpenCode team.",
-    baseUrl: "https://opencode.ai/zen/v1",
-    modelsPath: "/models",
-    chatPath: "/chat/completions",
-    auth: "bearer",
-    keyHint: "sk-…  (OpenCode Zen API key)",
-    docsUrl: "https://opencode.ai/docs/zen",
-    free: "suffix",
-    freeTier: "Some models are free",
-    priority: 1,
-  },
   {
     id: "nvidia",
     label: "NVIDIA NIM",
@@ -401,7 +387,6 @@ export function normalizeModels(def: ProviderDef, raw: unknown): ModelInfo[] {
 // ---------------------------------------------------------------------------
 
 const PROVIDER_CAPS: Record<string, { tools?: boolean; vision?: boolean }> = {
-  opencode: { tools: true },
   nvidia: { tools: true, vision: true },
   openrouter: { tools: true, vision: true },
   groq: { tools: true },
