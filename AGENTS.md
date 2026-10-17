@@ -44,7 +44,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 112 unit tests
+npm run test          # 123 unit tests
 npm run test:e2e      # 17 acceptance tests (local dev server)
 ```
 
@@ -180,6 +180,36 @@ Both must pass. The production run has caught bugs the local run missed.
   (`outputTokenBudget` in `src/lib/server/ai.ts`). `?debug=1` on `/agent` opens a
   raw-SSE capture drawer
   (`src/components/agent/debug-panel.tsx`) — use it to reproduce provider issues.
+- **Tool calls must be emitted before `done`, and that is load-bearing.** The SSE
+  read loop yields `{type:"done"}` the moment the provider sends `data: [DONE]`,
+  and both `/api/ai/chat` and the client stop there. Aggregated `tool_calls` were
+  originally flushed *after* the loop, so for every provider that terminates with
+  `[DONE]` (OpenAI, Groq, OpenRouter, …) the model's tool calls were silently
+  dropped and the agent only ever acted through the `routeIntent` keyword
+  fallback. `streamChat` now accumulates through `absorb()`, flushes
+  `tool_calls` first, and always ends with `done` last. `tests/agent-chat.test.ts`
+  pins the ordering.
+- **A model can stream reasoning forever and never answer.** Verified live:
+  `nvidia/nemotron-3.5-lightning:free` over OpenRouter emits 22k+ characters of
+  `delta.reasoning` with `content: ""` and no tool calls, so the agent looks
+  broken ("still doesn't answer") when the fault is the model. The client
+  already retries once with a doubled budget and a "reply now, plain text"
+  nudge, then fails loudly. `cohere/north-mini-code:free` was the free model that
+  reliably returned real `tool_calls`; check a model with a bare
+  `/api/ai/chat` call before blaming the app. A provider whose model id is not
+  enabled for the account fails fast with `Function '<uuid>': Not found for
+  account '<id>'` (seen on NVIDIA NIM), which the error frame surfaces verbatim.
+- **Printify's useful error text is not in `message`.** A rejected product comes
+  back as `{"error":"Operation failed.","detail":"{\"errors\":{\"reason\":\"Failed
+  to upload image…\"}}"}`. `confirmPrintifyProduct` now prefers
+  `detail.errors.reason` so the tool card says what actually happened. A design
+  whose artwork blob is only tens of bytes (a truncated PNG) is the usual cause —
+  the confirm step rejects anything under `MIN_ARTWORK_BYTES` (256) before
+  uploading.
+- **A verified live run created product `6ad34982afcbf697740ed96f`** (blueprint 5,
+  print provider 39, 100 variants, $24.99) from a generated 1 MB PNG through the
+  agent's `create_printify_product` confirm card, proving model → tool call →
+  confirm → Printify upload → product → `productDrafts` end to end.
 - **Agent voice, steering, and the rail (M3).** `src/lib/client/speech.ts` wraps the
   Web Speech API with feature detection (nothing throws when unsupported); the
   composer shows a mic (dictation → draft) and a speaker toggle (read replies

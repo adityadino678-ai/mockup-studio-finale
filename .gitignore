@@ -48,3 +48,6 @@ build.log
 e2e*.log
 test-results/
 playwright-report/
+
+# local dev server logs
+.dev-*.log

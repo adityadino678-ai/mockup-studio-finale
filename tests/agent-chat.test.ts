@@ -1039,4 +1039,57 @@ describe("Printify listing hardening", () => {
     expect(result.confirmation?.payload.printProviderId).toBe(2);
     expect(result.confirmation?.payload.variantIds).toEqual([7]);
   });
+
+  it("refuses to upload artwork that is only a few bytes", async () => {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    // The guard runs before any Blob API, so a size-only stand-in is enough —
+    // fake-indexeddb cannot round-trip a real (jsdom) Blob.
+    await db.blobs.put({ id: "a1", blob: { size: 92 } as unknown as Blob });
+    const result = await confirmPrintifyProduct({
+      designId: "d1",
+      blueprintId: 6,
+      printProviderId: 30,
+      price: 1999,
+      variantIds: [1],
+    });
+    expect(result.error).toContain("bytes of artwork");
+    expect(await db.productDrafts.count()).toBe(0);
+  });
+
+  it("surfaces Printify's real reason instead of the generic Operation failed.", async () => {
+    const detail = JSON.stringify({
+      code: 10300,
+      message: "Operation failed.",
+      errors: { reason: "Failed to upload image, please contact the support" },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "Operation failed.", detail }), {
+            status: 502,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    const result = await confirmPrintifyProduct({
+      artworkBase64: "AAAA",
+      artworkName: "cat.png",
+      blueprintId: 6,
+      printProviderId: 30,
+      price: 1999,
+      variantIds: [1],
+    });
+    vi.unstubAllGlobals();
+    expect(result.error).toContain("Failed to upload image");
+    expect(await db.productDrafts.count()).toBe(0);
+  });
 });

@@ -818,6 +818,8 @@ function rankBlueprints(candidates: BlueprintLite[], query: string): BlueprintLi
 interface CreateProductResponse {
   configured?: boolean;
   error?: string;
+  /** Printify's nested error payload, forwarded verbatim by the endpoint. */
+  detail?: string;
   product?: { id: string; title?: string; status?: string; permalink?: string };
 }
 
@@ -980,6 +982,38 @@ async function proposePrintifyProduct(
 }
 
 /**
+ * A design whose stored artwork is a few dozen bytes is a truncated or empty
+ * file — Printify accepts the upload request and then refuses to decode it
+ * ("Failed to upload image"), which reads as a mystery failure. Catch it here
+ * with the real cause instead.
+ */
+const MIN_ARTWORK_BYTES = 256;
+
+/**
+ * Printify's top-level message for a rejected product is the useless
+ * "Operation failed."; the actionable text is nested in the error payload that
+ * our own endpoint forwards as `detail` (`{ errors: { reason } }`). Prefer the
+ * deepest message so the tool card says what actually went wrong.
+ */
+function printifyFailureMessage(
+  data: { error?: string; detail?: string } | null,
+  httpStatus: number,
+): string {
+  const detail = data?.detail?.trim();
+  if (detail) {
+    try {
+      const parsed = JSON.parse(detail) as { errors?: { reason?: string }; message?: string };
+      const reason = parsed?.errors?.reason || parsed?.message;
+      if (reason) return reason;
+    } catch {
+      // `detail` is not JSON — it is already the readable text.
+    }
+    return detail;
+  }
+  return data?.error ?? `Printify request failed (HTTP ${httpStatus}).`;
+}
+
+/**
  * Runs a confirmed Printify proposal for real: uploads the artwork and creates
  * the product. Writes a `ProductDraft` so the creation is visible on the
  * Products page. The user's confirm click is what triggers this — the agent
@@ -1025,6 +1059,12 @@ export async function confirmPrintifyProduct(payload: Record<string, unknown>): 
           error: `“${design.name}” no longer has its image stored in this browser. Re-upload it, or attach the image here.`,
         };
       }
+      if (blob.size < MIN_ARTWORK_BYTES) {
+        return {
+          summary: "Artwork looks empty",
+          error: `“${design.name}” only has ${blob.size} bytes of artwork, so Printify cannot decode it. Re-upload the real image.`,
+        };
+      }
       artwork = {
         base64: await artworkToBase64(blob, MAX_ARTWORK_BYTES),
         filename: `${design.name || "artwork"}.png`,
@@ -1054,7 +1094,7 @@ export async function confirmPrintifyProduct(payload: Record<string, unknown>): 
     if (!res.ok || !data?.product?.id) {
       return {
         summary: "Printify rejected the product",
-        error: data?.error ?? `Printify request failed (HTTP ${res.status}).`,
+        error: printifyFailureMessage(data, res.status),
       };
     }
 
