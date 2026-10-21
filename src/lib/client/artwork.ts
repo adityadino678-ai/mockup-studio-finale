@@ -76,3 +76,55 @@ export async function artworkToBase64(blob: Blob, maxBytes = MAX_ARTWORK_BYTES):
   }
   throw new Error("Artwork is too large to upload even after downscaling. Try a smaller PNG.");
 }
+
+/**
+ * Returns the artwork as base64, resampled to fit the print area.
+ *
+ * Printify validates the uploaded image's resolution against the print area
+ * and rejects artwork that is too low ("Image has low quality"), so the file
+ * is sized to the area rather than sent at whatever resolution it happened
+ * to be. That also keeps the upload small - a 6000 px PNG becomes a ~1 MB one.
+ *
+ * The artwork is never UPSCALED: extra pixels carry no detail, so they would
+ * only make the upload bigger. A design smaller than the print area therefore
+ * stays small, and the caller is told so it can warn the user.
+ *
+ * When the file is still too big the size is stepped down in stages, with a
+ * floor of 1200 px. An earlier version fell back to a 700 px image here,
+ * which Printify rejects outright.
+ */
+export async function artworkToBase64Sized(
+  blob: Blob,
+  targetLongEdge: number,
+  maxBytes = MAX_ARTWORK_BYTES,
+): Promise<string> {
+  const img = await loadImage(blob);
+  const longest = Math.max(img.width, img.height);
+
+  const render = async (longEdge: number): Promise<string> => {
+    const scale = Math.min(1, longEdge / longest);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not get 2D context");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return readBase64(await canvasToPng(canvas));
+  };
+
+  const ceiling = Math.min(longest, targetLongEdge);
+  const candidates = [ceiling, ceiling * 0.8, ceiling * 0.6]
+    .concat([2400, 1800, 1200].filter((v) => v < ceiling))
+    .filter((v) => v > 0)
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort((a, b) => b - a);
+
+  for (const edge of candidates) {
+    const base64 = await render(edge);
+    if (estimateBase64Bytes(base64) <= maxBytes) return base64;
+  }
+  throw new Error(
+    "Artwork is too large to upload at the print area size. Use a smaller or flatter file.",
+  );
+}

@@ -42,4 +42,28 @@ function Label({ className, ...props }: React.ComponentProps<typeof LabelPrimiti
   );
 }
 
-export { Input, Textarea, Label };
+/**
+ * A label that is bound to its control.
+ *
+ * `Label` alone does not name a control: a Radix label that is not associated
+ * with a form element leaves screen readers announcing "slider" or "spin
+ * button" with nothing else. Pass `htmlFor` (and the matching `id` on the
+ * input) to make the pair explicit.
+ */
+function FieldLabel({
+  htmlFor,
+  className,
+  children,
+}: {
+  htmlFor: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <LabelPrimitive.Root htmlFor={htmlFor} className={cn("text-[12px] text-ink-muted", className)}>
+      {children}
+    </LabelPrimitive.Root>
+  );
+}
+
+export { Input, Textarea, Label, FieldLabel };

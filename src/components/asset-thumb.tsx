@@ -10,13 +10,15 @@ interface AssetThumbProps {
   className?: string;
   checkerboard?: boolean;
   alt?: string;
+  /** Inline styles, used for animation delays and similar. */
+  style?: React.CSSProperties;
 }
 
 /**
  * Renders a cached thumbnail for an asset id from IndexedDB. Falls back to a
  * subtle placeholder while loading. Object URLs are revoked on unmount/update.
  */
-export function AssetThumb({ assetId, className, checkerboard, alt }: AssetThumbProps) {
+export function AssetThumb({ assetId, className, checkerboard, alt, style }: AssetThumbProps) {
   const blob = useLiveQuery(() => getThumbBlob(assetId), [assetId]);
   const [url, setUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
@@ -53,6 +55,7 @@ export function AssetThumb({ assetId, className, checkerboard, alt }: AssetThumb
       alt={alt ?? "Asset thumbnail"}
       onError={() => setFailed(true)}
       className={cn("object-contain", checkerboard && "checkerboard", className)}
+      style={style}
       draggable={false}
     />
   );

@@ -38,10 +38,12 @@ const badgeVariants = cva(
       variant: {
         default: "bg-sage-soft text-forest",
         forest: "bg-forest text-white",
-        outline: "border border-border-strong text-ink-muted",
+        outline: "border border-border-strong text-ink",
         danger: "bg-danger-soft text-danger",
         warning: "bg-warning-soft text-warning",
-        muted: "bg-surface-muted text-ink-muted",
+        // The muted badge sits on the muted surface, where ink-muted is only
+        // 4.4:1 - too low for 11px text. Ink clears it comfortably.
+        muted: "bg-surface-muted text-ink",
       },
     },
     defaultVariants: { variant: "default" },

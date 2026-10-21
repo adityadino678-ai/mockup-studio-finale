@@ -49,6 +49,7 @@ export const GET: APIRoute = async ({ url, request }) => {
   const id = url.searchParams.get("id");
   const category = url.searchParams.get("category") ?? undefined;
   const wantsProviders = url.searchParams.get("providers") === "1";
+  const wantsColors = url.searchParams.get("colors") === "1";
   const provider = url.searchParams.get("provider");
   const q = url.searchParams.get("q")?.trim().toLowerCase() ?? "";
   const limit = Math.trunc(Number(url.searchParams.get("limit"))) || 0;
@@ -70,6 +71,44 @@ export const GET: APIRoute = async ({ url, request }) => {
     }
     if (wantsProviders) {
       return json({ configured: true, ...(await client.listProviders(Number(id))) });
+    }
+    if (wantsColors) {
+      // Real colour hexes only exist on a PRODUCT, never in the catalogue.
+      // Find one the seller already made for the same blueprint + provider
+      // and read its option values. See AGENTS.md.
+      const blueprintId = Number(id);
+      const printProviderId = Number(url.searchParams.get("provider"));
+      const shopId = await client.resolveShopId();
+      const products = await client.listShopProducts(shopId);
+      const match = products.find(
+        (p) =>
+          p.blueprint_id === blueprintId &&
+          (Number.isNaN(printProviderId) || p.print_provider_id === printProviderId),
+      );
+      if (!match) {
+        return json({ configured: true, source: "none", colors: [], sizes: [], variants: [] });
+      }
+      // The list endpoint may omit variants, so read the product in full.
+      const full = await client.getProduct(shopId, match.id).catch(() => match);
+      const options = full.options ?? [];
+      const colourOption = options.find((o) => /colou?r/i.test(o.type ?? o.name ?? ""));
+      const sizeOption = options.find((o) => /size/i.test(o.type ?? o.name ?? ""));
+      return json({
+        configured: true,
+        source: "product",
+        templateProductId: match.id,
+        colors: (colourOption?.values ?? []).map((v) => ({
+          id: v.id,
+          title: v.title,
+          colors: v.colors ?? [],
+        })),
+        sizes: (sizeOption?.values ?? []).map((v) => ({ id: v.id, title: v.title })),
+        variants: (full.variants ?? []).map((v) => ({
+          id: v.id,
+          title: v.title,
+          options: v.options ?? [],
+        })),
+      });
     }
     if (provider) {
       const variants = await client.listVariants(Number(id), Number(provider));

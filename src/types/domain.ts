@@ -326,6 +326,86 @@ export interface ListingDraft {
 }
 
 // ---------------------------------------------------------------------------
+// Printify Studio — the bulk-listing session.
+//
+// One session describes a whole batch: which product, which colours, which
+// sizes, where the artwork sits, and what has already been created. It is
+// stored as a single blob in the `settings` table (key `printifyStudio:session`)
+// so it survives a reload without a schema migration.
+// ---------------------------------------------------------------------------
+
+/** Which row of the designs grid a design belongs to. */
+export type StudioRowId = "plain" | "ink";
+
+/** The colour selection for one row of designs. */
+export interface StudioRowState {
+  /** Colour titles selected for this row. */
+  colors: string[];
+  /**
+   * Colour titles (within `colors`) that are printed with the black-ink
+   * artwork. Everything else in the row uses the white ink.
+   */
+  blackInkColors: string[];
+}
+
+/**
+ * Where an artwork sits inside a print area, in Printify's convention:
+ * centre-based coordinates in [0,1] and a width-relative scale.
+ */
+export interface StudioPlacement {
+  /** Print area position, e.g. "front". */
+  position: string;
+  /** Centre X within the print area, 0..1 (0.5 = centred). */
+  x: number;
+  /** Centre Y within the print area, 0..1. */
+  y: number;
+  /** Image width as a fraction of the print-area width. */
+  scale: number;
+  /** Rotation in degrees, clockwise. */
+  angle: number;
+}
+
+export interface StudioSession {
+  blueprintId?: number;
+  printProviderId?: number;
+  /** Size labels shared by every row. */
+  sizes: string[];
+  rows: Record<StudioRowId, StudioRowState>;
+  /**
+   * The designs this batch covers - the ids ticked in the Designs tab. Empty
+   * means "every design in the library", which the Design panel always says
+   * out loud so a batch is never bigger than the user expects.
+   */
+  designIds: string[];
+  /** When true, every design uses `universalPlacement`. */
+  universal: boolean;
+  universalPlacement: StudioPlacement;
+  /** Per-design placement overrides, used when `universal` is false. */
+  placements: Record<string, StudioPlacement>;
+  /** Price in cents, applied to every enabled variant. */
+  priceCents?: number;
+  /** `{design}` and `{product}` are replaced when a product is created. */
+  titleTemplate?: string;
+  updatedAt: number;
+}
+
+/** A product created by the studio, and how it went. */
+export interface StudioProductResult {
+  designId: string;
+  /** The title that was actually sent to Printify. */
+  title: string;
+  /** The design's name, for grouping. */
+  designName: string;
+  /** The Printify product id, once created. */
+  remoteProductId?: string;
+  status: "created" | "failed" | "skipped";
+  error?: string;
+  /** The Printify image ids uploaded for this product's artwork groups. */
+  imageIds?: string[];
+  createdAt: number;
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 

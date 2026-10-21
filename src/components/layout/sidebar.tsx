@@ -18,6 +18,7 @@ import {
   Search,
   Settings as SettingsIcon,
   Shapes,
+  Shirt,
   Store,
 } from "lucide-react";
 
@@ -50,6 +51,7 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/editor", label: "Mockup Editor", icon: <PenTool className="h-4 w-4" /> },
       { href: "/batch", label: "Batch Studio", icon: <Layers className="h-4 w-4" /> },
+      { href: "/printify-studio", label: "Printify Studio", icon: <Shirt className="h-4 w-4" /> },
       { href: "/templates", label: "Templates", icon: <Boxes className="h-4 w-4" /> },
     ],
   },

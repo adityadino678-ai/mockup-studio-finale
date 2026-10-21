@@ -80,6 +80,103 @@ Both must pass. The production run has caught bugs the local run missed.
   secrets in `astro.config.mjs`; no key is required for the core workflow.
 - **No `Buffer`.** `atob` + `Uint8Array` in `api/printify/products.ts`.
 
+## The Printify product contract (verified live, Oct 2026)
+
+Established by `npm run spike:printify` against a real shop — see
+`scripts/spike-printify.mjs`. These are **observed** behaviours, not guesses.
+Re-run the spike after any Printify change.
+
+**A product is a variant partition, and `print_areas` must cover every variant.**
+
+- `variants[]` = the enabled (colour × size) combinations, each with a price in
+  cents. There is no `colors` parameter: **a colour *is* a variant id.**
+- `print_areas[]` = groups of `{variant_ids, placeholders[{position, images[]}]}`.
+  One group per artwork; different groups may carry different artwork.
+- **`print_areas` is REQUIRED.** Code `8150` "print_areas: The print areas field
+  is required." — but `createProduct()` in `lib/server/printify.ts` omits the
+  field when `printAreas` is empty, so that path fails. Always send one.
+- **Printify rewrites `variant_ids` to complete the partition.** Any variant not
+  named by any group is silently appended to the **last** group.
+- **An incomplete partition renders the WRONG ARTWORK.** Verified at the pixel
+  level: with groups `A=[17391]` and `B=[17427]`, Printify expanded B to the
+  other 17 variants *and* variant 17391's generated mockup showed B's artwork.
+  With a **complete** partition (every variant named exactly once) the artwork
+  is exact, in any group order — confirmed by sampling the generated mockup
+  JPEGs: Heather Grey → red, Solid Black → blue, Solid White → green.
+  → **Always build a complete partition over every variant of the
+  (blueprint, print_provider) and disable the unwanted ones with
+  `is_enabled: false`.** Never rely on Printify filling the gaps.
+- `placeholders[].position` comes back expanded to every printable position for
+  the variant (`front` **and** `back`), but only the position you named receives
+  the image. The other stays empty — that is expected, not a bug.
+- `x`/`y` are **centre-based** in `[0,1]` (`0.5` = print-area centre) and
+  `scale` is image-width ÷ placeholder-width. Printify's own rule of thumb:
+  artwork the width of the placeholder → `scale: 1, x: 0.5, y: 0.5`.
+- Placeholder size is **per variant**, so one blueprint can have different
+  print areas per colour (embroidery front ≠ DTF front). A "universal"
+  placement therefore means different physical sizes on different garments.
+- **Colour hexes live on the *product*, not the catalogue.** The v1 catalogue
+  only returns colour *names* (`options: {color: "Heather Grey"}`). A product
+  carries the real values:
+  `options[] = [{name:"Colors", type:"color", display_in_preview:true,
+  values:[{id:831, title:"Heather Grey", colors:["#a4a4a3","#B7B6B5"]}]}]`.
+  A template product (or any existing product for the same blueprint+provider)
+  is the only source of true swatch hexes.
+- **API-created products are unpublished drafts.** `visible: true` is the
+  sales-channel flag, not a publish flag: `unpublish.json` answers
+  `"Cannot unpublish product, which was not published."` Publishing is
+  `POST /shops/{id}/products/{pid}/publish.json` with a body of **booleans**
+  (`{title:true, description:true, images:true, variants:true, tags:true,
+  keyFeatures:true, shipping_template:true}`) — each flag says "publish this
+  field". It is not a simple toggle.
+- `GET /shops/{id}/products.json` returns `{current_page, data:[…]}`, **not**
+  `{products:[…]}`. `limit` may not exceed 50.
+- **The catalogue is a SUBSET of the product's variants.** Measured: blueprint
+  6 / provider 30 lists 132 variants and the product has 137; 706 / 99 lists
+  419 and the product has 509. The extras belong to colours the catalogue
+  does not expose, so the UI can never select them - they arrive disabled.
+  They do land in the LAST print area, so the last group must be one whose
+  artwork would be harmless if it were ever enabled.
+- `npm run spike:printify` checks all of the above against a live shop and
+  deletes what it creates. Run it after any Printify change; it is the only
+  thing that catches API drift.
+
+## The Printify Studio (`/printify-studio`)
+
+The bulk listing tool: upload designs, pick the product and its colours,
+place the artwork, create one Printify product per design.
+
+- `src/lib/printify/` - the pure core: `colors` (hex, lightness, ink
+  contrast), `fit` (placement maths), `variants` (colour -> variant id and
+  the partition), `print-areas` (the payload and its guard),
+  `catalog-client` (cached catalogue), `studio-session` (the stored state).
+  Everything in there is a pure function with unit tests in
+  `tests/studio-printify.test.ts` - the ONLY safety net, because CI has no
+  Printify key.
+- `src/views/studio/` - the three tabs: Designs, Colors, Design panel.
+- The session is one blob in the `settings` table (`printifyStudio:session`).
+  It survives a reload without a schema migration.
+
+Four things that are easy to get wrong, and were:
+
+1. **The artwork is chosen by a group's INK LABEL, never by its position.**
+   A group with no colours is normal (the user marked every colour for the
+   other ink), and it used to shift the artwork onto the wrong colours.
+2. **The partition must cover every variant.** `buildPartition` completes it
+   over the catalogue, and `assertCompletePartition` checks it before a
+   product is created. Printify rewrites an incomplete partition and prints
+   the wrong artwork - proven at the pixel level.
+3. **A background removal "succeeded" when it removed nothing.** The check
+   used the output's total transparency, which is 1.0 for an
+   already-transparent artwork AND for a solid-colour artwork whose artwork
+   was erased. The engine now reports the fraction of pixels whose alpha
+   CHANGED (`removed`), and the UI fails when nothing changed or when
+   everything was removed.
+4. **Only the ticked designs are created.** An empty selection means NO
+   batch, not "every design" - otherwise one click turns one design into
+   fifty products. Created products are also written to `productDrafts`, so
+   they show up in the Product Builder and the Listings page.
+
 ## Traps that will bite you again
 
 1. **`main` in `wrangler.jsonc` must be a real file path.** The value in Astro's

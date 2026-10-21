@@ -79,6 +79,34 @@ export interface PrintifyShop {
   sales_channel?: string;
 }
 
+/** A product in the shop, as far as the list endpoint reports it. */
+export interface PrintifyShopProduct {
+  id: string;
+  title: string;
+  blueprint_id?: number;
+  print_provider_id?: number;
+  visible?: boolean;
+  options?: PrintifyProductOption[];
+  variants?: PrintifyProductVariant[];
+}
+
+/** A product option: a named group of selectable values. */
+export interface PrintifyProductOption {
+  name: string;
+  type: string;
+  values: Array<{ id: number; title: string; colors?: string[] }>;
+  display_in_preview?: boolean;
+}
+
+/** A product variant: the option value ids it is made of. */
+export interface PrintifyProductVariant {
+  id: number;
+  title: string;
+  price?: number;
+  is_enabled?: boolean;
+  options: number[];
+}
+
 export interface PrintifyProductCreated {
   id: string;
   title: string;
@@ -98,11 +126,40 @@ export interface CreatePrintifyProductInput {
   variants: Record<string, number[]>;
   /** Variant id → price in cents. Required by Printify for every enabled variant. */
   prices: Record<number, number>;
-  /** Print area position → uploaded image id. */
+  /**
+   * Print areas, one group per artwork. The groups MUST cover every enabled
+   * variant: Printify rewrites a group's `variant_ids` to swallow anything
+   * nobody named, and a variant that lands in the wrong group is printed with
+   * the wrong artwork. See AGENTS.md.
+   */
+  printAreaGroups?: PrintifyPrintAreaGroup[];
+  /**
+   * Legacy single-artwork form: position → uploaded image id. Kept for the
+   * Product Builder and the agent tool. `print_areas` is REQUIRED by
+   * Printify, so one of the two forms must always be present.
+   */
   printAreas?: Record<string, string>;
   /** Optional storefront images (Printify also generates mockups automatically). */
   images?: Array<{ src: string; position?: string; is_default?: boolean }>;
   shopId?: number;
+}
+
+/** One artwork group: the variants it prints on, and where it sits. */
+export interface PrintifyPrintAreaGroup {
+  /** The variants this artwork is printed on. */
+  variantIds: number[];
+  /** Print area position, e.g. "front". */
+  position: string;
+  /** The uploaded image id. */
+  imageId: string;
+  /** Centre X within the print area, 0..1 (0.5 = centred). */
+  x?: number;
+  /** Centre Y within the print area, 0..1. */
+  y?: number;
+  /** Image width as a fraction of the print-area width. */
+  scale?: number;
+  /** Rotation in degrees, clockwise. */
+  angle?: number;
 }
 
 function extractError(data: unknown, status: number): string {
@@ -281,14 +338,62 @@ export function createPrintifyClient(explicitKey?: string) {
           400,
         );
       }
-      const printAreas = Object.entries(input.printAreas ?? {})
-        .filter(([, imageId]) => imageId && imageId !== "pending")
-        .map(([position, imageId]) => ({
-          variant_ids: variantIds,
-          placeholders: [
-            { position, images: [{ id: String(imageId), x: 0.5, y: 0.5, scale: 1, angle: 0 }] },
-          ],
-        }));
+      const printAreas: Array<{
+        variant_ids: number[];
+        placeholders: Array<{
+          position: string;
+          images: Array<{ id: string; x: number; y: number; scale: number; angle: number }>;
+        }>;
+      }> = [];
+
+      if (input.printAreaGroups && input.printAreaGroups.length > 0) {
+        // One group per artwork. `variant_ids` decides which colour the
+        // artwork is printed on, so the groups must partition the variants.
+        for (const group of input.printAreaGroups) {
+          if (!group.imageId || group.variantIds.length === 0) continue;
+          printAreas.push({
+            variant_ids: group.variantIds,
+            placeholders: [
+              {
+                position: group.position,
+                images: [
+                  {
+                    id: String(group.imageId),
+                    x: group.x ?? 0.5,
+                    y: group.y ?? 0.5,
+                    scale: group.scale ?? 1,
+                    angle: group.angle ?? 0,
+                  },
+                ],
+              },
+            ],
+          });
+        }
+      } else {
+        // Legacy single-artwork form: every enabled variant gets the same image.
+        for (const [position, imageId] of Object.entries(input.printAreas ?? {})) {
+          if (!imageId || imageId === "pending") continue;
+          printAreas.push({
+            variant_ids: variantIds,
+            placeholders: [
+              {
+                position,
+                images: [{ id: String(imageId), x: 0.5, y: 0.5, scale: 1, angle: 0 }],
+              },
+            ],
+          });
+        }
+      }
+
+      if (printAreas.length === 0) {
+        // Printify rejects a product without print areas (code 8150), so fail
+        // here with a message the user can act on instead of letting the
+        // gateway answer "Validation failed."
+        throw new PrintifyError(
+          "A product needs artwork: attach at least one design to a print area before creating it.",
+          400,
+        );
+      }
 
       const body: Record<string, unknown> = {
         title: input.title,
@@ -296,8 +401,8 @@ export function createPrintifyClient(explicitKey?: string) {
         blueprint_id: input.blueprintId,
         print_provider_id: input.printProviderId,
         variants: variantIds.map((id) => ({ id, price: input.prices[id], is_enabled: true })),
+        print_areas: printAreas,
       };
-      if (printAreas.length > 0) body.print_areas = printAreas;
       if (input.tags?.length) body.tags = input.tags;
       if (input.images?.length) body.images = input.images;
 
@@ -314,6 +419,28 @@ export function createPrintifyClient(explicitKey?: string) {
         throw new PrintifyError("This Printify account has no shops connected", 404, shops);
       }
       return shops[0];
+    },
+
+    /**
+     * GET /shops/{shop_id}/products.json - the shop's existing products.
+     *
+     * This is how we find a TEMPLATE: a product the seller already made for
+     * the same blueprint and print provider carries that provider's real
+     * colour values and their hexes, which the catalogue never exposes.
+     */
+    async listShopProducts(shopId: number, limit = 50): Promise<PrintifyShopProduct[]> {
+      const data = await request<unknown>(`/shops/${shopId}/products.json?limit=${limit}`);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray((data as { data?: unknown })?.data)
+          ? (data as { data: unknown[] }).data
+          : [];
+      return list as PrintifyShopProduct[];
+    },
+
+    /** GET /shops/{shop_id}/products/{product_id}.json - one product in full. */
+    getProduct(shopId: number, productId: string): Promise<PrintifyShopProduct> {
+      return request<PrintifyShopProduct>(`/shops/${shopId}/products/${productId}.json`);
     },
   };
 }

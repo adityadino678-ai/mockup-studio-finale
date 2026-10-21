@@ -397,10 +397,25 @@ test.describe("core workflow", () => {
 
   test("12. missing credentials never break unrelated features", async ({ page }) => {
     await seedLibrary(page);
-    // Integrations report honest, unconfigured states.
+    // Integrations report an HONEST state for whatever configuration exists.
+    // In CI no key is present, so the state is "not configured"; a developer
+    // running locally with a key in .dev.vars gets the connected state. Both
+    // are correct, and neither may break anything else.
+    const configured = await page.evaluate(async () => {
+      const res = await fetch("/api/printify/catalog?limit=1");
+      const data = await res.json();
+      return Boolean(data.configured);
+    });
+
     await gotoApp(page, "/products");
-    await expect(page.getByText("Not configured. Local drafts work without an account.")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/Add PRINTIFY_API_KEY/).first()).toBeVisible();
+    if (configured) {
+      await expect(page.getByText(/Connected — \d+ blueprints available/)).toBeVisible({ timeout: 20_000 });
+    } else {
+      await expect(page.getByText("Not configured. Local drafts work without an account.")).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(page.getByText(/Add PRINTIFY_API_KEY/).first()).toBeVisible();
+    }
 
     await gotoApp(page, "/seo");
     await expect(page.getByText(/No AI provider configured/)).toBeVisible({ timeout: 20_000 });
@@ -435,6 +450,7 @@ test.describe("core workflow", () => {
     const routes = [
       "/", "/agent", "/designs", "/mockups", "/editor", "/batch", "/templates",
       "/products", "/listings", "/export", "/seo", "/activity", "/settings",
+      "/printify-studio",
     ];
     for (const route of routes) {
       await page.goto(route);
@@ -466,6 +482,7 @@ test.describe("core workflow", () => {
       { link: /^Mockups$/, path: "/mockups", copy: /Photos of your products/ },
       { link: /^Mockup Editor$/, path: "/editor", copy: /Pick a design/ },
       { link: /^Batch Studio$/, path: "/batch", copy: /No batch jobs yet/ },
+      { link: /^Printify Studio$/, path: "/printify-studio", copy: /Upload designs, choose the product/ },
       { link: /^Templates$/, path: "/templates", copy: /Reusable settings for placements/ },
       { link: /^Product Builder$/, path: "/products", copy: /No product drafts/ },
       { link: /^Listings$/, path: "/listings", copy: /Etsy-ready drafts with validation/ },
@@ -531,8 +548,7 @@ test.describe("core workflow", () => {
     expect(stored?.activeProvider).toBe("nvidia");
   });
 
-  test("17. agent page exposes sessions, composer and a model switcher", async ({ page }) => {
-    await gotoApp(page, "/agent");
+  test("17. agent page exposes sessions, composer and a model switcher", async ({ page }) => {    await gotoApp(page, "/agent");
 
     // Sessions rail with a search box and a New chat button.
     await expect(page.getByRole("button", { name: /New chat/ })).toBeVisible();
@@ -557,6 +573,59 @@ test.describe("core workflow", () => {
     await expect(page.getByText("stored in this browser")).toBeVisible();
     await page.getByRole("button", { name: "Hide workspace rail" }).click();
     await expect(page.getByText("stored in this browser")).toHaveCount(0);
+  });
+
+  test("18. the printify studio splits designs into ink rows and wipes backgrounds", async ({ page }) => {
+    await gotoApp(page, "/printify-studio");
+    await page.setInputFiles('input[type=file]', [
+      fixture("design-a.png"),
+      fixture("design-solid.png"),
+    ]);
+    // Both designs start in the "no ink variants" row.
+    await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Has ink variants (0)")).toHaveCount(0);
+
+    // Give one design an ink variant, so the rows split.
+    await gotoApp(page, "/designs");
+    await page.getByRole("button", { name: /Actions for design-a/ }).click();
+    await page.getByRole("menuitem", { name: /Ink variants/ }).click();
+    await page.getByRole("button", { name: "Auto-generate" }).first().click();
+    await expect(page.getByText("White ink variant created")).toBeVisible({ timeout: 30_000 });
+    // Once the white slot exists it stops offering Auto-generate, so exactly
+    // one (the black one) is left.
+    await expect(page.getByRole("button", { name: "Auto-generate" })).toHaveCount(1, {
+      timeout: 15_000,
+    });
+    await page.getByRole("button", { name: "Auto-generate" }).first().click();
+    await expect(page.getByText("Black ink variant created")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Done" }).click();
+
+    await gotoApp(page, "/printify-studio");
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Has ink variants (1)")).toBeVisible();
+
+    // Background removal is a real edit, and the cutout is shown.
+    await page.getByRole("checkbox", { name: "Select design-solid" }).click();
+    await page.getByRole("button", { name: /^Remove background$/ }).click();
+    await expect(page.getByText("cutout").first()).toBeVisible({ timeout: 30_000 });
+
+    // The wave is a real CSS animation on the design that has a cutout.
+    const wave = await page.evaluate(() => {
+      const el = document.querySelector(".studio-wave-layer");
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return { name: cs.animationName, duration: cs.animationDuration };
+    });
+    expect(wave?.name).toBe("studio-wave-reveal");
+
+    // The sub-tabs switch.
+    await page.getByRole("tab", { name: "Colors" }).click();
+    await expect(page.getByRole("tab", { name: "Colors" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Design panel" }).click();
+    await expect(page.getByRole("tab", { name: "Design panel" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });
 

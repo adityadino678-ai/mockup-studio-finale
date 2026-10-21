@@ -92,6 +92,35 @@ describe("flood-key background removal", () => {
     floodKeyRemoveBackground(px, w, h, FLOOD_KEY_DEFAULTS);
     expect(transparentFraction(px)).toBe(1);
   });
+
+  it("reports how many pixels it actually removed", () => {
+    // The number that says whether anything happened. The output's total
+    // transparency cannot: an already-transparent artwork scores 1.0
+    // without a pixel being touched.
+    const w = 20;
+    const h = 20;
+    const px = solidBackgroundImage(w, h, [255, 255, 255, 255], [6, 6, 14, 14]);
+    const before = new Uint8ClampedArray(px);
+    const { removedPixels } = floodKeyRemoveBackground(px, w, h, FLOOD_KEY_DEFAULTS);
+
+    let changed = 0;
+    for (let i = 3; i < px.length; i += 4) if (before[i] !== px[i]) changed++;
+    expect(removedPixels).toBe(changed);
+    // The background around the artwork, not the artwork itself.
+    expect(changed).toBe(w * h - 64);
+  });
+
+  it("removes a solid-colour artwork entirely - which is why the UI refuses it", () => {
+    // Every pixel is border-connected and the same colour, so the artwork is
+    // erased. The result is 100% transparent, which the UI treats as a
+    // failure ("the artwork itself looked like the background") rather than
+    // a successful cutout.
+    const w = 8;
+    const h = 8;
+    const px = solidBackgroundImage(w, h, [255, 0, 0, 255]);
+    floodKeyRemoveBackground(px, w, h, FLOOD_KEY_DEFAULTS);
+    expect(transparentFraction(px)).toBe(1);
+  });
 });
 
 describe("file validation and filename safety", () => {

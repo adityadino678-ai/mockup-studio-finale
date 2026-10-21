@@ -13,13 +13,13 @@
   --color-forest-deep: #263a2e;
   --color-forest-soft: #e3e9e0;
   --color-ink: #252a26;
-  --color-ink-muted: #6c736a;
-  --color-ink-subtle: #9aa095;
+  --color-ink-muted: #565d53;
+  --color-ink-subtle: #676e64;
   --color-border-subtle: #e6e7e0;
   --color-border-strong: #d3d5cb;
   --color-danger: #b3423a;
   --color-danger-soft: #f9ecea;
-  --color-warning: #9a7218;
+  --color-warning: #7d5a0e;
   --color-warning-soft: #f8f2e3;
 
   --radius-sm: 6px;
@@ -34,8 +34,19 @@
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-* {
-  border-color: var(--color-border-subtle);
+/*
+ * The default border colour.
+ *
+ * This MUST live in `@layer base`. Tailwind's utilities are in
+ * `@layer utilities`, and an unlayered rule beats every layer - so as an
+ * unlayered rule this silently killed every `border-border-strong`,
+ * `border-forest` and `focus-visible:border-forest` in the app, and every
+ * control fell back to the subtle border.
+ */
+@layer base {
+  * {
+    border-color: var(--color-border-subtle);
+  }
 }
 
 html {
@@ -57,7 +68,15 @@ body {
 *:focus-visible {
   outline: 2px solid var(--color-forest);
   outline-offset: 2px;
-  border-radius: 4px;
+}
+
+/*
+ * The focus ring must not change a control's shape: a global `border-radius`
+ * turned every round swatch and pill into a rounded rectangle the moment it
+ * was focused. The radius is left alone so the outline follows the control.
+ */
+[role="tabpanel"]:focus-visible {
+  outline: none;
 }
 
 /* Thin scrollbars for panels */
@@ -85,4 +104,80 @@ body {
     linear-gradient(-45deg, transparent 75%, #e9e9e4 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   The background-removal wave: the real artwork sits underneath and the
+   cutout is wiped in from the left, with an edge travelling with the wipe.
+   Both animations share a duration so the edge stays on the boundary.
+   --------------------------------------------------------------------------- */
+@keyframes studio-wave-reveal {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  45% {
+    clip-path: inset(0 0% 0 0);
+  }
+  70% {
+    clip-path: inset(0 0% 0 0);
+  }
+  100% {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+/*
+ * The travelling edge.
+ *
+ * It moves with `transform`, not `left`: animating `left` forces a full
+ * layout on every frame for every visible card, which measured ~20x the
+ * layout work of a transform.
+ */
+@keyframes studio-wave-edge {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  45% {
+    transform: translateX(100%);
+    opacity: 1;
+  }
+  70% {
+    transform: translateX(100%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+}
+
+.studio-wave-layer {
+  animation: studio-wave-reveal 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.studio-wave-edge {
+  animation: studio-wave-edge 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* The wave is decoration: without motion, show the finished cutout. */
+@media (prefers-reduced-motion: reduce) {
+  .studio-wave-layer,
+  .studio-wave-edge {
+    animation: none !important;
+  }
+  .studio-wave-layer {
+    clip-path: inset(0 0% 0 0);
+  }
+  .studio-wave-edge {
+    display: none;
+  }
+  /* The other looping animations are decoration too. */
+  .animate-pulse,
+  .animate-spin {
+    animation: none !important;
+  }
 }

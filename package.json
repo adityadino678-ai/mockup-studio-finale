@@ -14,7 +14,9 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "typecheck": "astro check --minimumSeverity error"
+    "typecheck": "astro check --minimumSeverity error",
+    "spike:printify": "node scripts/spike-printify.mjs",
+    "spike:printify:cleanup": "node scripts/spike-printify.mjs --cleanup"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.6.13",

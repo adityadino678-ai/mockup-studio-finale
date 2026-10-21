@@ -29,7 +29,9 @@ export function EmptyState({ icon, title, description, actions, className }: Emp
         {icon}
       </div>
       <div className="space-y-1">
-        <h3 className="text-[15px] font-semibold text-ink">{title}</h3>
+        {/* h2, not h3: the empty state sits directly under the page's h1 and
+            skipping a level breaks heading navigation. */}
+        <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
         <p className="mx-auto max-w-sm text-[13px] leading-relaxed text-ink-muted">{description}</p>
       </div>
       {actions && actions.length > 0 && (

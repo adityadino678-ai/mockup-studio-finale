@@ -80,9 +80,18 @@ export function BgRemovalDialog({
           if (!blob) throw new Error(`Could not read "${design.name}" from storage`);
           const out = await removeBackground(engine, blob, tolerance);
           last = out;
-          if (out.transparency < 0.005) {
+          // `removed` is how much actually changed. The output's total
+          // transparency cannot answer this: an artwork that was already
+          // transparent scores 1.0 without a pixel being touched, and a
+          // solid-colour artwork scores 1.0 because the ARTWORK was erased.
+          if (out.removed < 0.005) {
             throw new Error(
               `"${design.name}": no background was detected. Try a higher tolerance, or the AI engine for photos/complex backgrounds.`,
+            );
+          }
+          if (out.transparency > 0.999) {
+            throw new Error(
+              `"${design.name}": the whole image was removed - the artwork itself looked like the background. Try a lower tolerance.`,
             );
           }
           if (designs.length > 1) {

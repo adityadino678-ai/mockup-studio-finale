@@ -232,6 +232,15 @@ export async function deleteDesign(designId: string): Promise<void> {
       await db.batchItems.where("designId").equals(designId).modify({ status: "cancelled", error: "Design deleted" });
     },
   );
+  // The studio keeps its own state in `settings`, which the cascade above
+  // does not touch - so a deleted design would linger in the batch scope and
+  // in the results list.
+  try {
+    const { pruneStudioDesign } = await import("@/lib/printify/studio-session");
+    await pruneStudioDesign(designId);
+  } catch {
+    // The studio is optional; a failure here must not fail the delete.
+  }
   await logActivity("design.delete", `Deleted design "${design.name}"`);
 }
 

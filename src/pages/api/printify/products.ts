@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { createPrintifyClient, PrintifyError } from "@/lib/server/printify";
+import { clampPlacement } from "@/lib/printify/fit";
 
 interface CreateProductBody {
   /** Explicit user confirmation is required before anything is created remotely. */
@@ -21,6 +22,22 @@ interface CreateProductBody {
   printAreas?: Record<string, string>;
   /** Base64 artwork to upload and attach to the print area. */
   artwork?: { base64: string; filename: string; printAreaId: string };
+  /**
+   * One entry per artwork group. `variantIds` decides which colours the
+   * artwork is printed on, so one design can carry different artwork for
+   * different colours of the same product. The groups must partition the
+   * enabled variants - see AGENTS.md.
+   */
+  artworks?: Array<{
+    /** Print area position, e.g. "front". */
+    printAreaId: string;
+    /** The variants this artwork is printed on. Defaults to every variant. */
+    variantIds?: number[];
+    base64: string;
+    filename: string;
+    /** Placement inside the print area, in Printify's centre-based units. */
+    placement?: { x?: number; y?: number; scale?: number; angle?: number };
+  }>;
 }
 
 /**
@@ -29,6 +46,13 @@ interface CreateProductBody {
  * stay under this cap before uploading.
  */
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Ceiling for the whole request. A product can carry several artwork groups
+ * (one per colour), and each one is a separate base64 payload, so the
+ * per-artwork cap alone is not enough to bound the request.
+ */
+const MAX_TOTAL_UPLOAD_BYTES = 24 * 1024 * 1024;
 
 /** Printify rejects a product with more than this many enabled variants. */
 const MAX_VARIANTS = 100;
@@ -51,12 +75,27 @@ function sanitizeTags(value: unknown): string[] {
 
 /**
  * Estimates decoded byte length from a base64 string without allocating a
- * buffer. `Buffer` does not exist in the Workers runtime, and decoding 8 MB just
- * to measure it would double the peak memory for no reason.
+ * buffer. `Buffer` does not exist in the Workers runtime, and decoding 8 MB
+ * just to measure it would double the peak memory for no reason.
+ *
+ * The string is scanned in place: a `data:` prefix, whitespace and padding
+ * are skipped rather than copied out, because the payload can be 10 MB and
+ * three copies of it would dominate the request's memory.
  */
 function base64Bytes(base64: string): number {
-  const clean = base64.replace(/^data:[^,]+,/, "").replace(/\s+/g, "").replace(/=+$/, "");
-  return Math.floor((clean.length * 3) / 4);
+  let start = 0;
+  if (base64.startsWith("data:")) {
+    const comma = base64.indexOf(",");
+    if (comma >= 0) start = comma + 1;
+  }
+  let length = 0;
+  for (let i = start; i < base64.length; i++) {
+    const code = base64.charCodeAt(i);
+    if (code === 32 || code === 9 || code === 10 || code === 13) continue; // whitespace
+    if (code === 61) break; // '=' padding ends the payload
+    length++;
+  }
+  return Math.floor((length * 3) / 4);
 }
 
 export const prerender = false;
@@ -129,18 +168,75 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    let assetId: string | undefined;
-    if (body.artwork) {
-      if (base64Bytes(body.artwork.base64) > MAX_UPLOAD_BYTES) {
-        return json({ error: "Artwork exceeds the 8 MB upload limit after processing" }, 413);
-      }
-      const uploaded = await client.uploadImage(body.artwork.base64, body.artwork.filename);
-      assetId = String(uploaded.id);
+    // --- artwork -------------------------------------------------------------
+    // `artworks` is the multi-group form: one upload per artwork group, each
+    // with the variants it prints on. The legacy single `artwork` form is
+    // still accepted and applies its image to every variant.
+    const artworks: NonNullable<CreateProductBody["artworks"]> = body.artworks ?? (body.artwork ? [{ ...body.artwork }] : []);
+    if (artworks.length === 0) {
+      return json({ error: "Attach a design to a print area before creating the product" }, 400);
     }
 
-    const printAreas = { ...(body.printAreas ?? {}) };
-    if (assetId && body.artwork?.printAreaId) {
-      printAreas[body.artwork.printAreaId] = assetId;
+    const totalBytes = artworks.reduce((sum, a) => sum + base64Bytes(a.base64), 0);
+    if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
+      return json(
+        {
+          error: `The artwork for this product is too large (${Math.round(totalBytes / 1024 / 1024)} MB). Use smaller or fewer designs.`,
+        },
+        413,
+      );
+    }
+
+    const printAreaGroups: Array<{
+      variantIds: number[];
+      position: string;
+      imageId: string;
+      x?: number;
+      y?: number;
+      scale?: number;
+      angle?: number;
+    }> = [];
+
+    for (const artwork of artworks) {
+      if (base64Bytes(artwork.base64) > MAX_UPLOAD_BYTES) {
+        return json({ error: "Artwork exceeds the 8 MB upload limit after processing" }, 413);
+      }
+      const uploaded = await client.uploadImage(artwork.base64, artwork.filename);
+      const placement = clampPlacement(artwork.placement ?? {});
+      printAreaGroups.push({
+        variantIds: artwork.variantIds?.length ? artwork.variantIds : variantIds,
+        position: artwork.printAreaId,
+        imageId: String(uploaded.id),
+        x: placement.x,
+        y: placement.y,
+        scale: placement.scale,
+        angle: placement.angle,
+      });
+    }
+
+    // A product's print areas must partition its variants. Printify rewrites
+    // a group to swallow anything nobody named, and a variant that lands in
+    // the wrong group is printed with the wrong artwork.
+    const covered = new Set<number>();
+    for (const group of printAreaGroups) {
+      for (const id of group.variantIds) {
+        if (covered.has(id)) {
+          return json(
+            { error: `Variant ${id} is assigned to more than one print area. Every variant must belong to exactly one.` },
+            400,
+          );
+        }
+        covered.add(id);
+      }
+    }
+    const uncovered = variantIds.filter((id) => !covered.has(id));
+    if (uncovered.length > 0) {
+      return json(
+        {
+          error: `${uncovered.length} variant(s) have no artwork. Every selected variant must belong to a print area, or Printify will print the wrong design on it.`,
+        },
+        400,
+      );
     }
 
     const product = await client.createProduct({
@@ -151,17 +247,38 @@ export const POST: APIRoute = async ({ request }) => {
       printProviderId: body.printProviderId,
       variants: body.variants,
       prices,
-      printAreas: Object.keys(printAreas).length > 0 ? printAreas : undefined,
+      printAreaGroups,
+      // Resolve the shop once per request instead of once per product.
+      shopId: await client.resolveShopId(),
     });
 
-    return json({ product });
+    // The uploaded image ids are echoed back so the client can VERIFY that
+    // every enabled variant really carries the artwork it was meant to.
+    return json({
+      product,
+      artworks: printAreaGroups.map((g) => ({
+        printAreaId: g.position,
+        variantIds: g.variantIds,
+        imageId: g.imageId,
+      })),
+    });
   } catch (error) {
     if (error instanceof PrintifyError) {
       const detail =
         error.detail === undefined
           ? undefined
           : (typeof error.detail === "string" ? error.detail : JSON.stringify(error.detail)).slice(0, 400);
-      return json({ error: error.message, detail, status: error.status }, 502);
+      // Pass the upstream status through where it is meaningful, so a
+      // validation failure is not reported to the browser as a gateway error.
+      const status =
+        error.status === 429
+          ? 429
+          : error.status === 400 || error.status === 422 || error.status === 413
+            ? 400
+            : error.status === 404
+              ? 404
+              : 502;
+      return json({ error: error.message, detail, status: error.status }, status);
     }
     return json(
       { error: error instanceof Error ? error.message : "Unexpected error creating product" },

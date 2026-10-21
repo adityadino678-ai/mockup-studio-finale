@@ -155,7 +155,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[13px] font-medium text-ink-muted transition-colors cursor-pointer",
+        "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[13px] font-medium text-ink transition-colors cursor-pointer",
         "data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-subtle",
         className,
       )}
@@ -197,7 +197,9 @@ function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxP
   return (
     <CheckboxPrimitive.Root
       className={cn(
-        "peer h-4 w-4 shrink-0 rounded-[4px] border border-border-strong bg-surface shadow-subtle",
+        // A checkbox has no fill until it is checked, so its border IS its
+        // only affordance - it has to be clearly visible.
+        "peer h-4 w-4 shrink-0 rounded-[4px] border border-ink-muted bg-surface shadow-subtle",
         "data-[state=checked]:border-forest data-[state=checked]:bg-forest data-[state=checked]:text-white",
         "focus-visible:outline-2 focus-visible:outline-forest disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer",
         className,
@@ -216,13 +218,15 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
   return (
     <SwitchPrimitive.Root
       className={cn(
-        "peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
+        // 24px tall: the track is the only affordance, so it must clear the
+        // 24x24 minimum target size.
+        "peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
         "data-[state=checked]:bg-forest data-[state=unchecked]:bg-border-strong disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb className="pointer-events-none block h-4 w-4 rounded-full bg-white shadow-subtle transition-transform data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0" />
+      <SwitchPrimitive.Thumb className="pointer-events-none block h-5 w-5 rounded-full bg-white shadow-subtle transition-transform data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0" />
     </SwitchPrimitive.Root>
   );
 }
