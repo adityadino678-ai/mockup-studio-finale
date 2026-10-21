@@ -271,9 +271,11 @@ export function createPrintifyClient(explicitKey?: string) {
     /**
      * GET /catalog/blueprints.json
      *
-     * The catalogue is ~2,900 products and more than half the payload is the
-     * HTML `description` of every product, which the app never renders. It
-     * is stripped here so it is never transferred or cached.
+     * The catalogue is ~2,900 products. Only the fields the app actually
+     * uses are sent on: the HTML `description` (never rendered) and all but
+     * the first image url (the product grid shows one photo). That takes the
+     * payload from 5.2 MB to well under 1 MB, which matters because it is
+     * streamed through the Worker.
      */
     async listBlueprints(category?: string): Promise<PrintifyBlueprint[]> {
       const qs = category ? `?category=${encodeURIComponent(category)}` : "";
@@ -285,8 +287,7 @@ export function createPrintifyClient(explicitKey?: string) {
         brand: b.brand,
         model: b.model,
         category: b.category,
-        image: b.image,
-        images: b.images,
+        images: b.images?.slice(0, 1),
       }));
     },
 

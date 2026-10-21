@@ -4,6 +4,7 @@ import { credentialsFromRequest } from "@/lib/server/creds";
 import {
   createPrintifyClient,
   PrintifyError,
+  type PrintifyBlueprint,
   type PrintifyBlueprintDetail,
 } from "@/lib/server/printify";
 
@@ -26,11 +27,60 @@ function fail(error: unknown) {
  * GET /api/printify/catalog?id=123                 -> blueprint detail (identity only)
  * GET /api/printify/catalog?id=123&providers=1     -> print providers for a blueprint
  * GET /api/printify/catalog?id=123&provider=29     -> variants (sizes/colors + print areas)
+ * GET /api/printify/catalog?id=123&provider=29&colors=1 -> the colour values of a template product
  *
  * The API key is taken from the request headers (the key pasted in Settings)
  * when present, otherwise from the server environment.
  */
 export const prerender = false;
+
+/** How long the catalogue is cached. Printify adds products slowly. */
+const CATALOGUE_TTL_SECONDS = 3600;
+
+/**
+ * The blueprint list is the same for everyone, is 2.4 MB, and takes several
+ * seconds to fetch from Printify. It is memoised in the isolate so a warm
+ * isolate answers instantly, and the browser keeps its own copy for a day.
+ */
+let catalogueMemo: { at: number; blueprints: unknown[] } | null = null;
+const CATALOGUE_MEMO_TTL_MS = CATALOGUE_TTL_SECONDS * 1000;
+
+/** Cloudflare's `caches.default` is not in the DOM lib's CacheStorage type. */
+function edgeCache(): Cache | null {
+  if (typeof caches === "undefined") return null;
+  const store = caches as unknown as { default?: Cache };
+  return store.default ?? null;
+}
+
+/**
+ * The blueprint list is the same for everyone and changes rarely, but it is
+ * 2.4 MB and takes ~10 s to fetch. Caching it at the edge turns every first
+ * visit into a cache hit.
+ */
+async function cachedCatalogue(url: URL): Promise<Response | null> {
+  const cache = edgeCache();
+  if (!cache) return null;
+  const key = new Request(url.toString());
+  try {
+    const hit = await cache.match(key);
+    if (hit) return hit;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function putInCatalogueCache(url: URL, response: Response): Promise<void> {
+  const cache = edgeCache();
+  if (!cache) return;
+  try {
+    const copy = response.clone();
+    copy.headers.set("Cache-Control", `public, max-age=${CATALOGUE_TTL_SECONDS}`);
+    await cache.put(new Request(url.toString()), copy);
+  } catch {
+    // A cache that will not take the object must never fail the request.
+  }
+}
 
 export const GET: APIRoute = async ({ url, request }) => {
   const creds = credentialsFromRequest(request);
@@ -56,7 +106,25 @@ export const GET: APIRoute = async ({ url, request }) => {
 
   try {
     if (!id) {
-      let blueprints = await client.listBlueprints(category);
+      // The catalogue is the same for everyone and is 2.4 MB, so it is served
+      // from the isolate's memory, then from the edge, and only then fetched
+      // from Printify. The search and category filtering happen client-side
+      // against the cached copy, so only this one shape is ever cached.
+      const cached = await cachedCatalogue(url);
+      if (cached) {
+        const hit = new Response(cached.body, cached);
+        hit.headers.set("x-catalog-cache", "edge");
+        return hit;
+      }
+
+      let blueprints: PrintifyBlueprint[];
+      if (catalogueMemo && Date.now() - catalogueMemo.at < CATALOGUE_MEMO_TTL_MS) {
+        blueprints = catalogueMemo.blueprints as PrintifyBlueprint[];
+      } else {
+        blueprints = await client.listBlueprints(category);
+        catalogueMemo = { at: Date.now(), blueprints };
+      }
+
       if (q) {
         // Every whitespace-separated token must appear somewhere in the row, so
         // "unisex tee" narrows rather than widens. Keeps big result sets small.
@@ -67,7 +135,10 @@ export const GET: APIRoute = async ({ url, request }) => {
         });
       }
       if (limit > 0) blueprints = blueprints.slice(0, limit);
-      return json({ configured: true, blueprints });
+      const response = json({ configured: true, blueprints });
+      response.headers.set("x-catalog-cache", catalogueMemo ? "memo" : "miss");
+      await putInCatalogueCache(url, response);
+      return response;
     }
     if (wantsProviders) {
       return json({ configured: true, ...(await client.listProviders(Number(id))) });
