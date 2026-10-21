@@ -34,6 +34,10 @@ export interface PrintifyBlueprint {
   model: string;
   category?: string;
   image?: string;
+  /** The catalogue returns an array of image urls. */
+  images?: string[];
+  /** Stripped before the catalogue is sent on: it is never rendered. */
+  description?: string;
 }
 
 /** A printable area on a variant (Printify calls these "placeholders"). */
@@ -264,10 +268,26 @@ export function createPrintifyClient(explicitKey?: string) {
       return Array.isArray(shops) ? shops : [];
     },
 
-    /** GET /catalog/blueprints.json */
-    listBlueprints(category?: string): Promise<PrintifyBlueprint[]> {
+    /**
+     * GET /catalog/blueprints.json
+     *
+     * The catalogue is ~2,900 products and more than half the payload is the
+     * HTML `description` of every product, which the app never renders. It
+     * is stripped here so it is never transferred or cached.
+     */
+    async listBlueprints(category?: string): Promise<PrintifyBlueprint[]> {
       const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-      return request<PrintifyBlueprint[]>(`/catalog/blueprints.json${qs}`);
+      const data = await request<PrintifyBlueprint[]>(`/catalog/blueprints.json${qs}`);
+      if (!Array.isArray(data)) return [];
+      return data.map((b) => ({
+        id: b.id,
+        title: b.title,
+        brand: b.brand,
+        model: b.model,
+        category: b.category,
+        image: b.image,
+        images: b.images,
+      }));
     },
 
     /** GET /catalog/blueprints/{id}.json — identity only; no variants. */
