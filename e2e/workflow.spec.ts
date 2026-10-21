@@ -42,6 +42,24 @@ async function gotoApp(page: Page, path: string) {
   });
 }
 
+/**
+ * Runs `action` until it stops throwing, tolerating a dev-server reload.
+ *
+ * The Astro dev server reloads the page when it re-optimises a lazy import,
+ * and it can also lose a race with OneDrive's sync of its own content store
+ * (`.astro/data-store.json`). A reload resets the React state, so a test
+ * that depends on transient UI state - an open panel, a selected tab - has to
+ * survive it. The app itself is fine: production serves static files and has
+ * no Vite at all.
+ *
+ * `action` must therefore be safe to run more than once.
+ */
+async function toleratingReload(page: Page, action: () => Promise<void>) {
+  await expect(async () => {
+    await action();
+  }).toPass({ timeout: 60_000, intervals: [500, 1000, 2000, 3000] });
+}
+
 test.describe("core workflow", () => {
   test.beforeEach(async ({ page }) => {
     await clearWorkspace(page);
@@ -583,7 +601,10 @@ test.describe("core workflow", () => {
     ]);
     // Both designs start in the "no ink variants" row.
     await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Has ink variants (0)")).toHaveCount(0);
+    // The empty row is SHOWN, not hidden: a row the user cannot see the
+    // meaning of is a row the split is invisible in.
+    await expect(page.getByText("Has ink variants (0)")).toBeVisible();
+    await expect(page.getByText("No designs with ink variants yet")).toBeVisible();
 
     // Give one design an ink variant, so the rows split.
     await gotoApp(page, "/designs");
@@ -619,13 +640,107 @@ test.describe("core workflow", () => {
     expect(wave?.name).toBe("studio-wave-reveal");
 
     // The sub-tabs switch.
-    await page.getByRole("tab", { name: "Colors" }).click();
-    await expect(page.getByRole("tab", { name: "Colors" })).toHaveAttribute("aria-selected", "true");
-    await page.getByRole("tab", { name: "Design panel" }).click();
-    await expect(page.getByRole("tab", { name: "Design panel" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await toleratingReload(page, async () => {
+      await page.getByRole("tab", { name: "Colors" }).click();
+      await expect(page.getByRole("tab", { name: "Colors" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await page.getByRole("tab", { name: "Design panel" }).click();
+      await expect(page.getByRole("tab", { name: "Design panel" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+
+  test("19. the design panel opens a placement-only adjustment panel that snaps to the centre", async ({
+    page,
+  }) => {
+    await gotoApp(page, "/printify-studio");
+    await page.setInputFiles('input[type=file]', [fixture("design-a.png")]);
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
+
+    // The Designs tab shows BOTH rows, including the empty one.
+    await expect(page.getByText("Has ink variants (0)")).toBeVisible();
+    await expect(page.getByText("No designs with ink variants yet")).toBeVisible();
+
+    // The Design panel tab shows both rows too, above the listing.
+    await toleratingReload(page, async () => {
+      await page.getByRole("tab", { name: "Design panel" }).click();
+      await expect(page.getByRole("tab", { name: "Design panel" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+    await expect(page.locator('[data-design-row="plain"]')).toBeVisible();
+    await expect(page.locator('[data-design-row="ink"]')).toBeVisible();
+    await expect(page.getByText("Has ink variants (0)")).toBeVisible();
+
+    const panel = page.locator("[data-design-panel]");
+
+    /** Opens the adjustment panel for the only design, if it is not open. */
+    async function openPanel() {
+      if ((await panel.count()) > 0) return;
+      await page.getByRole("tab", { name: "Design panel" }).click();
+      await page.getByRole("button", { name: "Open design-a" }).click();
+      await expect(panel).toBeVisible({ timeout: 5_000 });
+    }
+
+    // Clicking a card opens a SEPARATE panel that holds nothing but the
+    // placement.
+    await toleratingReload(page, openPanel);
+    await expect(panel.getByText("Adjust \"design-a\"")).toBeVisible();
+
+    // ... and nothing else: no title template, no price, no colour list.
+    await expect(panel.getByText("Title template")).toHaveCount(0);
+    await expect(panel.getByText(/^Price/i)).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: /Create on Printify/ })).toHaveCount(0);
+
+    // Dragging the artwork 4 px off the centre snaps it back to the centre:
+    // the symmetry snap, measured in screen pixels.
+    await toleratingReload(page, async () => {
+      await openPanel();
+      const preview = panel.locator('[role="img"]');
+      await expect(preview).toBeVisible({ timeout: 5_000 });
+      const box = await preview.boundingBox();
+      expect(box).not.toBeNull();
+      const cx = box!.x + box!.width / 2;
+      const cy = box!.y + box!.height / 2;
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx + 4, cy - 3, { steps: 4 });
+      await page.mouse.up();
+      await expect(panel.locator("#studio-x")).toHaveValue("0.5");
+      await expect(panel.locator("#studio-y")).toHaveValue("0.5");
+    });
+
+    // The rotation handle snaps to the 15 degree grid: dragging it to 88
+    // degrees lands on exactly 90.
+    await toleratingReload(page, async () => {
+      await openPanel();
+      const preview = panel.locator('[role="img"]');
+      await expect(preview).toBeVisible({ timeout: 5_000 });
+      const handle = preview.locator("[data-rotate-handle]");
+      await expect(handle).toBeVisible({ timeout: 5_000 });
+      const pbox = await preview.boundingBox();
+      const hbox = await handle.boundingBox();
+      expect(pbox).not.toBeNull();
+      expect(hbox).not.toBeNull();
+      const cx = pbox!.x + pbox!.width / 2;
+      const cy = pbox!.y + pbox!.height / 2;
+      await page.mouse.move(hbox!.x + hbox!.width / 2, hbox!.y + hbox!.height / 2);
+      await page.mouse.down();
+      // The handle sits "above" the centre at angle 0, so an artwork angle of
+      // 88 degrees is a pointer angle of -2 degrees.
+      const r = Math.min(pbox!.width, pbox!.height) / 4;
+      const target = (-2 * Math.PI) / 180;
+      await page.mouse.move(cx + Math.cos(target) * r, cy + Math.sin(target) * r, {
+        steps: 4,
+      });
+      await page.mouse.up();
+      await expect(panel.locator("#studio-angle")).toHaveValue("90");
+    });
   });
 });
 

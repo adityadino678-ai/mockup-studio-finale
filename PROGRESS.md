@@ -145,3 +145,126 @@ afterwards:
 - One product per design, created sequentially. A batch of 50 designs is 50
   uploads plus 50 product creates against Printify's publish limit of 200 per
   30 minutes.
+
+## Printify Studio, second pass (Oct 2026)
+
+The user reported three things: the ink-variant split was invisible, the
+background remover did nothing on a real photo, and the artwork could not be
+placed the way Printify places it.
+
+### 1. The rows are always visible
+
+`designs-tab.tsx` and `placement-tab.tsx` used to do `if (list.length === 0)
+return null`, so an EMPTY row was never rendered and the split between "no
+ink variants" and "has ink variants" was invisible. Both rows now always
+render, each with its heading, its count and a one-line empty state that
+explains where the missing row comes from.
+
+The split logic itself was always correct - a design moves to the ink row the
+moment it gets an ink variant - and that was verified live by giving a design
+a white ink variant and watching it move.
+
+The Design panel tab now has the same two galleries at the top, and the
+listing (title, price, "Ready to create", "Create on Printify") stays below
+them, unchanged.
+
+### 2. Background removal works on real photos
+
+Two engines, and the rule that picks between them now lives in one place
+(`src/lib/printify/remove-background.ts`):
+
+| Flood-key result | Outcome |
+|---|---|
+| removed >= 2% and transparency <= 98% | success, `flood-key` (flat artwork) |
+| removed >= 2% and transparency > 98% | fail - the artwork WAS the background. Not escalated: the AI engine cannot help and it would cost a 25 MB download to fail the same way. |
+| removed < 2% | escalate to `ai-segmenter` - this is a photograph |
+
+`removed` is the fraction of pixels whose ALPHA CHANGED, never the output's
+total transparency. That distinction is the whole fix: an artwork that was
+already transparent scores 100% transparency without a pixel being touched,
+and a solid-colour artwork scores 100% because the artwork itself was erased.
+
+Measured on a real noisy photograph through the real UI: flood-key found
+nothing, the run escalated, the model download was announced, and the AI
+engine removed 42% of the pixels at the original 400x400 resolution.
+
+The stage is queued rather than replaced, so each message stays up for at
+least 900 ms. Without that, React's state coalescing swallowed "Downloading
+the background model (~25 MB, first use only)" - the exact message that stops
+a 90-second wait from looking like a freeze.
+
+Also fixed in the AI worker: a non-RGBA model output was copied into the
+artwork-sized buffer at the model's own resolution, so the content landed in
+the top-left corner and the rest of the image was transparent. It now
+resamples through a canvas.
+
+### 3. Printify-style placement
+
+`src/lib/printify/snap.ts` is the pure core, `print-area-preview.tsx` is the
+React surface. Snap thresholds are in SCREEN PIXELS (7px), not fractions of
+the area, so the feel is identical at any zoom.
+
+- Drag to move, with the grab offset recorded so the artwork does not jump.
+- A round rotation handle in the artwork's ROTATED frame, so at 90 degrees it
+  sits on the right edge.
+- The centre snap is the symmetry: the artwork's centre locks to 0.5 and a
+  guide appears. The edges snap to the area's edges.
+- Rotation snaps to every 15 degrees.
+- Shift disables snapping. Arrows move, Shift+arrows resize, Alt+arrows
+  rotate.
+
+The artwork's position is `translate(-50%,-50%) translate((x-0.5)*W,(y-0.5)*H)
+rotate(a)`. Positioning it with `left:50%` PLUS an absolute translate
+double-counts the offset and throws the artwork out of the print area - a bug
+the prototype caught before it could ship.
+
+Measured on the real component: a 4px drag lands on 0.5 snapped and 0.513
+free (Shift held); a rotation to 88 degrees lands on 90 degrees with a "90"
+badge, and 89 degrees free.
+
+### 4. The adjustment panel
+
+Clicking a card opens a SEPARATE panel holding nothing but the placement:
+the preview, the print-area picker, width, rotation, centre X and Y, and the
+"apply to this design / to every design" choice. No title template, no
+price, no colour list, no results - a panel that mixes the two is how a user
+ends up editing the wrong thing.
+
+### 5. An app-wide defect found on the way
+
+The global `* { border-color: ... }` rule was UNLAYERED, so it beat Tailwind's
+`@layer utilities` and silently killed every `border-border-strong`,
+`border-forest` and `focus-visible:border-forest` in the app. It now lives in
+`@layer base`.
+### Gates
+
+- [x] `npm run lint` - 0 errors
+- [x] `npm run typecheck` - 0 errors
+- [x] `npm run test` - 223 unit tests
+- [x] `npm run test:e2e` - 19 acceptance tests, local AND production
+- [x] `npm run build` - `/printify-studio` prerendered
+- [x] Deployed to https://mockup-studio.adityadino678.workers.dev, then the
+      same 19 e2e tests re-run against the deployed Worker
+
+### Two flakes fixed on the way
+
+- **The dev server reloads the page when it re-optimises a lazy import**, and
+  a reload resets the React state - so a test that depends on an open panel
+  or a selected tab lost it. `toleratingReload()` in `e2e/workflow.spec.ts`
+  retries the interaction. The app is fine: production serves static files
+  and has no Vite.
+- **A cold Vite optimizer pushed the first page load past the assertion
+  timeouts**, so the suite failed on "the app shell did not hydrate" with no
+  application error anywhere. `e2e/global-setup.ts` now visits every route
+  once, with a real browser, before the suite starts.
+
+### Known limits (honest)
+
+- The AI background removal downloads a ~25 MB model (MODNet) from a CDN on
+  the first run. The download is announced, but it is still a download.
+- The print-area preview shows the area and the artwork inside it. Printify
+  does not publish where that area sits on the garment, so the position on
+  the shirt is an approximation, and the UI says so.
+- One product per design, created sequentially. A batch of 50 designs is 50
+  uploads plus 50 product creates against Printify's publish limit of 200 per
+  30 minutes.

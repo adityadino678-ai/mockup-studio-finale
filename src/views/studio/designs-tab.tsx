@@ -12,21 +12,17 @@ import {
   logActivity,
   storeAsset,
 } from "@/lib/db/repo";
-import { removeBackground, type BgRemovalEngineId } from "@/lib/bg-removal/engine";
+import { removeBackgroundAuto, type RemoveEngine } from "@/lib/printify/remove-background";
 import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
-import { WaveCompare } from "@/components/studio/wave-compare";
-import { ColorSwatchRow } from "@/components/studio/color-swatch";
+import { DesignGallery, type DesignSwatch } from "@/views/studio/design-panel";
 import { UploadDropzone } from "@/components/upload-dropzone";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
 import { Label } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import { hexForColourName, suggestInk } from "@/lib/printify/colors";
-import { ROW_HINTS, ROW_LABELS, ROWS } from "@/lib/printify/studio-session";
+import { ROWS } from "@/lib/printify/studio-session";
 import type { StudioRowId, StudioSession } from "@/types/domain";
-import { Images, Loader2, Trash2, Wand2 } from "lucide-react";
+import { Loader2, Trash2, Wand2 } from "lucide-react";
 
 interface DesignRow {
   id: string;
@@ -44,15 +40,78 @@ interface DesignsTabProps {
   /** Update the session - the ticked designs ARE the batch scope. */
   update: (patch: Partial<StudioSession>) => void;
   /** The resolved swatches for a row, so each design shows its colours. */
-  swatchesForRow: (row: StudioRowId) => Array<{ name: string; hex: string; ink?: "black" | "white" | "ambiguous" }>;
+  swatchesForRow: (row: StudioRowId) => DesignSwatch[];
 }
+
+/**
+ * How long a stage of the work stays on screen.
+ *
+ * The engine reports its stages as it works and two of them can arrive
+ * within the same frame. The message that explains the ~25 MB model download
+ * would then be replaced before it was ever painted, which is exactly the
+ * silent freeze that message exists to prevent. So every stage stays up for
+ * a moment and the next one waits its turn.
+ */
+const MIN_STAGE_MS = 900;
 
 export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps) {
   const [uploading, setUploading] = React.useState(0);
-  const [engine, setEngine] = React.useState<BgRemovalEngineId>("flood-key");
+  const [engine, setEngine] = React.useState<RemoveEngine>("auto");
   const [tolerance, setTolerance] = React.useState(FLOOD_KEY_DEFAULTS.tolerance);
-  const [busy, setBusy] = React.useState<{ done: number; total: number; current: string } | null>(null);
+  const [busy, setBusy] = React.useState<{
+    done: number;
+    total: number;
+    current: string;
+  } | null>(null);
+  /** The stage of the work, as the engine reports it. */
+  const [stage, setStage] = React.useState("");
+  const stageQueue = React.useRef<string[]>([]);
+  const stageShownAt = React.useRef(0);
+  const stageTimer = React.useRef<number | null>(null);
   const [paused, setPaused] = React.useState(false);
+
+  /**
+   * Shows a stage of the work and keeps it up long enough to read it.
+   *
+   * The stages are queued rather than replaced: one that arrives while
+   * another is on screen waits for its turn, so the message that explains a
+   * slow step is never swallowed by the step that follows it.
+   */
+  const showStage = React.useCallback((next: string) => {
+    stageQueue.current.push(next);
+    if (stageTimer.current !== null) return;
+    const wait = Math.max(0, MIN_STAGE_MS - (Date.now() - stageShownAt.current));
+    const pump = () => {
+      const pending = stageQueue.current.shift();
+      if (pending === undefined) {
+        stageTimer.current = null;
+        return;
+      }
+      setStage(pending);
+      stageShownAt.current = Date.now();
+      if (stageQueue.current.length > 0) {
+        stageTimer.current = window.setTimeout(pump, MIN_STAGE_MS);
+      } else {
+        stageTimer.current = null;
+      }
+    };
+    if (wait === 0) {
+      pump();
+    } else {
+      stageTimer.current = window.setTimeout(pump, wait);
+    }
+  }, []);
+
+  /** Throws the queued stages away - the run they belonged to is over. */
+  const resetStages = React.useCallback(() => {
+    if (stageTimer.current !== null) {
+      window.clearTimeout(stageTimer.current);
+      stageTimer.current = null;
+    }
+    stageQueue.current = [];
+    stageShownAt.current = 0;
+    setStage("");
+  }, []);
 
   /**
    * The ticked designs are the batch the Design panel will create. It lives
@@ -116,11 +175,18 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
    *
    * The work is CPU-bound, so it is done sequentially with a yield between
    * designs: otherwise the progress bar never paints and the tab freezes.
+   *
+   * The engine picks itself ("auto") unless the user asks for a specific
+   * one: the cheap flood key runs first and the AI segmenter is only used
+   * when the cheap one provably cannot help. The stage is shown as it
+   * happens, because the AI engine downloads a ~25 MB model on its first
+   * run and a silent spinner there looks like a freeze.
    */
   const removeBackgrounds = async () => {
     if (selected.length === 0) return;
     const ids = [...selected];
     setBusy({ done: 0, total: ids.length, current: "" });
+    resetStages();
     let done = 0;
     let failed = 0;
     for (const id of ids) {
@@ -130,25 +196,20 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
         continue;
       }
       setBusy((b) => (b ? { ...b, current: design.name } : b));
+      resetStages();
       try {
         const sourceId = designMainAssetId(design);
         const blob = await getAssetBlob(sourceId);
         if (!blob) throw new Error(`Could not read "${design.name}" from storage`);
-        const out = await removeBackground(engine, blob, tolerance);
-        // `removed` is how much actually changed. The output's total
-        // transparency cannot answer this: an artwork that was already
-        // transparent scores 1.0 without a pixel being touched, and a
-        // solid-colour artwork scores 1.0 because the ARTWORK was erased.
-        if (out.removed < 0.005) {
-          throw new Error(
-            `"${design.name}": no background was detected. Try a higher tolerance, or the AI engine for photos.`,
-          );
-        }
-        if (out.transparency > 0.999) {
-          throw new Error(
-            `"${design.name}": the whole image was removed - the artwork itself looked like the background. Try a lower tolerance.`,
-          );
-        }
+        const out = await removeBackgroundAuto(blob, {
+          engine,
+          tolerance,
+          onProgress: showStage,
+        });
+        // The engine does the honest checks itself - "nothing was removed"
+        // and "the artwork itself was the background" are both thrown as
+        // messages that are safe to show, so all that is left here is to
+        // name the design the message is about.
         const asset = await storeAsset(out.blob, `${design.name}-cutout.png`, "design-processed", {
           parentId: design.originalAssetId,
         });
@@ -158,18 +219,24 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
         });
         await logActivity(
           "bgremoval.run",
-          `Removed background from "${design.name}" (${Math.round(out.transparency * 100)}% transparent)`,
+          `Removed background from "${design.name}" with the ${out.engine} engine (${Math.round(out.removed * 100)}% of pixels changed)`,
         );
       } catch (e) {
         failed++;
-        toast.error(e instanceof Error ? e.message : `Could not process "${design.name}"`);
+        const message = e instanceof Error ? e.message : `Could not process "${design.name}"`;
+        toast.error(
+          message.startsWith(`"${design.name}"`) ? message : `"${design.name}": ${message}`,
+        );
       }
       done++;
       setBusy({ done, total: ids.length, current: design.name });
       // Let the browser paint the progress bar.
       await new Promise((r) => setTimeout(r, 0));
     }
+    // The last stage ("Done") has to be seen before the box goes away.
+    await new Promise((r) => setTimeout(r, MIN_STAGE_MS));
     setBusy(null);
+    resetStages();
     if (failed === 0) {
       toast.success(`Removed the background from ${done} design${done > 1 ? "s" : ""}`);
       setSelected([]);
@@ -213,16 +280,24 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       </div>
 
       {busy && (
-        <div className="rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
+        <div
+          className="rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card"
+          data-bg-progress=""
+        >
           <div className="flex items-center gap-2 text-[13px] text-ink">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             <span className="truncate">
               {busy.current ? `Removing background from "${busy.current}"` : "Working…"}
             </span>
-            <span className="ml-auto text-ink-subtle">
+            <span className="ml-auto shrink-0 text-ink-subtle">
               {busy.done} / {busy.total}
             </span>
           </div>
+          {stage && (
+            <p className="mt-1 pl-[22px] text-[11px] text-ink-muted" data-bg-stage="">
+              {stage}
+            </p>
+          )}
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-muted">
             <div
               className="h-full rounded-full bg-forest transition-[width] duration-200"
@@ -238,19 +313,20 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
             {selected.length} design{selected.length > 1 ? "s" : ""} selected
           </span>
           <div className="flex flex-wrap items-end gap-2">
-            <div className="w-[170px] space-y-1">
+            <div className="w-[190px] space-y-1">
               <Label className="text-[11px] text-ink-muted">Engine</Label>
-              <Select value={engine} onValueChange={(v) => setEngine(v as BgRemovalEngineId)}>
-                <SelectTrigger className="h-8 text-[12px]">
+              <Select value={engine} onValueChange={(v) => setEngine(v as RemoveEngine)}>
+                <SelectTrigger className="h-8 text-[12px]" aria-label="Background removal engine">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="auto">Auto (recommended)</SelectItem>
                   <SelectItem value="flood-key">Flood-key (solid backgrounds)</SelectItem>
                   <SelectItem value="ai-segmenter">AI segmentation (photos)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {engine === "flood-key" && (
+            {engine !== "ai-segmenter" && (
               <div className="w-[120px] space-y-1">
                 <Label className="text-[11px] text-ink-muted">Tolerance {tolerance}</Label>
                 <input
@@ -283,78 +359,20 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
         </div>
       )}
 
-      {!hasAny && (
-        <EmptyState
-          icon={<Images />}
-          title="No designs yet"
-          description="Upload your artwork above. Designs are split into two rows: those without ink variants, and those with them."
+      {/* Both rows are always shown, even when one of them is empty. */}
+      {ROWS.map((row) => (
+        <DesignGallery
+          key={row}
+          row={row}
+          designs={rows[row]}
+          swatches={swatchesForRow(row)}
+          selectedIds={selected}
+          showCheckbox
+          onToggle={toggle}
+          indexOffset={row === "ink" ? rows.plain.length : 0}
+          paused={paused}
         />
-      )}
-
-      {ROWS.map((row) => {
-        const list = rows[row];
-        if (list.length === 0) return null;
-        const swatches = swatchesForRow(row);
-        return (
-          <section key={row}>
-            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-[14px] font-semibold text-ink">
-                {ROW_LABELS[row]}{" "}
-                <span className="font-normal text-ink-subtle">({list.length})</span>
-              </h2>
-              <p className="text-[11px] text-ink-muted">{ROW_HINTS[row]}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {list.map((d, i) => {
-                const isSelected = selected.includes(d.id);
-                return (
-                  <Card
-                    key={d.id}
-                    className={cn(
-                      "group relative overflow-hidden transition-shadow",
-                      isSelected && "ring-2 ring-forest",
-                    )}
-                  >
-                    <div className="relative">
-                      <WaveCompare
-                        originalAssetId={d.originalAssetId}
-                        processedAssetId={d.processedAssetId}
-                        index={i}
-                        paused={paused}
-                        className="aspect-square w-full"
-                      />
-                      <div className="absolute left-2 top-2">
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={() => toggle(d.id)}
-                          aria-label={`Select ${d.name}`}
-                          // The artwork behind the box can be white, so the
-                          // box needs its own edge to stay visible.
-                          className="border-ink-subtle bg-white/90 shadow-subtle"
-                        />
-                      </div>
-                      <div className="absolute right-2 top-2 flex gap-1">
-                        {d.processedAssetId && <Badge>cutout</Badge>}
-                        {d.whiteInkAssetId && <Badge>white ink</Badge>}
-                        {d.blackInkAssetId && <Badge>black ink</Badge>}
-                      </div>
-                    </div>
-                    <div className="space-y-1.5 border-t border-border-subtle px-3 py-2">
-                      <div className="truncate text-[13px] font-medium text-ink" title={d.name}>
-                        {d.name}
-                      </div>
-                      <div className="text-[11px] text-ink-subtle">{d.dimensions}</div>
-                      {swatches.length > 0 && (
-                        <ColorSwatchRow swatches={swatches} className="pt-0.5" />
-                      )}
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
+      ))}
     </div>
   );
 }
@@ -364,7 +382,7 @@ export function swatchesForColors(
   colors: string[],
   blackInkColors: string[],
   hasInkVariants: boolean,
-): Array<{ name: string; hex: string; ink?: "black" | "white" | "ambiguous" }> {
+): DesignSwatch[] {
   return colors.map((name) => {
     const hex = hexForColourName(name);
     if (!hasInkVariants) return { name, hex };

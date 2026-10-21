@@ -7,8 +7,9 @@
 // placeholder, at scale 1, x 0.5, y 0.5 fills the area exactly.
 //
 // The fit rule below matches the one real bulk uploader uses: fit the artwork
-// into the area, but never upscale it beyond twice the size that would fill
-// the area (tiny artwork stays small rather than being blown up to a poster).
+// into the area, but never upscale it beyond twice its OWN original size, and
+// never past half the size that would fill the area. Tiny artwork stays small
+// rather than being blown up to a poster.
 // ---------------------------------------------------------------------------
 
 export interface FitInput {
@@ -40,39 +41,59 @@ export interface FitResult {
   factor: number;
 }
 
-/** Largest upscale we will apply, as a multiple of "fills the area". */
+/**
+ * Largest upscale we will apply, as a multiple of the artwork's OWN size.
+ *
+ * A 100px-wide design in a 3000px-wide print area is drawn at 200px wide,
+ * not at 3000px: Printify's uploader treats the artwork's own size as the
+ * limit, and a blown-up thumbnail would fail the resolution check anyway.
+ */
 export const MAX_UPSCALE = 2;
 
-/** The multiplier that fits the artwork into the area (no upscale limit). */
-function rawFit(aw: number, ah: number, ow: number, oh: number): number {
-  return Math.min(aw / ow, ah / oh);
+/**
+ * The multiplier that fits the artwork into the area (no upscale limit).
+ *
+ * The parameters are named for the values the caller passes: the area's size
+ * first, the artwork's size second. The result is the factor the artwork has
+ * to be scaled BY, so the artwork ends up filling the area on its shorter
+ * side.
+ */
+function rawFit(areaW: number, areaH: number, artW: number, artH: number): number {
+  return Math.min(areaW / artW, areaH / artH);
 }
 
 /**
  * Fits artwork into a print area and returns Printify's placement values.
  *
- * Small artwork may be scaled up to fill the area, but never beyond
- * `MAX_UPSCALE` times the size that would fill it.
+ * Artwork that is at least half the area on both sides is scaled so that it
+ * fills the area. Smaller artwork is scaled up too, but never beyond
+ * `MAX_UPSCALE` times its own size, and never past half the size that would
+ * fill the area.
  */
 export function computeFit(input: FitInput): FitResult {
-  const { artworkWidth: ow, artworkHeight: oh, areaWidth: aw, areaHeight: ah } = input;
-  if (ow <= 0 || oh <= 0 || aw <= 0 || ah <= 0) {
+  const {
+    artworkWidth: artW,
+    artworkHeight: artH,
+    areaWidth: areaW,
+    areaHeight: areaH,
+  } = input;
+  if (artW <= 0 || artH <= 0 || areaW <= 0 || areaH <= 0) {
     throw new Error("Artwork and print area must both have positive dimensions");
   }
   const factor =
-    ow < aw / 2 && oh < ah / 2
-      ? Math.min(MAX_UPSCALE, rawFit(aw, ah, ow * 2, oh * 2))
-      : rawFit(aw, ah, ow, oh);
+    artW < areaW / 2 && artH < areaH / 2
+      ? Math.min(MAX_UPSCALE, rawFit(areaW, areaH, artW * 2, artH * 2))
+      : rawFit(areaW, areaH, artW, artH);
 
-  const width = ow * factor;
-  const height = oh * factor;
-  const offsetX = (aw - width) / 2 / aw;
-  const offsetY = (ah - height) / 2 / ah;
-  const scale = width / aw;
+  const width = artW * factor;
+  const height = artH * factor;
+  const offsetX = (areaW - width) / 2 / areaW;
+  const offsetY = (areaH - height) / 2 / areaH;
+  const scale = width / areaW;
   return {
     scale,
     x: offsetX + scale / 2,
-    y: offsetY + height / ah / 2,
+    y: offsetY + height / areaH / 2,
     width,
     height,
     offsetX,

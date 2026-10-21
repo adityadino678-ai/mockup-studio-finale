@@ -25,6 +25,9 @@ export default defineConfig({
     video: "off",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // The dev server pays a large one-off cost on the first request for a
+  // route, and that cost used to land inside a test's assertion timeout.
+  globalSetup: "./e2e/global-setup.ts",
   // Only manage a dev server when we are not pointed at an external target.
   webServer: external
     ? undefined

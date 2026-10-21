@@ -177,6 +177,42 @@ Four things that are easy to get wrong, and were:
    fifty products. Created products are also written to `productDrafts`, so
    they show up in the Product Builder and the Listings page.
 
+## Background removal: two engines, and the rule that picks between them
+
+`src/lib/printify/remove-background.ts` owns the decision. The cheap engine
+runs first and the expensive one is only used when the cheap one provably
+cannot help:
+
+| Flood-key result | Outcome |
+|---|---|
+| removed >= 2% and transparency <= 98% | success, engine `flood-key` (flat artwork) |
+| removed >= 2% and transparency > 98% | **throw** - the artwork WAS the background. Do NOT escalate: the AI engine cannot help, and it would cost a 25 MB download to fail the same way. |
+| removed < 2% | **escalate to `ai-segmenter`** - this is a photo |
+| AI removed < 2% | throw "no background was detected" |
+
+`removed` is the fraction of pixels whose ALPHA CHANGED, never the output's
+total transparency: a soft ramp (alpha 255 -> 100) counts as a change, and an
+already-transparent artwork scores 1.0 without a pixel being touched.
+
+The AI engine downloads MODNet (~25 MB) from a CDN at runtime, so its stages
+are reported through `onProgress` - "Downloading the background model (~25 MB,
+first use only)" must be visible or the run looks like a freeze.
+
+## Placement: drag, rotate, snap
+
+`src/lib/printify/snap.ts` is the pure core and `print-area-preview.tsx` is
+the React surface.
+
+- Snap thresholds are in **SCREEN PIXELS** (7px), not fractions of the area,
+  so the feel is the same at any zoom.
+- The centre snap is the symmetry: the artwork's centre locks to 0.5 and a
+  guide appears. The edges also snap to the area's edges in mode "all".
+- Rotation snaps to every 15 degrees. Shift disables snapping.
+- **The artwork's position must be `translate(-50%,-50%) translate((x-0.5)*W,
+  (y-0.5)*H) rotate(a)`.** Positioning it with `left:50%` PLUS an absolute
+  `translate(cx, cy)` double-counts the offset and throws the artwork out of
+  the print area - a bug the prototype caught before it could ship.
+
 ## Traps that will bite you again
 
 1. **`main` in `wrangler.jsonc` must be a real file path.** The value in Astro's
@@ -194,6 +230,25 @@ Four things that are easy to get wrong, and were:
    URL assertion must tolerate an optional trailing slash.
 5. **Commit messages with `"` break PowerShell argument parsing.** Use
    `git commit -F <file>`.
+6. **The repo lives in OneDrive, and Astro's content store does not always
+   survive it.** `astro dev` writes `.astro/data-store.json` through a
+   temporary file and renames it; OneDrive's sync can hold the target open
+   and the rename fails with `EPERM: operation not permitted`, which kills
+   the dev server with `UnknownFilesystemError`. Delete
+   `.astro/data-store.json.tmp` and start again. If the dev server dies
+   with a stack trace in `mutable-data-store.js`, this is why - not a code
+   bug.
+7. **A cold Vite optimizer pushes the first page load past the assertion
+   timeouts**, so the e2e suite fails on "the app shell did not hydrate"
+   with no application error anywhere. `e2e/global-setup.ts` visits every
+   route once, with a real browser, before the suite runs. Do not remove it
+   because the suite passes on a warm machine - it is what makes a cold
+   machine pass.
+8. **The dev server reloads the page when it re-optimises a lazy import.**
+   A reload resets the React state, so anything transient (an open panel, a
+   selected tab) is lost. `toleratingReload()` in `e2e/workflow.spec.ts`
+   retries the interaction. The app is fine - production serves static
+   files and has no Vite.
 
 ## Known gaps
 

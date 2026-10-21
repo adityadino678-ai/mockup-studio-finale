@@ -34,6 +34,19 @@ interface RawImageLike {
   channels: number;
 }
 
+/**
+ * Normalises the model's output to bytes.
+ *
+ * A float mask carries 0..1 per channel while the byte form carries 0..255;
+ * reinterpreting one as the other would turn the mask into noise.
+ */
+function toByteArray(data: Uint8ClampedArray | Float32Array): Uint8ClampedArray {
+  if (data instanceof Uint8ClampedArray) return data;
+  const out = new Uint8ClampedArray(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = Math.round(data[i] * 255);
+  return out;
+}
+
 let removerPromise: Promise<{ (input: Blob | string, opts?: unknown): Promise<RawImageLike | RawImageLike[]> }> | null =
   null;
 
@@ -56,7 +69,7 @@ async function getRemover() {
 
 self.onmessage = async (event: MessageEvent<RequestMessage>) => {
   const { requestId, blob } = event.data;
-  post({ requestId, ok: true, progress: { stage: "Loading background-removal model (first use downloads ~25 MB, cached after)" } });
+  post({ requestId, ok: true, progress: { stage: "Loading background-removal model…" } });
   try {
     const remover = await getRemover();
     post({ requestId, ok: true, progress: { stage: "Removing background…" } });
@@ -76,11 +89,15 @@ self.onmessage = async (event: MessageEvent<RequestMessage>) => {
     const inputHeight = inputBitmap.height;
     const inputCanvas = new OffscreenCanvas(inputWidth, inputHeight);
     const inputCtx = inputCanvas.getContext("2d", { willReadFrequently: true });
-    inputCtx?.drawImage(inputBitmap, 0, 0);
+    if (!inputCtx) {
+      post({ requestId, ok: false, error: "Could not get 2D context" });
+      return;
+    }
+    inputCtx.drawImage(inputBitmap, 0, 0);
     inputBitmap.close();
-    const inputAlpha = inputCtx
-      ? inputCtx.getImageData(0, 0, inputWidth, inputHeight).data
-      : null;
+    // The input's alpha is the baseline for "did anything change", so it is
+    // required: without it the run could not be told apart from a no-op.
+    const inputAlpha = inputCtx.getImageData(0, 0, inputWidth, inputHeight).data;
 
     const canvas = new OffscreenCanvas(inputWidth, inputHeight);
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -89,53 +106,47 @@ self.onmessage = async (event: MessageEvent<RequestMessage>) => {
       return;
     }
     let rgba: Uint8ClampedArray<ArrayBuffer>;
-    if (img.channels === 4) {
+    const src = toByteArray(img.data);
+    if (img.channels === 4 && img.width === inputWidth && img.height === inputHeight) {
+      // Exact copy: no resampling, so no premultiplication round trip that
+      // would darken the soft edges of the mask.
       rgba = new Uint8ClampedArray(inputWidth * inputHeight * 4);
-      const src = new Uint8ClampedArray(
-        img.data.buffer ?? img.data,
-        img.data.byteOffset ?? 0,
-        img.width * img.height * 4,
-      );
-      if (img.width === inputWidth && img.height === inputHeight) {
-        rgba.set(src);
-      } else {
-        // Resample the model's mask to the artwork's size.
-        const maskCanvas = new OffscreenCanvas(img.width, img.height);
-        const maskCtx = maskCanvas.getContext("2d");
-        if (!maskCtx) {
-          post({ requestId, ok: false, error: "Could not get 2D context" });
-          return;
-        }
-        // A copy with its own buffer: ImageData needs a plain ArrayBuffer.
-        const copy = new Uint8ClampedArray(new ArrayBuffer(src.byteLength));
-        copy.set(src);
-        maskCtx.putImageData(new ImageData(copy, img.width, img.height), 0, 0);
-        ctx.drawImage(maskCanvas, 0, 0, inputWidth, inputHeight);
-        const scaled = ctx.getImageData(0, 0, inputWidth, inputHeight);
-        rgba = scaled.data;
-      }
+      rgba.set(src);
     } else {
-      // Expand non-RGBA output with full alpha.
-      const src = img.data;
-      rgba = new Uint8ClampedArray(inputWidth * inputHeight * 4);
-      for (let i = 0, j = 0; i < src.length && j < rgba.length; i += img.channels, j += 4) {
-        rgba[j] = src[i];
-        rgba[j + 1] = img.channels > 1 ? src[i + 1] : src[i];
-        rgba[j + 2] = img.channels > 2 ? src[i + 2] : src[i];
-        rgba[j + 3] = 255;
+      // The model works at its own resolution, so its output has to be
+      // scaled to the artwork's size. The mask is drawn through a canvas
+      // because that is the only way to resample it without a dependency.
+      const modelRgba = new Uint8ClampedArray(new ArrayBuffer(img.width * img.height * 4));
+      for (let i = 0, j = 0; i < src.length && j < modelRgba.length; i += img.channels, j += 4) {
+        modelRgba[j] = src[i];
+        modelRgba[j + 1] = img.channels > 1 ? src[i + 1] : src[i];
+        modelRgba[j + 2] = img.channels > 2 ? src[i + 2] : src[i];
+        modelRgba[j + 3] = 255;
       }
+      const modelCanvas = new OffscreenCanvas(img.width, img.height);
+      const modelCtx = modelCanvas.getContext("2d");
+      if (!modelCtx) {
+        post({ requestId, ok: false, error: "Could not get 2D context" });
+        return;
+      }
+      // A copy with its own buffer: ImageData needs a plain ArrayBuffer.
+      const copy = new Uint8ClampedArray(new ArrayBuffer(modelRgba.byteLength));
+      copy.set(modelRgba);
+      modelCtx.putImageData(new ImageData(copy, img.width, img.height), 0, 0);
+      ctx.clearRect(0, 0, inputWidth, inputHeight);
+      ctx.drawImage(modelCanvas, 0, 0, inputWidth, inputHeight);
+      const scaled = ctx.getImageData(0, 0, inputWidth, inputHeight);
+      rgba = scaled.data;
     }
 
     // How much actually changed? Without this a transparent artwork scores a
-    // "success" even though nothing was removed.
-    let removed = 0;
-    if (inputAlpha) {
-      let changed = 0;
-      for (let i = 3; i < rgba.length; i += 4) {
-        if (inputAlpha[i] !== rgba[i]) changed++;
-      }
-      removed = rgba.length > 0 ? changed / (rgba.length / 4) : 0;
+    // "success" even though nothing was removed. The comparison is on the
+    // ALPHA channel, so a soft ramp (255 -> 100) counts as a change.
+    let changed = 0;
+    for (let i = 3; i < rgba.length; i += 4) {
+      if (inputAlpha[i] !== rgba[i]) changed++;
     }
+    const removed = rgba.length > 0 ? changed / (rgba.length / 4) : 0;
 
     ctx.putImageData(new ImageData(rgba, inputWidth, inputHeight), 0, 0);
     const outBlob = await canvas.convertToBlob({ type: "image/png" });

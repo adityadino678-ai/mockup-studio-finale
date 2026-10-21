@@ -70,7 +70,15 @@ export async function removeBgFloodKey(
 }
 
 let workerInstance: Worker | null = null;
-const pendingRequests = new Map<string, { resolve: (r: BgRemovalResult) => void; reject: (e: Error) => void }>();
+const pendingRequests = new Map<
+  string,
+  {
+    resolve: (r: BgRemovalResult) => void;
+    reject: (e: Error) => void;
+    /** Per-call progress sink, in addition to the global callback. */
+    onProgress?: (stage: string) => void;
+  }
+>();
 let progressCallback: ((stage: string) => void) | null = null;
 
 function getWorker(): Worker {
@@ -91,7 +99,13 @@ function getWorker(): Worker {
         progress?: { stage: string };
       };
       const pending = pendingRequests.get(requestId);
-      if (progress?.stage && progressCallback) progressCallback(progress.stage);
+      if (progress?.stage) {
+        // The global callback is what the dialog subscribes to; the per-call
+        // sink lets a caller that owns a single removal (the auto engine)
+        // see the worker's stages without stealing the global callback.
+        if (progressCallback) progressCallback(progress.stage);
+        pending?.onProgress?.(progress.stage);
+      }
       if (!pending) return;
       if (ok && blob) {
         pendingRequests.delete(requestId);
@@ -134,11 +148,14 @@ export function setBgRemovalProgressCallback(cb: ((stage: string) => void) | nul
   progressCallback = cb;
 }
 
-export async function removeBgAI(blob: Blob): Promise<BgRemovalResult> {
+export async function removeBgAI(
+  blob: Blob,
+  onProgress?: (stage: string) => void,
+): Promise<BgRemovalResult> {
   const worker = getWorker();
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return new Promise<BgRemovalResult>((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
+    pendingRequests.set(requestId, { resolve, reject, onProgress });
     worker.postMessage({ requestId, blob });
   });
 }
@@ -146,9 +163,10 @@ export async function removeBackground(
   engine: BgRemovalEngineId,
   blob: Blob,
   tolerance?: number,
+  onProgress?: (stage: string) => void,
 ): Promise<BgRemovalResult> {
   if (engine === "flood-key") {
     return removeBgFloodKey(blob, tolerance);
   }
-  return removeBgAI(blob);
+  return removeBgAI(blob, onProgress);
 }

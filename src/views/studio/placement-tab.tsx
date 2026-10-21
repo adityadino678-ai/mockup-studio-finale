@@ -7,13 +7,16 @@ import { db, getSetting, setSetting } from "@/lib/db/schema";
 import { designMainAssetId, getAssetBlob, logActivity, uid } from "@/lib/db/repo";
 import { authedFetch } from "@/lib/client/integrations";
 import { artworkToBase64Sized } from "@/lib/client/artwork";
-import { decodeImage } from "@/lib/image/image";
-import { PrintAreaPreview } from "@/components/studio/print-area-preview";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, Separator } from "@/components/ui/card";
 import { FieldLabel, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Switch } from "@/components/ui/primitives";
+import {
+  DesignAdjustmentPanel,
+  DesignGallery,
+  type DesignSwatch,
+} from "@/views/studio/design-panel";
 import {
   Dialog,
   DialogContent,
@@ -25,9 +28,9 @@ import {
 import { buildPartition, inkGroupsForDesign, resolveVariantIds } from "@/lib/printify/variants";
 import { assertCompletePartition } from "@/lib/printify/print-areas";
 import { clampPlacement } from "@/lib/printify/fit";
-import { inkProblems, placementFor, renderTitle, RESULTS_KEY } from "@/lib/printify/studio-session";
+import { inkProblems, placementFor, renderTitle, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
 import type { StudioCatalogState } from "@/views/printify-studio-page";
-import type { StudioPlacement, StudioProductResult, StudioSession } from "@/types/domain";
+import type { StudioProductResult, StudioSession, Design } from "@/types/domain";
 import { AlertTriangle, Crosshair, Loader2, Package, Send } from "lucide-react";
 
 interface PlacementTabProps {
@@ -58,19 +61,73 @@ interface DesignPlan {
   groups: DesignGroup[];
 }
 
+/** One design in the gallery, with the size of its artwork. */
+interface GalleryEntry {
+  design: Design;
+  dimensions: string;
+}
+
 export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }: PlacementTabProps) {
   const [results, setResults] = React.useState<StudioProductResult[]>([]);
   const [creating, setCreating] = React.useState(false);
   const [progress, setProgress] = React.useState("");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [recreate, setRecreate] = React.useState(false);
-  const [previewId, setPreviewId] = React.useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
-  const [previewSize, setPreviewSize] = React.useState({ w: 0, h: 0 });
-  const [editingId, setEditingId] = React.useState<string | null>(null);
+  /** The design whose placement is being adjusted, if any. */
+  const [editingDesignId, setEditingDesignId] = React.useState<string | null>(null);
   const problemsRef = React.useRef<HTMLDivElement | null>(null);
 
-  const designs = useLiveQuery(() => db.designs.toArray(), []);
+  /**
+   * The designs, with the size of their artwork.
+   *
+   * The sizes are needed by the cards, and they come from the assets table:
+   * ONE bulk read for the whole gallery, never one read per card.
+   */
+  const gallery = useLiveQuery(async () => {
+    const all = await db.designs.toArray();
+    const metas = await db.assets.bulkGet(all.map((d) => d.originalAssetId));
+    const metaMap = new Map<string, { width: number; height: number }>();
+    for (const meta of metas) {
+      if (meta) metaMap.set(meta.id, { width: meta.width, height: meta.height });
+    }
+    return all
+      .map((d) => {
+        const meta = metaMap.get(d.originalAssetId);
+        return {
+          design: d,
+          dimensions: meta ? `${meta.width}×${meta.height}` : "—",
+        };
+      })
+      .sort((a, b) => a.design.createdAt - b.design.createdAt);
+  }, []);
+
+  const designs = React.useMemo(() => (gallery ?? []).map((g) => g.design), [gallery]);
+
+  /** The gallery split into the two rows: with ink variants and without. */
+  const galleryRows = React.useMemo(() => {
+    const plain: GalleryEntry[] = [];
+    const ink: GalleryEntry[] = [];
+    for (const entry of gallery ?? []) {
+      const d = entry.design;
+      if (d.whiteInkAssetId || d.blackInkAssetId) ink.push(entry);
+      else plain.push(entry);
+    }
+    return { plain, ink };
+  }, [gallery]);
+
+  /** The colour swatches of a row, so every card in it shows its colours. */
+  const swatchesForRow = React.useCallback(
+    (row: "plain" | "ink"): DesignSwatch[] =>
+      (session.rows[row]?.colors ?? []).map((name) => {
+        const hex = hexFor(name);
+        if (row === "plain") return { name, hex };
+        const ink = session.rows.ink?.blackInkColors?.includes(name)
+          ? ("black" as const)
+          : ("white" as const);
+        return { name, hex, ink };
+      }),
+    [session.rows, hexFor],
+  );
 
   React.useEffect(() => {
     (async () => {
@@ -222,68 +279,21 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
     [plan, alreadyCreated, recreate],
   );
 
-  // --- the preview -----------------------------------------------------------
-  const previewDesign = React.useMemo(() => {
-    if (!designs || designs.length === 0) return null;
-    if (previewId) return designs.find((d) => d.id === previewId) ?? designs[0];
-    return designs[0];
-  }, [designs, previewId]);
+  // --- the design being adjusted ----------------------------------------------
+  // The placement itself lives in the adjustment panel: it edits the same
+  // session fields the listing reads, so what the user arranges is what gets
+  // created. The tab only decides WHICH design the panel is for.
+  const editingDesign = React.useMemo(
+    () => (editingDesignId ? (designs ?? []).find((d) => d.id === editingDesignId) ?? null : null),
+    [designs, editingDesignId],
+  );
 
-  React.useEffect(() => {
-    let cancelled = false;
-    let url: string | null = null;
-    (async () => {
-      if (!previewDesign) {
-        setPreviewUrl(null);
-        return;
-      }
-      const blob = await getAssetBlob(designMainAssetId(previewDesign));
-      if (cancelled || !blob) return;
-      url = URL.createObjectURL(blob);
-      setPreviewUrl(url);
-      try {
-        const bmp = await decodeImage(blob);
-        if (cancelled) {
-          bmp.close();
-          return;
-        }
-        setPreviewSize({ w: bmp.width, h: bmp.height });
-        bmp.close();
-      } catch {
-        setPreviewSize({ w: 0, h: 0 });
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [previewDesign]);
-
-  // --- the placement being edited --------------------------------------------
-  // With "one placement for every design" on, the controls edit the shared
-  // placement. With it off, they edit the design picked below.
-  const editingPlacement: StudioPlacement = React.useMemo(() => {
-    if (session.universal || !editingId) return session.universalPlacement;
-    return session.placements[editingId] ?? session.universalPlacement;
-  }, [session.universal, session.universalPlacement, session.placements, editingId]);
-
-  const setEditingPlacement = (patch: Partial<StudioPlacement>) => {
-    const merged = { ...editingPlacement, ...patch };
-    // Rounded on write: a drag produces raw floats like 0.5045991124897677,
-    // which is not a value the number inputs can show or accept.
-    const next: StudioPlacement = {
-      position: merged.position,
-      x: Math.round(merged.x * 1000) / 1000,
-      y: Math.round(merged.y * 1000) / 1000,
-      scale: Math.round(merged.scale * 1000) / 1000,
-      angle: Math.round(merged.angle * 10) / 10,
-    };
-    if (session.universal || !editingId) {
-      update({ universalPlacement: next });
-      return;
-    }
-    update({ placements: { ...session.placements, [editingId]: next } });
-  };
+  /** The print area the edited design's placement points at. */
+  const editingArea = React.useMemo(() => {
+    if (!editingDesign) return area;
+    const position = placementFor(session, editingDesign.id).position;
+    return printAreas.find((a) => a.position === position) ?? area;
+  }, [area, printAreas, session, editingDesign]);
 
   // --- creating --------------------------------------------------------------
   const createListings = async () => {
@@ -476,185 +486,40 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
     }
   };
 
-  if (!session.blueprintId) {
-    return (
-      <EmptyState
-        icon={<Package />}
-        title="Choose a product first"
-        description="The design panel needs a product, because the print area and its size come from the product's placeholders."
-        actions={[{ label: "Go to Colors", onClick: onGoToColors }]}
-      />
-    );
-  }
-
   return (
     <div className="space-y-5">
-      {/* --- placement ------------------------------------------------------ */}
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-[14px] font-semibold text-ink">Where the artwork sits</h2>
-              <p className="text-[11px] text-ink-muted">
-                Printify positions artwork from the centre of the print area.
-              </p>
-            </div>
-            <label className="flex cursor-pointer items-center gap-2">
-              <Switch
-                checked={session.universal}
-                onCheckedChange={(v) => update({ universal: v })}
-                aria-label="Use one placement for every design"
-                id="studio-universal"
-              />
-              <span className="text-[12px] text-ink">One placement for every design</span>
-            </label>
-          </div>
+      {/* --- the designs ---------------------------------------------------- */}
+      {/* Both rows are always shown, exactly as on the Designs page. */}
+      {ROWS.map((row) => (
+        <DesignGallery
+          key={row}
+          row={row}
+          designs={galleryRows[row].map((g) => ({
+            id: g.design.id,
+            name: g.design.name,
+            originalAssetId: g.design.originalAssetId,
+            processedAssetId: g.design.processedAssetId,
+            whiteInkAssetId: g.design.whiteInkAssetId,
+            blackInkAssetId: g.design.blackInkAssetId,
+            dimensions: g.dimensions,
+          }))}
+          swatches={swatchesForRow(row)}
+          indexOffset={row === "ink" ? galleryRows.plain.length : 0}
+          onOpen={(id) => setEditingDesignId(id)}
+        />
+      ))}
 
-          {!session.universal && (
-            <div className="space-y-1.5 rounded-md bg-surface-muted/60 p-3">
-              <FieldLabel htmlFor="studio-edit-design">Editing the placement of</FieldLabel>
-              <select
-                id="studio-edit-design"
-                value={editingId ?? ""}
-                onChange={(e) => setEditingId(e.target.value || null)}
-                className="h-8 w-full rounded-md border border-border-strong bg-surface px-2 text-[12px] text-ink"
-              >
-                <option value="">Pick a design…</option>
-                {scope.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-ink-subtle">
-                Every design starts from the shared placement; pick one above to adjust it on its
-                own.
-              </p>
-            </div>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-[260px_1fr]">
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <FieldLabel htmlFor="studio-print-area">Print area</FieldLabel>
-                <div id="studio-print-area" className="flex flex-wrap gap-1.5">
-                  {printAreas.map((a) => (
-                    <Button
-                      key={a.position}
-                      size="sm"
-                      variant={editingPlacement.position === a.position ? "default" : "outline"}
-                      onClick={() => setEditingPlacement({ position: a.position })}
-                      className="h-7 text-[12px]"
-                    >
-                      {a.position}
-                    </Button>
-                  ))}
-                </div>
-                {area && (
-                  <p className="text-[11px] text-ink-subtle">
-                    {area.width} × {area.height} px
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <FieldLabel htmlFor="studio-scale">
-                  Width ({Math.round(editingPlacement.scale * 100)}% of the area)
-                </FieldLabel>
-                <input
-                  id="studio-scale"
-                  type="range"
-                  min={5}
-                  max={100}
-                  value={Math.round(editingPlacement.scale * 100)}
-                  onChange={(e) => setEditingPlacement({ scale: Number(e.target.value) / 100 })}
-                  className="h-8 w-full accent-[#314d3d]"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <FieldLabel htmlFor="studio-angle">
-                  Rotation ({Math.round(editingPlacement.angle)}°)
-                </FieldLabel>
-                <input
-                  id="studio-angle"
-                  type="range"
-                  min={-180}
-                  max={180}
-                  value={editingPlacement.angle}
-                  onChange={(e) => setEditingPlacement({ angle: Number(e.target.value) })}
-                  className="h-8 w-full accent-[#314d3d]"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <div className="w-1/2 space-y-1.5">
-                  <FieldLabel htmlFor="studio-x">Centre X</FieldLabel>
-                  <Input
-                    id="studio-x"
-                    type="number"
-                    step={0.01}
-                    min={0}
-                    max={1}
-                    value={editingPlacement.x}
-                    onChange={(e) => setEditingPlacement({ x: Number(e.target.value) })}
-                    className="h-8 text-[12px]"
-                  />
-                </div>
-                <div className="w-1/2 space-y-1.5">
-                  <FieldLabel htmlFor="studio-y">Centre Y</FieldLabel>
-                  <Input
-                    id="studio-y"
-                    type="number"
-                    step={0.01}
-                    min={0}
-                    max={1}
-                    value={editingPlacement.y}
-                    onChange={(e) => setEditingPlacement({ y: Number(e.target.value) })}
-                    className="h-8 text-[12px]"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <PrintAreaPreview
-                artworkUrl={previewUrl}
-                artworkWidth={previewSize.w}
-                artworkHeight={previewSize.h}
-                areaWidth={area?.width ?? 3000}
-                areaHeight={area?.height ?? 3000}
-                placement={editingPlacement}
-                onChange={setEditingPlacement}
-                className="mx-auto max-w-[320px]"
-              />
-              <p className="text-[11px] leading-relaxed text-ink-subtle">
-                Drag the artwork to move it. The dashed frame is the print area; Printify does not
-                publish where that frame sits on the garment, so the position on the shirt itself is
-                an approximation.
-              </p>
-              {designs && designs.length > 1 && (
-                <div className="space-y-1.5">
-                  <FieldLabel htmlFor="studio-preview">Previewing</FieldLabel>
-                  <select
-                    id="studio-preview"
-                    value={previewDesign?.id ?? ""}
-                    onChange={(e) => setPreviewId(e.target.value || null)}
-                    className="h-8 w-full rounded-md border border-border-strong bg-surface px-2 text-[12px] text-ink"
-                  >
-                    {designs.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* Without a product there is no listing to create, but the designs and
+          their placement are still there to look at. */}
+      {!session.blueprintId ? (
+        <EmptyState
+          icon={<Package />}
+          title="Choose a product first"
+          description="The design panel needs a product, because the print area and its size come from the product's placeholders."
+          actions={[{ label: "Go to Colors", onClick: onGoToColors }]}
+        />
+      ) : (
+        <>
       {/* --- listing details ------------------------------------------------- */}
       <Card>
         <CardContent className="space-y-3 p-4">
@@ -840,6 +705,20 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
             </div>
           </CardContent>
         </Card>
+      )}
+        </>
+      )}
+
+      {/* --- the adjustment panel --------------------------------------------- */}
+      {editingDesign && (
+        <DesignAdjustmentPanel
+          design={editingDesign}
+          session={session}
+          update={update}
+          area={editingArea}
+          printAreas={printAreas}
+          onClose={() => setEditingDesignId(null)}
+        />
       )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
