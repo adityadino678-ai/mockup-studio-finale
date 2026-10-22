@@ -36,13 +36,16 @@ test("two designs can be paired as one listing, with a black-ink and a white-ink
   await page.setInputFiles("input[type=file]", [fixture("design-a.png"), fixture("design-b.png")]);
   await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
 
-  // Pairing needs exactly two ticked designs; the first ticked is the
-  // black-ink half and therefore owns the listing.
-  await page.getByRole("checkbox", { name: "Select design-a" }).click();
-  await page.getByRole("checkbox", { name: "Select design-b" }).click();
-  await page.getByRole("button", { name: /Pair for one listing/ }).click();
-
+  // The user's own gesture: tick "Ink variants" on the two designs, then the
+  // ink row offers to pair them. No batch checkbox is involved.
+  await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+  await page.getByRole("checkbox", { name: "Ink variants for design-b" }).click();
   await expect(page.getByText("Has ink variants (2)")).toBeVisible();
+
+  const pairInk = page.getByRole("button", { name: /Pair these two as one listing/ });
+  await expect(pairInk).toBeVisible();
+  await pairInk.click();
+
   await expect(page.getByRole("checkbox", { name: "design-a prints black ink" })).toBeChecked();
   await expect(page.getByRole("checkbox", { name: "design-b prints white ink" })).toBeChecked();
   // Both cards name their partner, so the two halves describe the same pair.
@@ -80,6 +83,19 @@ test("two designs can be paired as one listing, with a black-ink and a white-ink
   });
   expect(layout.cards).toBeGreaterThan(0);
   expect(layout.bad).toEqual([]);
+
+  // Unpair breaks it and returns both designs to the no-ink row.
+  await page.getByRole("button", { name: "Unpair" }).first().click();
+  await expect(page.getByText("No ink variants (2)")).toBeVisible();
+  await expect(page.locator("[data-ink-pair-role]")).toHaveCount(0);
+
+  // The batch checkboxes still pair a specific two - both halves are already
+  // in the scope, so the bar's button is the path that stays open.
+  await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+  await page.getByRole("checkbox", { name: "Ink variants for design-b" }).click();
+  await expect(page.getByText("Has ink variants (2)")).toBeVisible();
+  await page.getByRole("button", { name: /Pair for one listing/ }).click();
+  await expect(page.locator("[data-ink-pair-role]")).toHaveCount(2);
 });
 
 test("the adjustment preview clips the artwork to the print area", async ({ page }) => {

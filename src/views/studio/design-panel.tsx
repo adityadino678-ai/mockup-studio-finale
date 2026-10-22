@@ -15,6 +15,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
+import { Link2 } from "lucide-react";
 import { DesignCard, type DesignCardData } from "@/components/studio/design-card";
 import { PrintAreaPreview } from "@/components/studio/print-area-preview";
 import { Button } from "@/components/ui/button";
@@ -164,6 +165,15 @@ export interface DesignGalleryProps {
   onSetInkRole?: (id: string, role: "black" | "white") => void;
   /** Breaks a design's pair. */
   onUnpair?: (id: string) => void;
+  /**
+   * Pairs the two UNPAIRED designs in this row as one listing.
+   *
+   * Only offered when the row holds exactly two of them: that is the moment
+   * the user's intent is unambiguous ("these two, one listing"), and it saves
+   * them from finding the batch checkboxes first. The first card is the
+   * black-ink half; the cards let them swap the roles afterwards.
+   */
+  onPairInk?: (blackInkDesignId: string, whiteInkDesignId: string) => void;
   /** Called when a card's body is clicked. */
   onOpen?: (id: string) => void;
 }
@@ -187,8 +197,15 @@ export function DesignGallery({
   pairInfo,
   onSetInkRole,
   onUnpair,
+  onPairInk,
   onOpen,
 }: DesignGalleryProps) {
+  // The designs the user could pair RIGHT NOW: ink-ticked and not already in
+  // a pair. Two of them is the whole gesture - no batch selection needed.
+  const pairable = onPairInk
+    ? designs.filter((d) => (inkPairIds?.includes(d.id) ?? false) && !pairInfo?.(d.id))
+    : [];
+
   return (
     <section data-design-row={row}>
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
@@ -198,6 +215,39 @@ export function DesignGallery({
         </h2>
         <p className="text-[11px] text-ink-muted">{ROW_HINTS[row]}</p>
       </div>
+
+      {onPairInk && row === "ink" && designs.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2" data-pair-action="">
+          {pairable.length === 2 ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onPairInk(pairable[0].id, pairable[1].id)}
+                title="One product: the two designs print on the same placeholder, split by ink colour. The first card is the black-ink half."
+              >
+                <Link2 className="h-3.5 w-3.5" /> Pair these two as one listing
+              </Button>
+              <span className="text-[11px] text-ink-subtle">
+                Same placeholder, one for black ink and one for white ink.
+              </span>
+            </>
+          ) : pairable.length === 1 ? (
+            <span className="text-[11px] text-ink-subtle">
+              Tick another design&apos;s &ldquo;Ink variants&rdquo; box to pair the two as one
+              listing.
+            </span>
+          ) : pairable.length === 0 ? (
+            <span className="text-[11px] text-ink-subtle">
+              Every design in this row is already paired.
+            </span>
+          ) : (
+            <span className="text-[11px] text-ink-subtle">
+              Pick two with the card checkboxes, then press &ldquo;Pair for one listing&rdquo;.
+            </span>
+          )}
+        </div>
+      )}
 
       {designs.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border-subtle bg-surface-muted/40 px-4 py-3">

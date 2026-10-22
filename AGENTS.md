@@ -255,12 +255,23 @@ Two things were removed on purpose; do not bring them back:
 
 ### Pairing two uploaded designs as ONE listing
 
-`session.inkPairs` holds the pairs. The **"Pair for one listing"** button on
-the Designs tab pairs exactly the two ticked designs: the first ticked becomes
-the **black-ink** half and owns the listing (title, price, placement), the
-other becomes the **white-ink** half. Each card then names its partner and
-shows a **Black ink / White ink** box, because which design is which is the
-user's decision, not a guess.
+`session.inkPairs` holds the pairs. There are TWO ways to pair, and they share
+one function:
+
+- the **ink row** offers **"Pair these two as one listing"** as soon as exactly
+  two ink-ticked designs are unpaired - the user's own gesture (tick "Ink
+  variants" on both) and the one that is visible without touching the batch
+  checkboxes; or
+- tick exactly two designs and press **"Pair for one listing"** in the
+  selection bar. That bar is hidden until something is selected, which is why
+  the row button exists.
+
+The first design becomes the **black-ink** half and owns the listing (title,
+price, placement), the other the **white-ink** half. Pairing also adds both
+halves to the batch scope, because a pair IS a listing - leaving one half out
+of the scope would create nothing for the other. Each card then names its
+partner and shows a **Black ink / White ink** box, because which design is
+which is the user's decision, not a guess.
 
 - The black-ink design prints the plain colours AND the colours marked for
   black ink; the white-ink design prints the remaining ink colours. Together

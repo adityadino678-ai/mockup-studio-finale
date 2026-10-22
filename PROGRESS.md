@@ -550,6 +550,22 @@ studio now pairs them.
   to the no-ink-variants row. A paired design is never reported as "missing
   ink": its partner is the artwork for the other half.
 
+### 2b. The pair step is visible without a batch selection
+
+The first shipped version put **"Pair for one listing"** only in the selection
+bar, and that bar renders only when at least one design is ticked for the
+batch. The user ticked "Ink variants" on two designs and saw nothing - the
+pair step was invisible, and so were the Black ink / White ink boxes that only
+appear after it.
+
+The ink row now offers **"Pair these two as one listing"** as soon as exactly
+two of its designs are ink-ticked and unpaired. It needs no batch checkbox and
+adds both halves to the batch scope, because a pair IS a listing. With one
+ink-ticked design the row says "Tick another design's Ink variants box...";
+with three or more it points at the card checkboxes. The selection-bar path
+still works for picking a specific two out of many, and Unpair still returns
+both to the no-ink row.
+
 ### 3. Tests and gates
 
 - `tests/design-colours.test.ts` gains 13 cases for the role split, the pair

@@ -38,6 +38,7 @@ import {
   planDesignColours,
   planPairedDesignColours,
   setInkPairRole,
+  withInkPair,
   withoutInkPair,
   type InkArtworkProblem,
 } from "@/lib/printify/design-colours";
@@ -153,6 +154,28 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
     update({
       inkPairs: withoutInkPair(inkPairs, id),
       inkPairIds: (session.inkPairIds ?? []).filter((x) => !members.includes(x)),
+    });
+  };
+
+  /**
+   * Pairs the two ink-ticked designs as one listing, from this tab too.
+   *
+   * Both halves join the batch scope, because a pair IS a listing: leaving
+   * one half out would create nothing for the other.
+   */
+  const pairTwo = (blackId: string, whiteId: string) => {
+    if (!blackId || !whiteId || blackId === whiteId) return;
+    const existing = pairForDesign(inkPairs, blackId);
+    if (
+      existing &&
+      (existing.pair.blackInkDesignId === whiteId || existing.pair.whiteInkDesignId === whiteId)
+    ) {
+      return;
+    }
+    update({
+      inkPairs: withInkPair(inkPairs, blackId, whiteId),
+      inkPairIds: [...new Set([...(session.inkPairIds ?? []), blackId, whiteId])],
+      designIds: [...new Set([...session.designIds, blackId, whiteId])],
     });
   };
 
@@ -715,6 +738,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           pairInfo={pairInfo}
           onSetInkRole={setRole}
           onUnpair={unpair}
+          onPairInk={pairTwo}
           onOpen={(id) => setEditingDesignId(id)}
         />
       ))}

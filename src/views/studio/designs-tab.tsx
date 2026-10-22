@@ -154,17 +154,18 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   };
 
   /**
-   * Pairs the two ticked designs as ONE listing.
+   * Pairs two designs as ONE listing.
    *
-   * The first one ticked becomes the black-ink half (and therefore owns the
-   * title, price and placement); the other becomes the white-ink half. The
-   * roles are swappable on the cards, and nothing about the artwork infers
-   * which is which.
+   * The first id becomes the black-ink half (and therefore owns the title,
+   * price and placement); the other becomes the white-ink half. The roles are
+   * swappable on the cards, and nothing about the artwork infers which is
+   * which.
+   *
+   * Both halves are also added to the batch scope: a pair IS a listing, so
+   * leaving one half out of the batch would create nothing for it.
    */
-  const pairSelected = () => {
-    if (selected.length !== 2) return;
-    const [blackId, whiteId] = selected;
-    if (blackId === whiteId) return;
+  const pairTwo = (blackId: string, whiteId: string) => {
+    if (!blackId || !whiteId || blackId === whiteId) return;
     const existing = pairForDesign(inkPairs, blackId);
     if (
       existing &&
@@ -176,10 +177,17 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
     update({
       inkPairs: withInkPair(inkPairs, blackId, whiteId),
       inkPairIds: [...new Set([...inkPairIds, blackId, whiteId])],
+      designIds: [...new Set([...selected, blackId, whiteId])],
     });
     toast.success(
       "Paired as one listing — use the Black ink / White ink boxes to set each design's role",
     );
+  };
+
+  /** The two ticked designs, from the batch checkboxes. */
+  const pairSelected = () => {
+    if (selected.length !== 2) return;
+    pairTwo(selected[0], selected[1]);
   };
 
   /** Moves a paired design to the other half of its pair. */
@@ -482,6 +490,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           pairInfo={pairInfo}
           onSetInkRole={setRole}
           onUnpair={unpair}
+          onPairInk={pairTwo}
         />
       ))}
     </div>
