@@ -772,23 +772,25 @@ describe("mockup + library tools", () => {
 
   it("proposes background removal and reports missing artwork on confirm", async () => {
     await seedLibrary();
-    const proposal = await executeTool("remove_background", { design: "sunset", engine: "flood-key" });
-    expect(proposal.confirmation?.payload.engine).toBe("flood-key");
-    const executed = await confirmRemoveBackground({ designId: "d1", engine: "flood-key" });
+    const proposal = await executeTool("remove_background", { design: "sunset" });
+    expect(proposal.confirmation?.payload.designId).toBe("d1");
+    expect(proposal.confirmation?.payload.engine).toBeUndefined();
+    const executed = await confirmRemoveBackground({ designId: "d1" });
     expect(executed.error).toBeDefined();
   });
 
-  it("defaults the background removal to the engine that picks itself", async () => {
-    // "auto" tries the instant engines first and only downloads the AI model
-    // when they cannot help. The old default was flood-key, which removed
-    // nothing at all from a photograph.
+  it("has no engine to choose: the local chain is fixed", async () => {
+    // The remover runs flood-key then border-model, on this device, with no
+    // key and no limit. There is no engine for the model to pick, so a
+    // stray `engine` argument must not reach the confirm card.
     await seedLibrary();
-    const proposal = await executeTool("remove_background", { design: "sunset" });
-    expect(proposal.confirmation?.payload.engine).toBe("auto");
-    // An engine the app does not know falls back to "auto" rather than to
-    // something that would fail.
-    const odd = await executeTool("remove_background", { design: "sunset", engine: "nonsense" });
-    expect(odd.confirmation?.payload.engine).toBe("auto");
+    const proposal = await executeTool("remove_background", {
+      design: "sunset",
+      engine: "flood-key",
+    });
+    expect(proposal.confirmation?.payload.engine).toBeUndefined();
+    expect(proposal.confirmation?.detail).toMatch(/on this device/i);
+    expect(proposal.confirmation?.detail).not.toMatch(/download|25 MB|AI segmentation/i);
   });
 
   it("needs an attached image before saving one from chat", async () => {

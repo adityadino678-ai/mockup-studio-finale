@@ -35,8 +35,7 @@ import {
 } from "@/lib/printify/design-colours";
 import { ROW_HINTS, ROW_LABELS } from "@/lib/printify/studio-session";
 import {
-  splitDesignsByInkArtwork,
-  splitDesignsByProduct,
+  splitDesignsByInkPair,
   type ProductColourGroups,
   type SeparableDesign,
 } from "@/lib/printify/design-colours";
@@ -81,26 +80,18 @@ export function productColourGroups(session: StudioSession): ProductColourGroups
 }
 
 /**
- * The split to show, for the product that is selected.
+ * The split to show, for the session.
  *
- * With a product chosen, the split follows THAT product: a design belongs
- * with the ink colours only when it has the ink artwork the product's
- * colours actually need.
- *
- * With NO product chosen there is nothing to separate the designs by - the
- * colour groups belong to the product - and the Designs tab is usable before
- * a product is picked, because that is where designs are uploaded and their
- * ink variants are made. In that state the split falls back to which
- * designs have their own ink artwork on file.
+ * The split is exactly what the user ticked in the Designs tab: the ids in
+ * `session.inkPairIds` are the "Has ink variants" row and every other design
+ * is "No ink variants". Nothing about the product, and nothing about the ink
+ * artwork on file, changes that - the user decides, the app obeys.
  */
 export function splitDesignsForSession<T extends SeparableDesign>(
   designs: T[],
   session: StudioSession,
 ): { plain: T[]; ink: T[] } {
-  if (!session.blueprintId || !session.printProviderId) {
-    return splitDesignsByInkArtwork(designs);
-  }
-  return splitDesignsByProduct(designs, productColourGroups(session));
+  return splitDesignsByInkPair(designs, session.inkPairIds ?? []);
 }
 
 /**
@@ -139,7 +130,7 @@ export const DESIGN_ROW_EMPTY: Record<StudioRowId, { title: string; hint: string
   },
   ink: {
     title: "No designs with ink variants yet",
-    hint: "Create them on the Designs page - Actions, then Ink variants - and they will appear here.",
+    hint: 'Tick "Ink variants" on a design card and it will appear here.',
   },
 };
 
@@ -163,12 +154,12 @@ export interface DesignGalleryProps {
   /** Show the batch-scope checkbox. */
   showCheckbox?: boolean;
   onToggle?: (id: string) => void;
+  /** The designs the user marked as "has ink variants". */
+  inkPairIds?: readonly string[];
+  /** Ticks / unticks a design as "has ink variants". Omit to hide the box. */
+  onToggleInkPair?: (id: string) => void;
   /** Called when a card's body is clicked. */
   onOpen?: (id: string) => void;
-  /** Offset for the wipe animation stagger, so two grids do not pulse together. */
-  indexOffset?: number;
-  /** Pause the before/after wipe animation. */
-  paused?: boolean;
 }
 
 /**
@@ -185,9 +176,9 @@ export function DesignGallery({
   selectedIds,
   showCheckbox = false,
   onToggle,
+  inkPairIds,
+  onToggleInkPair,
   onOpen,
-  indexOffset = 0,
-  paused = false,
 }: DesignGalleryProps) {
   return (
     <section data-design-row={row}>
@@ -205,20 +196,20 @@ export function DesignGallery({
           <p className="mt-0.5 text-[11px] text-ink-muted">{DESIGN_ROW_EMPTY[row].hint}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {designs.map((d, i) => {
+        <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {designs.map((d) => {
             const own = designColours?.(d);
             return (
               <DesignCard
                 key={d.id}
                 design={d}
-                index={indexOffset + i}
-                paused={paused}
                 selected={selectedIds?.includes(d.id) ?? false}
                 showCheckbox={showCheckbox}
                 onToggle={onToggle ? () => onToggle(d.id) : undefined}
                 swatches={own?.swatches ?? swatches}
                 colors={own?.colors}
+                inkPair={inkPairIds?.includes(d.id) ?? false}
+                onToggleInkPair={onToggleInkPair ? () => onToggleInkPair(d.id) : undefined}
                 onOpen={onOpen ? () => onOpen(d.id) : undefined}
               />
             );
@@ -350,7 +341,10 @@ export function DesignAdjustmentPanel({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl" data-design-panel={design.id}>
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] max-w-3xl overflow-x-hidden overflow-y-auto"
+        data-design-panel={design.id}
+      >
         <DialogHeader>
           <DialogTitle>
             <Crosshair className="h-4 w-4" /> Adjust "{design.name}"
@@ -378,8 +372,8 @@ export function DesignAdjustmentPanel({
           </span>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-[260px_1fr]">
-          <div className="space-y-3">
+        <div className="grid gap-4 sm:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-3">
             <div className="space-y-1.5">
               <FieldLabel htmlFor="studio-print-area">Print area</FieldLabel>
               <div id="studio-print-area" className="flex flex-wrap gap-1.5">
@@ -463,7 +457,7 @@ export function DesignAdjustmentPanel({
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <PrintAreaPreview
               artworkUrl={artwork?.url ?? null}
               artworkWidth={artwork?.width ?? 0}

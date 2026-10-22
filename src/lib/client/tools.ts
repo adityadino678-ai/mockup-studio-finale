@@ -29,7 +29,7 @@ import {
 } from "@/lib/db/repo";
 import { createInkVariantBlob } from "@/lib/canvas/compose";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
-import { removeBackgroundAuto, type RemoveEngine } from "@/lib/printify/remove-background";
+import { removeBackgroundAuto } from "@/lib/printify/remove-background";
 import {
   DEFAULT_TRANSFORM,
   type ImagePartData,
@@ -148,7 +148,7 @@ const HOWTO: Array<{ match: RegExp; answer: string }> = [
   {
     match: /background|remove bg|cutout|transparen/i,
     answer:
-      "Background removal runs locally and picks its own engine: flat backgrounds are removed instantly, and photos use MODNet (the first run downloads ~25 MB, then it is cached). You can also force an engine on the design's actions menu.",
+      "Background removal runs on this device with no key and no limit: the flood key removes one flat background colour, then the border model follows a background that fades or vignettes.",
   },
   {
     match: /ink|variant|white|black/i,
@@ -606,49 +606,27 @@ export async function confirmInkVariant(payload: Record<string, unknown>): Promi
 // ---------------------------------------------------------------------------
 
 /**
- * The engines the background-removal tool accepts.
+ * The background-removal tool always uses the same local chain.
  *
- * "auto" is the default: it runs the instant engines first and only
- * downloads the AI model when they cannot do the job. A hard-coded flood
- * key could only ever remove one flat colour, so a photograph came back
- * with nothing changed and the agent reported a removal that never
- * happened.
+ * There is no engine for the model to pick any more, so the numbers can no
+ * longer drift from what the app actually does: the flood key removes one
+ * flat colour and the border model follows a backdrop that fades.
  */
-const REMOVE_ENGINES: RemoveEngine[] = ["auto", "flood-key", "border-model", "ai-segmenter"];
-
-function parseRemoveEngine(value: unknown): RemoveEngine {
-  return REMOVE_ENGINES.includes(value as RemoveEngine) ? (value as RemoveEngine) : "auto";
-}
-
-/** What each engine does, in the words the confirm card shows. */
-const ENGINE_BLURB: Record<RemoveEngine, string> = {
-  auto:
-    "The engine picks itself: a flat background is handled instantly, a backdrop that fades is handled by the border model, and a photo uses AI segmentation (the first run downloads ~25 MB).",
-  "flood-key": "The flood-key engine removes one flat background colour, instantly.",
-  "border-model":
-    "The border-model engine follows a background that fades or vignettes, instantly.",
-  "ai-segmenter":
-    "AI segmentation handles any photo, but the first run downloads ~25 MB of model.",
-  api:
-    "Your own background-removal service (remove.bg, PhotoRoom or Google AI Studio) removes the background.",
-};
+const REMOVE_BLURB =
+  "Runs on this device: the flood key removes one flat background colour, then the border model follows a background that fades or vignettes. No key, no upload, no limit.";
 
 async function proposeRemoveBackground(args: Record<string, unknown>): Promise<ToolExecResult> {
   const designs = await db.designs.toArray();
   if (!designs.length) return { summary: "No designs to process", error: "Upload a design first." };
   const design = pickByName(designs, String(args.design ?? "")) ?? designs[0];
-  // The engine the model asked for, or "auto" - which tries the instant
-  // engines first and only downloads the AI model when they cannot help.
-  const engine = parseRemoveEngine(args.engine);
   const tolerance = Number(args.tolerance);
   return {
     summary: `Ready to remove the background from “${design.name}”`,
     confirmation: {
-      detail: `Remove the background from “${design.name}”. ${ENGINE_BLURB[engine]} The original file is kept.`,
+      detail: `Remove the background from “${design.name}”. ${REMOVE_BLURB} The original file is kept.`,
       payload: {
         designId: design.id,
         designName: design.name,
-        engine,
         tolerance: Number.isFinite(tolerance) ? tolerance : undefined,
       },
     },
@@ -660,12 +638,11 @@ export async function confirmRemoveBackground(payload: Record<string, unknown>):
   const designId = String(payload.designId ?? "");
   const design = designId ? await db.designs.get(designId) : undefined;
   if (!design) return { summary: "Design not found", error: "That design is no longer in this browser." };
-  const engine = parseRemoveEngine(payload.engine);
   const tolerance = typeof payload.tolerance === "number" ? payload.tolerance : undefined;
   try {
     const blob = await getAssetBlob(design.originalAssetId);
     if (!blob) return { summary: "Artwork missing", error: "The design's artwork is missing from storage." };
-    const out = await removeBackgroundAuto(blob, { engine, tolerance });
+    const out = await removeBackgroundAuto(blob, { tolerance });
     // `removed` is the fraction of pixels whose ALPHA CHANGED. The output's
     // total transparency cannot answer this: an artwork that was already
     // transparent scores 1.0 without a pixel being touched, and a solid

@@ -2,15 +2,11 @@ import { floodKeyRemoveBackground, FLOOD_KEY_DEFAULTS, transparentFraction } fro
 import { borderModelRemoveBackground, BORDER_MODEL_DEFAULTS } from "./border-model";
 
 // ---------------------------------------------------------------------------
-// Background removal engine abstraction. Three local engines:
+// Background removal engine abstraction. Two local engines:
 //   1. flood-key    — instant, deterministic, works on solid backgrounds
 //   2. border-model — instant, deterministic, follows a gradient or a vignette
-//   3. ai-segmenter — transformers.js MODNet in a Web Worker (first use
-//                     downloads the model, cached by the browser afterwards)
 // The original blob is never modified; engines return a new PNG blob.
 // ---------------------------------------------------------------------------
-
-export type BgRemovalEngineId = "flood-key" | "border-model" | "ai-segmenter";
 
 export interface BgRemovalResult {
   blob: Blob;
@@ -103,108 +99,4 @@ export async function removeBgBorderModel(
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Canvas export failed"))), "image/png");
   });
   return { blob: outBlob, transparency, removed };
-}
-
-let workerInstance: Worker | null = null;const pendingRequests = new Map<
-  string,
-  {
-    resolve: (r: BgRemovalResult) => void;
-    reject: (e: Error) => void;
-    /** Per-call progress sink, in addition to the global callback. */
-    onProgress?: (stage: string) => void;
-  }
->();
-let progressCallback: ((stage: string) => void) | null = null;
-
-function getWorker(): Worker {
-  if (!workerInstance) {
-    // NOTE: webpack only compiles a worker entry when `new URL(...)` is written
-    // inline inside `new Worker(...)`. Keep this pattern exactly as written.
-    workerInstance = new Worker(new URL("@/lib/workers/bg-removal-ai.worker.ts", import.meta.url), {
-      type: "module",
-    });
-    workerInstance.onmessage = (event: MessageEvent) => {
-      const { requestId, ok, blob, error, removed, progress } = event.data as {
-        requestId: string;
-        ok: boolean;
-        blob?: Blob;
-        error?: string;
-        /** Fraction of pixels whose alpha changed. */
-        removed?: number;
-        progress?: { stage: string };
-      };
-      const pending = pendingRequests.get(requestId);
-      if (progress?.stage) {
-        // The global callback is what the dialog subscribes to; the per-call
-        // sink lets a caller that owns a single removal (the auto engine)
-        // see the worker's stages without stealing the global callback.
-        if (progressCallback) progressCallback(progress.stage);
-        pending?.onProgress?.(progress.stage);
-      }
-      if (!pending) return;
-      if (ok && blob) {
-        pendingRequests.delete(requestId);
-        const transparencyTask = createImageBitmap(blob)
-          .then((bmp) => {
-            const c = document.createElement("canvas");
-            c.width = bmp.width;
-            c.height = bmp.height;
-            const cx = c.getContext("2d", { willReadFrequently: true });
-            let transparency = 0;
-            if (cx) {
-              cx.drawImage(bmp, 0, 0);
-              const d = cx.getImageData(0, 0, c.width, c.height);
-              transparency = transparentFraction(d.data);
-            }
-            bmp.close();
-            return transparency;
-          })
-          .catch(() => 0);
-        transparencyTask.then((transparency) =>
-          pending.resolve({ blob, transparency, removed: removed ?? 0 }),
-        );
-      } else if (!ok && error) {
-        pendingRequests.delete(requestId);
-        pending.reject(new Error(error));
-      }
-    };
-    workerInstance.onerror = (event) => {
-      const err = new Error(`Background removal worker failed: ${event.message ?? "unknown error"}`);
-      for (const pending of pendingRequests.values()) pending.reject(err);
-      pendingRequests.clear();
-      workerInstance?.terminate();
-      workerInstance = null;
-    };
-  }
-  return workerInstance;
-}
-
-export function setBgRemovalProgressCallback(cb: ((stage: string) => void) | null): void {
-  progressCallback = cb;
-}
-
-export async function removeBgAI(
-  blob: Blob,
-  onProgress?: (stage: string) => void,
-): Promise<BgRemovalResult> {
-  const worker = getWorker();
-  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return new Promise<BgRemovalResult>((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject, onProgress });
-    worker.postMessage({ requestId, blob });
-  });
-}
-export async function removeBackground(
-  engine: BgRemovalEngineId,
-  blob: Blob,
-  tolerance?: number,
-  onProgress?: (stage: string) => void,
-): Promise<BgRemovalResult> {
-  if (engine === "flood-key") {
-    return removeBgFloodKey(blob, tolerance);
-  }
-  if (engine === "border-model") {
-    return removeBgBorderModel(blob, tolerance);
-  }
-  return removeBgAI(blob, onProgress);
 }

@@ -595,51 +595,70 @@ test.describe("core workflow", () => {
     await expect(page.getByText("stored in this browser")).toHaveCount(0);
   });
 
-  test("18. the printify studio splits designs into ink rows and wipes backgrounds", async ({ page }) => {
+  test("18. the ink-row checkbox moves a design, survives a reload, and backgrounds are removed", async ({
+    page,
+  }) => {
     await gotoApp(page, "/printify-studio");
     await page.setInputFiles('input[type=file]', [
       fixture("design-a.png"),
       fixture("design-solid.png"),
     ]);
-    // Both designs start in the "no ink variants" row.
+    // Both designs start in the "no ink variants" row: nothing is inferred
+    // from the artwork on file.
     await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
     // The empty row is SHOWN, not hidden: a row the user cannot see the
     // meaning of is a row the split is invisible in.
     await expect(page.getByText("Has ink variants (0)")).toBeVisible();
     await expect(page.getByText("No designs with ink variants yet")).toBeVisible();
 
-    // Give one design an ink variant, so the rows split.
-    await gotoApp(page, "/designs");
-    await page.getByRole("button", { name: /Actions for design-a/ }).click();
-    await page.getByRole("menuitem", { name: /Ink variants/ }).click();
-    await page.getByRole("button", { name: "Auto-generate" }).first().click();
-    await expect(page.getByText("White ink variant created")).toBeVisible({ timeout: 30_000 });
-    // Once the white slot exists it stops offering Auto-generate, so exactly
-    // one (the black one) is left.
-    await expect(page.getByRole("button", { name: "Auto-generate" })).toHaveCount(1, {
-      timeout: 15_000,
-    });
-    await page.getByRole("button", { name: "Auto-generate" }).first().click();
-    await expect(page.getByText("Black ink variant created")).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Done" }).click();
+    // The user decides: one tick and the design moves to the other row.
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Has ink variants (1)")).toBeVisible();
 
-    await gotoApp(page, "/printify-studio");
+    // The tick is the session's, so a reload cannot invent a different split.
+    // The studio saves 400 ms after a change.
+    await page.waitForTimeout(900);
+    await page.reload();
     await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Has ink variants (1)")).toBeVisible();
 
-    // Background removal is a real edit, and the cutout is shown.
+    // Unticking puts it back - the box is the only switch.
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+    await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Has ink variants (0)")).toBeVisible();
+
+    // Background removal is a real edit, and the cutout is shown in place.
     await page.getByRole("checkbox", { name: "Select design-solid" }).click();
     await page.getByRole("button", { name: /^Remove background$/ }).click();
     await expect(page.getByText("cutout").first()).toBeVisible({ timeout: 30_000 });
 
-    // The wave is a real CSS animation on the design that has a cutout.
-    const wave = await page.evaluate(() => {
-      const el = document.querySelector(".studio-wave-layer");
-      if (!el) return null;
-      const cs = getComputedStyle(el);
-      return { name: cs.animationName, duration: cs.animationDuration };
+    // The before/after wave is gone: the card shows the cutout, statically.
+    await expect(page.locator(".studio-wave-layer")).toHaveCount(0);
+
+    // No card may stick out of the row it belongs to. The rows are the
+    // panels' width; a card wider than its grid track is what made the
+    // gallery look broken.
+    const layout = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll("[data-design-card]"));
+      const bad: string[] = [];
+      for (const card of cards) {
+        const row = card.closest("[data-design-row]");
+        if (!row) {
+          bad.push("card outside a row");
+          continue;
+        }
+        const cr = card.getBoundingClientRect();
+        const rr = row.getBoundingClientRect();
+        // 1 px of tolerance for sub-pixel rounding.
+        if (cr.left < rr.left - 1 || cr.right > rr.right + 1) {
+          bad.push(card.getAttribute("data-design-card") ?? "unknown");
+        }
+      }
+      return { cards: cards.length, bad };
     });
-    expect(wave?.name).toBe("studio-wave-reveal");
+    expect(layout.cards).toBeGreaterThan(0);
+    expect(layout.bad).toEqual([]);
 
     // The sub-tabs switch.
     await toleratingReload(page, async () => {
@@ -932,7 +951,7 @@ test.describe("core workflow", () => {
     }
   });
 
-  test("22. the studio separates the designs by the product that is selected", async ({ page }) => {
+  test("22. the studio's ink rows follow what the user ticks, not the product", async ({ page }) => {
     await gotoApp(page, "/printify-studio");
     await page.setInputFiles('input[type=file]', [
       fixture("design-a.png"),
@@ -940,23 +959,9 @@ test.describe("core workflow", () => {
     ]);
     await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
 
-    // Give one design an ink variant, so there is something to separate.
-    await gotoApp(page, "/designs");
-    await page.getByRole("button", { name: /Actions for design-a/ }).click();
-    await page.getByRole("menuitem", { name: /Ink variants/ }).click();
-    await page.getByRole("button", { name: "Auto-generate" }).first().click();
-    await expect(page.getByText("White ink variant created")).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Done" }).click();
-
-    await gotoApp(page, "/printify-studio");
-    // No product is chosen yet, so the split falls back to which designs have
-    // their own ink artwork on file.
-    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Has ink variants (1)")).toBeVisible();
-
-    // Now choose a product whose ink group is EMPTY. The product decides:
-    // no colour of it needs the ink artwork, so no design needs it either -
-    // even design-a, which has an ink variant on file.
+    // A product whose ink group is EMPTY: no colour of it needs the ink
+    // artwork. That used to reshuffle the rows on its own. It no longer
+    // does: only the checkbox separates the designs.
     await setStudioSession(page, {
       blueprintId: 6,
       printProviderId: 30,
@@ -965,22 +970,35 @@ test.describe("core workflow", () => {
         ink: { colors: [], blackInkColors: [] },
       },
     });
-
-    // The separation follows the ONE product: with its ink group empty, both
-    // designs are "no ink variants" designs for this product.
     await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Has ink variants (0)")).toBeVisible();
+
+    // The user's tick still moves the design.
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Has ink variants (1)")).toBeVisible();
+
+    // The split is stored, so the Design panel shows the same two rows, and
+    // the box works there too.
+    await page.waitForTimeout(900);
+    await page.getByRole("tab", { name: "Design panel" }).click();
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Has ink variants (1)")).toBeVisible();
+
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+    await expect(page.getByText("Has ink variants (0)")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("No ink variants (2)")).toBeVisible();
   });
 
-  test("23. the studio says why a design cannot print every colour, and offers the fix", async ({
+  test("23. the studio says why a PAIRED design cannot print every ink colour", async ({
     page,
   }) => {
     await gotoApp(page, "/printify-studio");
     await page.setInputFiles('input[type=file]', [fixture("design-a.png")]);
     await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
 
-    // A product whose colours need the ink artwork, for a design that has
-    // none.
+    // A product whose ink colours need the white ink, for a design that has
+    // no ink artwork at all.
     await setStudioSession(page, {
       blueprintId: 6,
       printProviderId: 30,
@@ -995,46 +1013,43 @@ test.describe("core workflow", () => {
     // The problems are about the batch that is about to be created, so the
     // design has to be ticked for it to have one.
     await page.getByRole("checkbox", { name: "Select design-a" }).click();
-
     await page.getByRole("tab", { name: "Design panel" }).click();
     await expect(page.getByRole("tab", { name: "Design panel" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
 
-    // The reason is a plain sentence, not "132 variants are not in any group".
+    // UNTICKED, the design prints one artwork on every colour on purpose.
+    // That is a decision, not a defect, so nothing is reported.
+    await expect(page.locator("[data-ink-problem]")).toHaveCount(0);
+
+    // Tick it and the app says exactly what is missing - a plain sentence,
+    // not "132 variants are not in any group".
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
     const problem = page.locator("[data-ink-problem]").first();
     await expect(problem).toBeVisible({ timeout: 30_000 });
     await expect(problem).toContainText(/white-ink artwork/i);
     await expect(problem).not.toContainText(/not in any group/i);
 
-    // And there is a one-click fix.
-    const fix = page.locator("[data-move-to-plain]");
-    await expect(fix).toBeVisible();
-    await fix.click();
+    // There is no one-click colour move any more: the two ways out are to
+    // make the ink artwork, or to untick the box. The tick is the fix the
+    // checkbox offers, and it works.
+    await expect(page.locator("[data-move-to-plain]")).toHaveCount(0);
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
     await expect(page.locator("[data-ink-problem]")).toHaveCount(0, { timeout: 15_000 });
   });
 
-  test("24. the hosted background remover answers clearly when no key is set", async ({ request }) => {
-    // The endpoint is reachable without any credentials and says exactly
-    // which key is missing, rather than failing silently.
-    const png =
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  test("24. the hosted background-removal endpoint is gone", async ({ request }) => {
+    // The remover is local now: two engines, no service, no key. The old
+    // endpoint must not answer, so nothing can quietly start uploading the
+    // user's artwork again.
     const response = await request.post("/api/bg-remove", {
-      data: { image: png, mimeType: "image/png" },
+      data: { image: "AAAA", mimeType: "image/png" },
+      failOnStatusCode: false,
     });
-    expect(response.status()).toBe(503);
-    const body = (await response.json()) as { error?: string };
-    expect(body.error).toMatch(/background-removal key/i);
-
-    // The Gemini path says which key IT wants, because it is a different one.
-    const gemini = await request.post("/api/bg-remove", {
-      headers: { "x-bg-remove-provider": "gemini" },
-      data: { image: png, mimeType: "image/png" },
-    });
-    expect(gemini.status()).toBe(503);
-    const geminiBody = (await gemini.json()) as { error?: string };
-    expect(geminiBody.error).toMatch(/Google AI Studio key/i);
+    expect(response.status()).toBeGreaterThanOrEqual(400);
+    const body = await response.text();
+    expect(body).not.toMatch(/background-removal key/i);
   });
 });
 

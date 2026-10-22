@@ -408,3 +408,97 @@ Check the key in Settings."*
   removed". It now always reads the original.
 - The exported Gemini request builder had no default model, so calling it
   without one built `models/undefined:generateContent`.
+
+## Printify Studio, fourth pass (Oct 2026)
+
+The instruction was blunt: **no AI separation, one background remover that
+works with unlimited usage, and the ink pairs stacked by hand.** So this pass
+is mostly subtraction - and every removal is recorded here so nobody adds it
+back.
+
+### 1. One background remover, two local engines, no key and no limit
+
+`ai-segmenter` (MODNet in a worker, ~25 MB CDN download) and `api` (remove.bg /
+PhotoRoom / Gemini) are **gone**, along with `POST /api/bg-remove`,
+`src/lib/client/background-removal.ts`, the AI worker, `BG_REMOVE_API_KEY`,
+the `bgRemove` integration setting, its Settings section and its headers.
+
+What is left is the chain that was already the best one for artwork, and it
+stops after two engines:
+
+| Result | Outcome |
+|---|---|
+| flood key removed >= 2%, transparency <= 98% | done, `flood-key` |
+| flood key removed >= 2%, transparency > 98% | **fail** - the artwork WAS the background. Not escalated. |
+| flood key removed < 2% | border model |
+| border model removed >= 2%, transparency <= 99.5% | done, `border-model` |
+| border model removed < 2% | **fail** - "no background was detected", plus the one sentence that says a busy photo must be cut out before upload |
+
+Both engines are instant, offline, deterministic and free. There is no
+account, no key, no upload and no usage cap - which is the point. The failure
+message is a sentence, not a stack trace, and it no longer pretends another
+engine could rescue a busy photograph.
+
+`tests/studio-remove-background.test.ts` was rewritten around the two-engine
+chain and now also asserts that `removeBgAI`, `removeBackground` and
+`setBgRemovalProgressCallback` are **absent** from the engine module, so the
+AI path cannot creep back in unnoticed.
+
+### 2. The ink split is a checkbox, not a guess
+
+The disturbing behaviour was the automatic split: changing the product moved
+designs between "Has ink variants" and "No ink variants", and there was a
+one-click button that silently rewrote the user's colour groups.
+
+Both are removed (`splitDesignsByProduct`, `splitDesignsByInkArtwork`,
+`coloursToMoveToPlain`). In their place is one checkbox on every design card -
+labelled **Ink variants**, `aria-label="Ink variants for <name>"` - stored as
+`session.inkPairIds`:
+
+- **Ticked** = this design has the ink pair. It prints its ink artwork on the
+  ink colours and its main artwork on the plain ones, and a missing ink
+  artwork is reported in plain language ("this design has no white-ink
+  artwork, so on Black and Navy it would print with the main artwork").
+- **Unticked** = one artwork on every colour. That is a decision, so it is
+  never warned about.
+
+The Designs tab and the Design panel draw the same card, so the two tabs
+cannot disagree. Unticking is the fix for a "missing ink" warning; there is
+no button that moves colours behind the user's back.
+
+### 3. Removed the before/after wave
+
+`wave-compare.tsx` and the pause/resume control are deleted. The card shows
+the cutout if there is one and the original otherwise - statically. A
+comparison animation on a card that is also being selected, dragged and
+re-ordered was one moving part too many.
+
+### 4. Layout
+
+The gallery's broken look was a grid-track overflow:
+
+- `min-w-0` on the cards and on the grid so a long design name or a wide
+  badge can shrink instead of pushing the card out of its row.
+- Badges wrap instead of widening the card.
+- The adjustment dialog is `sm:grid-cols-[260px_minmax(0,1fr)]` with
+  `min-w-0` on the flexible column, and `max-h-[calc(100dvh-2rem)]
+  overflow-x-hidden overflow-y-auto` on the dialog itself, so a short window
+  scrolls instead of clipping the Save button.
+- Acceptance test 18 measures every `[data-design-card]` box against its
+  `[data-design-row]` and fails if one escapes.
+
+### Gates
+
+- `npm run lint` - clean.
+- `npm run typecheck` - 0 errors (153 files).
+- `npm run test` - **303** unit tests pass.
+- `npm run build` - succeeds; `dist/.assetsignore` written.
+- `npm run test:e2e` - **22/25** pass. Tests 18, 22, 23 and 24 were rewritten
+  for this pass and all pass. Tests 20, 25 and 26 fail on `#area-preset`,
+  which no longer exists anywhere in `src`: they belong to the separate,
+  in-progress print-area editor rewrite, not to this pass.
+
+### Still to do
+
+- Rotate the Printify key that was pasted in plain text during this pass:
+  `npx wrangler secret put PRINTIFY_API_KEY`, and update `.dev.vars`.

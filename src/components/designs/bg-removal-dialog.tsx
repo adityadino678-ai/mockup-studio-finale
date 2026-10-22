@@ -4,13 +4,11 @@ import * as React from "react";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import { getAssetBlob, logActivity } from "@/lib/db/repo";
-import { removeBackgroundAuto, type RemoveEngine, type RemoveOutcome } from "@/lib/printify/remove-background";
-import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
+import { removeBackgroundAuto, type RemoveOutcome } from "@/lib/printify/remove-background";
 import type { Design } from "@/types/domain";
 import { AssetThumb } from "@/components/asset-thumb";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
-import { Label } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider } from "@/components/ui/primitives";
 import { Download, Loader2, RotateCcw, Wand2 } from "lucide-react";
 
 type ProcessingState = "idle" | "processing" | "done" | "failed";
@@ -27,11 +24,9 @@ type ProcessingState = "idle" | "processing" | "done" | "failed";
 /**
  * How long a stage of the work stays on screen.
  *
- * The engine reports its stages as it works and two of them can arrive
- * within the same frame. The message that explains the ~25 MB model download
- * would then be replaced before it was ever painted, which is exactly the
- * silent freeze that message exists to prevent. So every stage stays up for
- * a moment and the next one waits its turn.
+ * The engine reports its stages as it works and more than one can arrive
+ * within the same frame. A stage that is replaced before it was painted is a
+ * stage the user never sees, so every stage stays up for a moment.
  */
 const MIN_STAGE_MS = 900;
 
@@ -50,8 +45,6 @@ export function BgRemovalDialog({
   designs: Design[];
   onClose: () => void;
 }) {
-  const [engine, setEngine] = React.useState<RemoveEngine>("auto");
-  const [tolerance, setTolerance] = React.useState(FLOOD_KEY_DEFAULTS.tolerance);
   const [state, setState] = React.useState<ProcessingState>("idle");
   const [stage, setStage] = React.useState<string>("");
   const [error, setError] = React.useState<string | null>(null);
@@ -136,11 +129,7 @@ export function BgRemovalDialog({
           try {
             // The per-call `onProgress` is used instead of the global sink so
             // another caller cannot steal the stages mid-run.
-            out = await removeBackgroundAuto(blob, {
-              engine,
-              tolerance,
-              onProgress: showStage,
-            });
+            out = await removeBackgroundAuto(blob, { onProgress: showStage });
           } catch (e) {
             // The engine's own message is written for one image and says
             // nothing about WHICH design failed, which is ambiguous in a
@@ -156,7 +145,7 @@ export function BgRemovalDialog({
           // half a percent must never be shown to the user as a success.
           if (out.removed < 0.005) {
             throw new Error(
-              `"${design.name}": no background was detected, so the image was left unchanged. Try a higher tolerance, or the AI segmentation engine for photos and complex backgrounds.`,
+              `"${design.name}": no background was detected, so the image was left unchanged.`,
             );
           }
           if (designs.length > 1) {
@@ -187,7 +176,7 @@ export function BgRemovalDialog({
         setError(e instanceof Error ? e.message : "Background removal failed");
       }
     },
-    [designs, engine, tolerance, onClose, showStage, resetStages],
+    [designs, onClose, showStage, resetStages],
   );
 
   const applyToDesign = async () => {
@@ -230,37 +219,7 @@ export function BgRemovalDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="w-[220px] space-y-1">
-              <Label className="text-ink-muted">Engine</Label>
-              <Select value={engine} onValueChange={(v) => setEngine(v as RemoveEngine)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto (recommended)</SelectItem>
-                  <SelectItem value="flood-key">Flood-key (solid backgrounds, instant)</SelectItem>
-                  <SelectItem value="border-model">Border-model (gradients and vignettes, instant)</SelectItem>
-                  <SelectItem value="ai-segmenter">AI segmentation (photos, complex)</SelectItem>
-                  <SelectItem value="api">API (your own key)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {(engine === "auto" || engine === "flood-key" || engine === "border-model") && (
-              <div className="w-[200px] space-y-1">
-                <div className="flex items-center justify-between">
-                  <Label className="text-ink-muted">Color tolerance</Label>
-                  <span className="text-[12px] text-ink">{tolerance}</span>
-                </div>
-                <Slider
-                  value={[tolerance]}
-                  min={5}
-                  max={120}
-                  step={1}
-                  onValueChange={(v) => setTolerance(v[0])}
-                />
-              </div>
-            )}
+          <div className="flex flex-wrap items-center gap-3">
             <Button size="sm" onClick={() => run()} disabled={state === "processing"}>
               {state === "processing" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
               {single ? (state === "done" ? "Re-run" : "Remove background") : "Process all"}
@@ -268,24 +227,15 @@ export function BgRemovalDialog({
           </div>
 
           <p className="text-[12px] leading-relaxed text-ink-muted">
-            Auto runs the instant engines first and only downloads the AI model (~25 MB, first use only)
-            when they cannot do it.
+            Runs on this device: it removes a solid or faded background, uploads nothing, and needs
+            no key or account.
           </p>
-
-          {engine === "ai-segmenter" && (
-            <p className="text-[12px] leading-relaxed text-ink-muted">
-              Runs the open-source MODNet model (MIT license) entirely in your browser — images never
-              leave this machine. First use downloads ~25 MB, cached afterwards. MODNet is trained for
-              photos of people and product shots; for flat artwork on solid backgrounds the flood-key
-              engine is usually faster and cleaner.
-            </p>
-          )}
 
           {state === "processing" && (
             <div className="flex items-center gap-2 rounded-md bg-surface-muted px-3 py-2 text-[13px] text-ink-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {stage || "Processing…"}
-              {!single && savedCount > 0 && ` Â· ${savedCount} saved`}
+              {!single && savedCount > 0 && ` · ${savedCount} saved`}
             </div>
           )}
 
@@ -324,8 +274,8 @@ export function BgRemovalDialog({
               {result.removed < 0.05 && (
                 <p className="mt-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-[12px] leading-relaxed text-warning">
                   Only {Math.round(result.removed * 100)}% of the pixels changed - the {result.engine}{" "}
-                  engine could not find a background to remove. Try the AI segmentation engine for
-                  photos and complex backgrounds.
+                  engine could not find a background to remove. This remover handles a solid or faded
+                  background; a photo with a busy background has to be cut out first.
                 </p>
               )}
             </div>

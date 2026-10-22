@@ -44,8 +44,9 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 129 unit tests
-npm run test:e2e      # 17 acceptance tests (local dev server)
+npm run test          # 303 unit tests
+npm run test:e2e      # 24 acceptance tests (local dev server)
+npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
 To run the e2e suite against the deployed site instead:
@@ -177,25 +178,24 @@ Four things that are easy to get wrong, and were:
    fifty products. Created products are also written to `productDrafts`, so
    they show up in the Product Builder and the Listings page.
 
-## Background removal: four engines, and the rule that picks between them
+## Background removal: two engines, both local, no key and no limit
 
-`src/lib/printify/remove-background.ts` owns the decision. The cheap engines
-run first and the expensive one is only used when the cheap ones provably
-cannot help:
+`src/lib/printify/remove-background.ts` owns the decision. There are exactly
+two engines and the chain stops after them:
 
 | Flood-key result | Outcome |
 |---|---|
 | removed >= 2% and transparency <= 98% | success, engine `flood-key` (flat artwork) |
-| removed >= 2% and transparency > 98% | **throw** - the artwork WAS the background. Do NOT escalate: the AI engine cannot help, and it would cost a 25 MB download to fail the same way. |
+| removed >= 2% and transparency > 98% | **throw** - the artwork WAS the background. Do NOT try the border model: it only eats the same artwork. |
 | removed < 2% | try the **border model** next |
 | border model removed >= 2% and transparency <= 99.5% | success, engine `border-model` (a backdrop that fades or vignettes) |
-| border model removed < 2% | the **hosted service** next, if the user configured one, then the local model |
+| border model removed < 2% | **throw** "no background was detected", plus the one sentence that says a busy photo has to be cut out before upload |
 
 `removed` is the fraction of pixels whose ALPHA CHANGED, never the output's
 total transparency: a soft ramp (alpha 255 -> 100) counts as a change, and an
 already-transparent artwork scores 1.0 without a pixel being touched.
 
-The four engines are genuinely different methods:
+The two engines are different methods:
 
 - **flood-key** matches ONE flat colour from the border. Instant, offline.
 - **border-model** (`src/lib/bg-removal/border-model.ts`) models the
@@ -204,13 +204,12 @@ The four engines are genuinely different methods:
   one colour. The removal is restricted to the pixels CONNECTED to the
   border, which is what keeps a white shape inside the artwork from being
   erased. Instant, offline, no model.
-- **ai-segmenter** (MODNet in a worker) handles any photograph. It downloads
-  ~25 MB from a CDN on the first run, so its stages are reported through
-  `onProgress` - "Downloading the background model (~25 MB, first use only)"
-  must be visible or the run looks like a freeze.
-- **api** is the user's own hosted service - see below. It is the engine the
-  after-upload separation uses, and the `auto` chain reaches it before the
-  25 MB download when a key is configured.
+
+**There is deliberately no AI engine and no hosted service.** This was the
+user's decision: one remover that works, unlimited, with no key, no account
+and no upload. Do not re-add an AI model or a `BG_REMOVE_API_KEY` path. A busy
+photographic background is out of scope, and the error message says so
+instead of quietly escalating to something that costs money.
 
 **Every entry point must use `removeBackgroundAuto`.** The Designs page
 dialog used to call the old `removeBackground()` directly, which never
@@ -223,52 +222,36 @@ bug.
 removal used to operate on an already-transparent image - which cannot work,
 and reported "little was removed" every time.
 
-## The hosted background remover (the user's own key)
-
-`POST /api/bg-remove` forwards to the service the user configured in
-Settings. Three providers:
-
-| Provider | Key | What it does |
-|---|---|---|
-| `remove-bg` | `x-bg-remove-key` | a dedicated background-removal service |
-| `photoroom` | `x-bg-remove-key` | the same, different request shape |
-| `gemini` | the **Google AI Studio key** (`x-ai-key`) | Gemini edits the image so the background is transparent |
-
-The credential pattern is the one the app already uses: the key lives in the
-user's own IndexedDB, travels as a request header, and is never written to
-the server. `BG_REMOVE_API_KEY` is the optional server fallback.
-
-**Gemini needs the GOOGLE key specifically, not whichever AI provider is
-active** - `bgRemoveHeaders()` sends `x-ai-provider: google` and the Google
-provider's key, so the request goes to the right account.
-
-The removal's source is the ORIGINAL file, and the after-upload separation
-in the studio's Designs tab uses the `api` engine directly - that is the
-case the user sets a key up for. The local engines stay first in the `auto`
-chain, because they are free, instant and private.
-
-## The design split follows ONE product, not the design
+## The ink split is the user's tick, not a guess
 
 `src/lib/printify/design-colours.ts` owns this. A product has ONE set of
 colours, split into two groups: `plain` (one artwork) and `ink` (the ink
 artwork, black on some colours and white on the rest).
 
-The designs are separated **to match that product**:
+WHICH design is printed with the ink artwork is the user's decision, stored
+as `session.inkPairIds` and set by the **"Ink variants" checkbox on every
+design card** - the Designs tab and the Design panel draw the same card, so
+the two tabs cannot disagree:
 
-- A design WITH ink artwork prints the ink artwork on the ink colours and its
-  main artwork on the plain ones.
-- A design WITHOUT ink artwork prints its main artwork on EVERY colour of
-  the product. Its artwork is not "wrong" on the ink colours - it is simply
-  not tuned for them, so that is reported, not hidden.
-- A design is in the "Has ink variants" group only when it has an ink
-  artwork **that this product's colours actually need**. For a product whose
-  ink group is empty, no design needs an ink artwork and every design is a
-  "no ink variants" design for that product.
+- Ticked: the design prints its ink artwork on the ink colours and its main
+  artwork on the plain ones. If the ink artwork is missing, that IS reported
+  ("this design has no white-ink artwork, so on Black and Navy it would print
+  with the main artwork").
+- Unticked: the design prints its main artwork on EVERY colour of the
+  product. That is a choice, not a defect, so it is never reported - and the
+  box is the only thing that moves a design between the two rows.
 
 The rule that matters: **a design always covers every colour of the
 product.** The old code took the design's colour set from the group its ink
 assets happened to match, so a design whose group was empty printed on
 nothing and the only clue was "132 variant(s) are not in any group".
+
+Two things were removed on purpose; do not bring them back:
+
+- the product-driven split (`splitDesignsByProduct`), which moved designs
+  between rows when the user changed the product; and
+- the one-click `coloursToMoveToPlain` fix, which silently rewrote the
+  user's colour groups.
 
 ## Placement: drag, rotate, snap
 
@@ -440,7 +423,7 @@ That is the whole design, and it is deliberate:
   from a product type (catalog keyword search), then a print provider and up to
   100 variants, but never invents ids — with no product type it asks. `create_ink_variant`
   and `remove_background` reuse the editor's own canvas code
-  (`createInkVariantBlob`, `removeBackground`); `create_mockup_render` reuses the
+  (`createInkVariantBlob`, `removeBackgroundAuto`); `create_mockup_render` reuses the
   batch engine's `renderComposition`, so a single render and a batch render are
   pixel-identical. `save_chat_image` reads images the user attached in the
   current conversation. Execution happens in the browser against IndexedDB, so
@@ -559,8 +542,10 @@ That is the whole design, and it is deliberate:
   the next step if this ever matters commercially.
 - **Etsy listing *submission* is deliberately not implemented** (drafts +
   validation only) because v3 OAuth needs app registration.
-- MODNet (background removal) is tuned for photos; flat artwork on solid
-  backgrounds is better served by the flood-key engine.
+- **Background removal is local and deliberately limited.** It handles a
+  solid or faded backdrop; a busy photographic background has to be cut out
+  before upload. There is no AI model and no hosted service, so there is
+  nothing to configure and no usage limit.
 
 ## Git
 

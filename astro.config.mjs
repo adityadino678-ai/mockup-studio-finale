@@ -40,9 +40,6 @@ export default defineConfig({
       AI_BASE_URL: envField.string(optionalSecret),
       AI_MODEL: envField.string(optionalSecret),
       OPENAI_API_KEY: envField.string(optionalSecret),
-      // Fallback key for the hosted background-removal APIs (remove.bg /
-      // PhotoRoom). Optional: the visitor's own key is sent per request.
-      BG_REMOVE_API_KEY: envField.string(optionalSecret),
     },
   },
   vite: {

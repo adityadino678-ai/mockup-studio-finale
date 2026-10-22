@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Separating the designs for ONE product.
+// Printing the designs on ONE product.
 //
 // A product has ONE set of colours, and the user splits them into two groups:
 //
@@ -7,25 +7,20 @@
 //   ink   - printed with the ink artwork: black ink on some of them, white
 //           ink on the rest
 //
-// The designs are separated to MATCH that product. A design with ink artwork
-// belongs with the ink colours; a design without belongs with the plain ones.
-// So the separation is a property of (product, design) and not of the design
-// alone:
-//
-//   - The same design can land in different groups for different products.
-//   - For a product whose ink group is empty, NO design needs an ink artwork,
-//     so every design is a "no ink variants" design for that product.
+// WHICH DESIGN gets the ink artwork is the USER'S decision, not the app's.
+// The Designs tab gives every design a checkbox ("Ink variants"); the ids the
+// user ticked are stored in `session.inkPairIds` and are the only thing that
+// separates the two rows. Nothing here infers a pairing from the artwork on
+// file, from the product, or from the colours.
 //
 // The rule that stops a design printing on nothing:
 //
-//   A design WITH ink artwork prints the ink artwork on the ink colours and
+//   A design the user PAIRED prints the ink artwork on the ink colours and
 //   its main artwork on the plain ones.
 //
-//   A design WITHOUT ink artwork prints its MAIN artwork on every colour of
-//   the product. Its artwork is not "wrong" on the ink colours - it is simply
-//   not tuned for them, so that is reported rather than hidden. The ink
-//   colours are the ones the user chose because the garment is dark there,
-//   and a design with no white-ink artwork would be invisible on them.
+//   A design the user did NOT pair prints its MAIN artwork on every colour of
+//   the product. That is a choice, not a defect, so it is never reported as
+//   one - the design covers every colour.
 //
 // Every function here is pure, so the rule can be unit-tested without a
 // browser, a catalogue or a Printify account.
@@ -46,6 +41,13 @@ export interface ProductColourGroups {
 
 /** The ink artwork a design actually has. */
 export interface DesignInkArtwork {
+  /**
+   * True when the USER ticked this design as "has ink variants".
+   *
+   * This is the whole separation: an unticked design prints one artwork
+   * everywhere, whatever ink files happen to be on disk.
+   */
+  hasInkPair: boolean;
   hasBlackInk: boolean;
   hasWhiteInk: boolean;
 }
@@ -58,7 +60,9 @@ export interface DesignColourPlan {
    * The ink colours this design cannot print correctly with.
    *
    * Empty means the design can serve this product as it stands. A missing
-   * entry means the artwork would be invisible on those garments.
+   * entry means the artwork would be invisible on those garments. It is only
+   * ever non-empty for a design the user PAIRED: an unpaired design prints
+   * its main artwork everywhere on purpose.
    */
   missing: Array<{ ink: "black" | "white"; colors: string[] }>;
   /** True when the design contributes ink artwork to this product. */
@@ -119,8 +123,20 @@ export function planDesignColours(
   groups: ProductColourGroups,
 ): DesignColourPlan {
   const { plain, black, white } = normaliseColourGroups(groups);
+  const everything = unique([...plain, ...black, ...white]);
 
-  // The ink artwork is only used where the product actually needs it.
+  // Not paired: one artwork, every colour. This is the user's own choice, so
+  // nothing is missing and nothing is reported.
+  if (!artwork.hasInkPair) {
+    return {
+      groups: everything.length > 0 ? [{ ink: "main", colors: everything }] : [],
+      missing: [],
+      usesInkArtwork: false,
+      colors: everything,
+    };
+  }
+
+  // Paired: the ink artwork is used where the product actually needs it.
   const useBlack = artwork.hasBlackInk && black.length > 0;
   const useWhite = artwork.hasWhiteInk && white.length > 0;
 
@@ -145,56 +161,32 @@ export function planDesignColours(
     groups: planGroups,
     missing,
     usesInkArtwork: useBlack || useWhite,
-    colors: unique([...plain, ...black, ...white]),
+    colors: everything,
   };
 }
 
-/**
- * Splits the designs into the two groups, for ONE product.
- *
- * A design is in the "ink" group when it contributes ink artwork to THIS
- * product - it has the ink artwork, and the product's ink colours need that
- * ink. A design whose ink artwork the product never uses is a "no ink
- * variants" design here, even though it has ink artwork on file.
- */
-export function splitDesignsByProduct<T extends SeparableDesign>(
-  designs: T[],
-  groups: ProductColourGroups,
-): { plain: T[]; ink: T[] } {
-  const plain: T[] = [];
-  const ink: T[] = [];
-  for (const design of designs) {
-    const plan = planDesignColours(
-      {
-        hasBlackInk: Boolean(design.blackInkAssetId),
-        hasWhiteInk: Boolean(design.whiteInkAssetId),
-      },
-      groups,
-    );
-    if (plan.usesInkArtwork) ink.push(design);
-    else plain.push(design);
-  }
-  return { plain, ink };
+/** True when the user marked this design as "has ink variants". */
+export function isInkPair(inkPairIds: readonly string[], designId: string): boolean {
+  return inkPairIds.includes(designId);
 }
 
 /**
- * The split to show when NO product has been chosen yet.
+ * Splits the designs into the two rows the gallery draws.
  *
- * The Designs tab is where designs are uploaded and their ink variants are
- * made, and that happens BEFORE a product is chosen - so there is no product
- * to separate them by. In that state the only thing that can be said is
- * which designs have their own ink artwork on file.
- *
- * As soon as a product IS chosen, `splitDesignsByProduct` takes over and the
- * split follows that product instead.
+ * The split is exactly the user's ticks: a design is in "Has ink variants"
+ * when its id is in `inkPairIds`, and in "No ink variants" otherwise. There
+ * is no fallback and no inference - an id that no longer belongs to a design
+ * is simply ignored.
  */
-export function splitDesignsByInkArtwork<T extends SeparableDesign>(
+export function splitDesignsByInkPair<T extends SeparableDesign>(
   designs: T[],
+  inkPairIds: readonly string[],
 ): { plain: T[]; ink: T[] } {
+  const paired = new Set(inkPairIds);
   const plain: T[] = [];
   const ink: T[] = [];
   for (const design of designs) {
-    if (design.whiteInkAssetId || design.blackInkAssetId) ink.push(design);
+    if (paired.has(design.id)) ink.push(design);
     else plain.push(design);
   }
   return { plain, ink };
@@ -210,21 +202,27 @@ export interface InkArtworkProblem {
 }
 
 /**
- * The designs whose ink artwork does not cover the product's ink colours.
+ * The paired designs whose ink artwork does not cover the product's ink
+ * colours.
  *
- * A missing black-ink artwork on a colour the user marked for the black ink
- * prints the main artwork there, which is usually invisible on a dark
- * garment. This is the check that says so in plain words instead of letting
- * the partition fail with "132 variants are not in any group".
+ * A paired design with no black-ink artwork on a colour the user marked for
+ * the black ink prints the main artwork there, which is usually invisible on
+ * a dark garment. This is the check that says so in plain words instead of
+ * letting the partition fail with "132 variants are not in any group".
+ *
+ * Unpaired designs are never reported: printing the main artwork everywhere
+ * is what the user asked for by leaving the box unticked.
  */
 export function inkArtworkProblems<T extends SeparableDesign>(
   designs: T[],
   groups: ProductColourGroups,
+  inkPairIds: readonly string[],
 ): InkArtworkProblem[] {
   const problems: InkArtworkProblem[] = [];
   for (const design of designs) {
     const plan = planDesignColours(
       {
+        hasInkPair: isInkPair(inkPairIds, design.id),
         hasBlackInk: Boolean(design.blackInkAssetId),
         hasWhiteInk: Boolean(design.whiteInkAssetId),
       },
@@ -241,22 +239,4 @@ export function inkArtworkProblems<T extends SeparableDesign>(
     }
   }
   return problems;
-}
-
-/**
- * The colours to move into the plain group so that nothing prints wrong.
- *
- * This is the one-click fix: a colour the product prints with the ink
- * artwork, on which some design has no ink artwork, is a colour that design
- * cannot serve. Moving it to the plain group makes every design able to
- * print it, with the main artwork.
- */
-export function coloursToMoveToPlain(
-  problems: InkArtworkProblem[],
-): string[] {
-  const moved = new Set<string>();
-  for (const problem of problems) {
-    for (const colour of problem.colors) moved.add(colour);
-  }
-  return [...moved];
 }

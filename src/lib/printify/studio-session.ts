@@ -31,8 +31,9 @@ export const ROW_LABELS: Record<StudioRowId, string> = {
 };
 
 export const ROW_HINTS: Record<StudioRowId, string> = {
-  plain: "One artwork for every colour — the design's main file is used throughout.",
-  ink: "Pick which colours print with the black ink; the rest use the white ink.",
+  plain:
+    'These designs print one artwork on every colour. Tick "Ink variants" on a card to move it to the other row.',
+  ink: 'These designs also print their ink artwork on the ink colours. Tick "Ink variants" on a card to move it here.',
 };
 
 export function emptyRowState(): StudioRowState {
@@ -44,6 +45,7 @@ export function emptySession(): StudioSession {
     sizes: [],
     rows: { plain: emptyRowState(), ink: emptyRowState() },
     designIds: [],
+    inkPairIds: [],
     universal: true,
     universalPlacement: { ...DEFAULT_PLACEMENT },
     placements: {},
@@ -125,6 +127,7 @@ export async function loadSession(): Promise<StudioSession> {
     sizes: stringArray(stored.sizes),
     rows,
     designIds: stringArray(stored.designIds),
+    inkPairIds: stringArray(stored.inkPairIds),
     universal: stored.universal !== false,
     universalPlacement,
     placements,
@@ -161,10 +164,14 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
   if (session.designIds.includes(designId)) {
     changed = true;
   }
+  if (session.inkPairIds.includes(designId)) {
+    changed = true;
+  }
   if (changed) {
     await saveSession({
       ...session,
       designIds: session.designIds.filter((id) => id !== designId),
+      inkPairIds: session.inkPairIds.filter((id) => id !== designId),
       placements,
     });
   }

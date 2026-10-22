@@ -447,6 +447,16 @@ export interface StudioSession {
    * out loud so a batch is never bigger than the user expects.
    */
   designIds: string[];
+  /**
+   * The designs the user marked as "has ink variants".
+   *
+   * This is the user's own decision, not a guess: a design in this list is
+   * printed with its ink artwork on the product's ink colours, and a design
+   * that is not is printed with one artwork on every colour. Both rows of the
+   * gallery are built from this list, so what the user ticks is what is
+   * printed.
+   */
+  inkPairIds: string[];
   /** When true, every design uses `universalPlacement`. */
   universal: boolean;
   universalPlacement: StudioPlacement;

@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { AssetThumb } from "@/components/asset-thumb";
 import { ColorSwatchRow } from "@/components/studio/color-swatch";
-import { WaveCompare } from "@/components/studio/wave-compare";
 import { Badge, Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
@@ -26,11 +26,8 @@ export interface DesignCardData {
 
 export interface DesignCardProps {
   design: DesignCardData;
-  /** Stagger index for the wipe animation. */
-  index?: number;
-  paused?: boolean;
   selected?: boolean;
-  /** Show the selection checkbox (the batch-scope picker). */
+  /** Show the batch-selection checkbox (the bulk actions' scope). */
   showCheckbox?: boolean;
   onToggle?: () => void;
   /** The colour swatches this design's colours resolve to. */
@@ -39,13 +36,20 @@ export interface DesignCardProps {
    * The colour names THIS design will be printed on.
    *
    * Optional, and only a filter: when it is given, only the swatches of
-   * those colours are drawn. The gallery passes it because the rows are
-   * split by the PRODUCT now, so a card can no longer show its row's
-   * colours - a design without ink artwork prints on the plain AND the ink
-   * colours, and a design with ink artwork prints on the plain ones with
-   * its main artwork and on the ink ones with its ink artwork.
+   * those colours are drawn. A design the user paired prints its ink artwork
+   * on the ink colours, so the card can no longer assume its row's colours.
    */
   colors?: string[];
+  /**
+   * True when the user ticked this design as "has ink variants".
+   *
+   * This is the separation itself: the checkbox below is the ONLY thing that
+   * decides whether the design is printed with ink artwork, so the app never
+   * guesses a pairing on the user's behalf.
+   */
+  inkPair?: boolean;
+  /** Ticks / unticks "has ink variants". Omit to hide the checkbox. */
+  onToggleInkPair?: () => void;
   /** Called when the card BODY is clicked (opens the adjustment panel). */
   onOpen?: () => void;
   className?: string;
@@ -67,13 +71,13 @@ export interface DesignCardProps {
  */
 export function DesignCard({
   design,
-  index = 0,
-  paused = false,
   selected = false,
   showCheckbox = false,
   onToggle,
   swatches,
   colors,
+  inkPair = false,
+  onToggleInkPair,
   onOpen,
   className,
 }: DesignCardProps): React.JSX.Element {
@@ -90,20 +94,26 @@ export function DesignCard({
       : swatches
     : undefined;
 
+  /** A paired design with no ink artwork at all cannot print its ink colours. */
+  const missingInk = inkPair && !design.whiteInkAssetId && !design.blackInkAssetId;
+
+  // The cutout when there is one, the original otherwise. No animation: a grid
+  // of fifty cards moving is noise, not information.
   const artwork = (
-    <WaveCompare
-      originalAssetId={design.originalAssetId}
-      processedAssetId={design.processedAssetId}
-      index={index}
-      paused={paused}
-      className="aspect-square w-full"
-    />
+    <div className="checkerboard relative aspect-square w-full overflow-hidden">
+      <AssetThumb
+        assetId={design.processedAssetId ?? design.originalAssetId}
+        alt={design.name}
+        className="absolute inset-0 h-full w-full object-contain"
+      />
+    </div>
   );
 
   return (
     <Card
+      data-design-card={design.id}
       className={cn(
-        "group relative overflow-hidden transition-shadow",
+        "group relative min-w-0 overflow-hidden transition-shadow",
         selected && "ring-2 ring-forest",
         className,
       )}
@@ -141,20 +151,42 @@ export function DesignCard({
           </div>
         )}
 
-        <div className="absolute right-2 top-2 flex gap-1">
+        <div className="absolute right-2 top-2 flex max-w-[calc(100%-1rem)] flex-wrap justify-end gap-1">
           {design.processedAssetId && <Badge>cutout</Badge>}
           {design.whiteInkAssetId && <Badge>white ink</Badge>}
           {design.blackInkAssetId && <Badge>black ink</Badge>}
         </div>
       </div>
 
-      <div className="space-y-1.5 border-t border-border-subtle px-3 py-2">
+      <div className="min-w-0 space-y-1.5 border-t border-border-subtle px-3 py-2">
         <div className="truncate text-[13px] font-medium text-ink" title={design.name}>
           {design.name}
         </div>
-        <div className="text-[11px] text-ink-subtle">{design.dimensions}</div>
+        <div className="truncate text-[11px] text-ink-subtle">{design.dimensions}</div>
         {shown && shown.length > 0 && (
           <ColorSwatchRow swatches={shown} className="pt-0.5" />
+        )}
+        {onToggleInkPair && (
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <Checkbox
+              id={`ink-pair-${design.id}`}
+              checked={inkPair}
+              onCheckedChange={() => onToggleInkPair()}
+              aria-label={`Ink variants for ${design.name}`}
+              className="h-3.5 w-3.5"
+            />
+            <label
+              htmlFor={`ink-pair-${design.id}`}
+              className="cursor-pointer text-[11px] text-ink-muted"
+            >
+              Ink variants
+            </label>
+            {missingInk && (
+              <span className="text-[10px] text-warning" data-ink-missing="">
+                make them first
+              </span>
+            )}
+          </div>
         )}
       </div>
     </Card>

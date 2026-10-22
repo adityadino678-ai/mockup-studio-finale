@@ -332,7 +332,7 @@ describe("the variant partition", () => {
     // and a group with no colours is never emitted, so the partition always
     // has a group that holds variants for Printify to complete.
     const plan = planDesignColours(
-      { hasBlackInk: true, hasWhiteInk: true },
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
       { plain: [], ink: ["Solid Black"], blackInk: ["Solid Black"] },
     );
     expect(plan.groups.every((group) => group.colors.length > 0)).toBe(true);

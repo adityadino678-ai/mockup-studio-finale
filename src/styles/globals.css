@@ -106,76 +106,8 @@ body {
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
-/* ---------------------------------------------------------------------------
-   The background-removal wave: the real artwork sits underneath and the
-   cutout is wiped in from the left, with an edge travelling with the wipe.
-   Both animations share a duration so the edge stays on the boundary.
-   --------------------------------------------------------------------------- */
-@keyframes studio-wave-reveal {
-  0% {
-    clip-path: inset(0 100% 0 0);
-  }
-  45% {
-    clip-path: inset(0 0% 0 0);
-  }
-  70% {
-    clip-path: inset(0 0% 0 0);
-  }
-  100% {
-    clip-path: inset(0 100% 0 0);
-  }
-}
-
-/*
- * The travelling edge.
- *
- * It moves with `transform`, not `left`: animating `left` forces a full
- * layout on every frame for every visible card, which measured ~20x the
- * layout work of a transform.
- */
-@keyframes studio-wave-edge {
-  0% {
-    transform: translateX(0);
-    opacity: 0;
-  }
-  8% {
-    opacity: 1;
-  }
-  45% {
-    transform: translateX(100%);
-    opacity: 1;
-  }
-  70% {
-    transform: translateX(100%);
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(0);
-    opacity: 0;
-  }
-}
-
-.studio-wave-layer {
-  animation: studio-wave-reveal 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-.studio-wave-edge {
-  animation: studio-wave-edge 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-/* The wave is decoration: without motion, show the finished cutout. */
+/* Reduced motion: the looping animations are decoration. */
 @media (prefers-reduced-motion: reduce) {
-  .studio-wave-layer,
-  .studio-wave-edge {
-    animation: none !important;
-  }
-  .studio-wave-layer {
-    clip-path: inset(0 0% 0 0);
-  }
-  .studio-wave-edge {
-    display: none;
-  }
-  /* The other looping animations are decoration too. */
   .animate-pulse,
   .animate-spin {
     animation: none !important;

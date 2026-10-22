@@ -11,8 +11,7 @@ import {
   logActivity,
   storeAsset,
 } from "@/lib/db/repo";
-import { removeBackgroundAuto, type RemoveEngine } from "@/lib/printify/remove-background";
-import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
+import { removeBackgroundAuto } from "@/lib/printify/remove-background";
 import { planDesignColours } from "@/lib/printify/design-colours";
 import {
   DesignGallery,
@@ -25,11 +24,9 @@ import {
 import type { DesignCardData } from "@/components/studio/design-card";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
-import { Label } from "@/components/ui/input";
 import { hexForColourName, suggestInk } from "@/lib/printify/colors";
 import { ROWS } from "@/lib/printify/studio-session";
-import type { Design, StudioRowId, StudioSession } from "@/types/domain";
+import type { StudioRowId, StudioSession } from "@/types/domain";
 import { Loader2, Trash2, Wand2 } from "lucide-react";
 
 interface DesignRow {
@@ -54,18 +51,15 @@ interface DesignsTabProps {
 /**
  * How long a stage of the work stays on screen.
  *
- * The engine reports its stages as it works and two of them can arrive
- * within the same frame. The message that explains the ~25 MB model download
- * would then be replaced before it was ever painted, which is exactly the
- * silent freeze that message exists to prevent. So every stage stays up for
- * a moment and the next one waits its turn.
+ * The engine reports its stages as it works and more than one can arrive
+ * within the same frame. A stage that is replaced before it was painted is a
+ * stage the user never sees, so every stage stays up for a moment and the
+ * next one waits its turn.
  */
 const MIN_STAGE_MS = 900;
 
 export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps) {
   const [uploading, setUploading] = React.useState(0);
-  const [engine, setEngine] = React.useState<RemoveEngine>("auto");
-  const [tolerance, setTolerance] = React.useState(FLOOD_KEY_DEFAULTS.tolerance);
   const [busy, setBusy] = React.useState<{
     done: number;
     total: number;
@@ -76,14 +70,13 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   const stageQueue = React.useRef<string[]>([]);
   const stageShownAt = React.useRef(0);
   const stageTimer = React.useRef<number | null>(null);
-  const [paused, setPaused] = React.useState(false);
 
   /**
    * Shows a stage of the work and keeps it up long enough to read it.
    *
    * The stages are queued rather than replaced: one that arrives while
-   * another is on screen waits for its turn, so the message that explains a
-   * slow step is never swallowed by the step that follows it.
+   * another is on screen waits for its turn, so a message is never swallowed
+   * by the step that follows it.
    */
   const showStage = React.useCallback((next: string) => {
     stageQueue.current.push(next);
@@ -130,6 +123,16 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
 
   const setSelected = (ids: string[]) => update({ designIds: ids });
 
+  /** The designs the user marked as "has ink variants". */
+  const inkPairIds = React.useMemo(() => session.inkPairIds ?? [], [session.inkPairIds]);
+
+  const toggleInkPair = (id: string) =>
+    update({
+      inkPairIds: inkPairIds.includes(id)
+        ? inkPairIds.filter((x) => x !== id)
+        : [...inkPairIds, id],
+    });
+
   const designs = useLiveQuery(async () => {
     const all = await db.designs.toArray();
     const metas = await db.assets.bulkGet(all.map((d) => d.originalAssetId));
@@ -152,13 +155,10 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   }, []);
 
   /**
-   * The gallery split into the two rows, for the ONE selected product.
+   * The gallery split into the two rows.
    *
-   * The split is a property of (product, design), not of the design alone:
-   * a design belongs with the ink colours only when its ink artwork is one
-   * THIS product actually needs. So a product with an empty ink group needs
-   * no ink artwork at all, and every design is a "no ink variants" design
-   * for it - even one that has an ink variant on file.
+   * The split is the user's own ticks - nothing about the product, and
+   * nothing about the ink artwork on file, moves a design between the rows.
    */
   const rows = React.useMemo(() => {
     const split = splitDesignsForSession(designs ?? [], session);
@@ -183,15 +183,16 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   /**
    * What each design prints on, for its card.
    *
-   * A design without ink artwork prints its MAIN artwork on every colour of
-   * the product; a design with ink artwork prints its main artwork on the
-   * plain colours and its ink artwork on the ink ones. The card says so,
-   * so the user can see which colours each design will be printed on.
+   * A design the user did NOT pair prints its MAIN artwork on every colour of
+   * the product; a paired one prints its main artwork on the plain colours and
+   * its ink artwork on the ink ones. The card shows the colours either way, so
+   * the user can see what each design will be printed on.
    */
   const designColours = React.useCallback(
     (design: DesignCardData): DesignColours => {
       const plan = planDesignColours(
         {
+          hasInkPair: inkPairIds.includes(design.id),
           hasBlackInk: Boolean(design.blackInkAssetId),
           hasWhiteInk: Boolean(design.whiteInkAssetId),
         },
@@ -200,7 +201,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       const hexFor = (name: string) => hexByColour.get(name) ?? hexForColourName(name);
       return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
     },
-    [session, hexByColour],
+    [session, hexByColour, inkPairIds],
   );
 
   const toggle = (id: string) =>
@@ -209,74 +210,15 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   const handleFiles = async (files: File[]) => {
     let ok = 0;
     const errors: string[] = [];
-    const uploaded: Design[] = [];
     setUploading(files.length);
     for (const file of files) {
       const result = await createDesignFromFile(file);
-      if (result.design) {
-        ok++;
-        uploaded.push(result.design);
-      }
+      if (result.design) ok++;
       if (result.error) errors.push(result.error);
       setUploading((n) => n - 1);
     }
     if (ok > 0) toast.success(`Uploaded ${ok} design${ok > 1 ? "s" : ""}`);
     errors.slice(0, 3).forEach((e) => toast.error(e));
-
-    // Separate the images that were just uploaded.
-    //
-    // The user's own background-removal service does this best, so when one
-    // is configured the upload is separated straight away: no button to
-    // press, and no 25 MB model to download first.
-    if (uploaded.length > 0) await separateUploaded(uploaded);
-  };
-
-  /**
-   * Removes the background of every design that was just uploaded.
-   *
-   * The user's own service is used rather than the local engines: this is the
-   * case they set a key up for. A design that cannot be separated is
-   * reported, and the ORIGINAL is always kept.
-   */
-  const separateUploaded = async (uploaded: Design[]) => {
-    let configured = false;
-    try {
-      const { hasBgRemoveKey, loadIntegrations } = await import("@/lib/client/integrations");
-      configured = hasBgRemoveKey(await loadIntegrations());
-    } catch {
-      configured = false;
-    }
-    if (!configured) return;
-
-    let separated = 0;
-    for (const design of uploaded) {
-      try {
-        const blob = await getAssetBlob(design.originalAssetId);
-        if (!blob) continue;
-        const out = await removeBackgroundAuto(blob, { engine: "api" });
-        const asset = await storeAsset(out.blob, `${design.name}-cutout.png`, "design-processed", {
-          parentId: design.originalAssetId,
-        });
-        await db.designs.update(design.id, {
-          processedAssetId: asset.id,
-          updatedAt: Date.now(),
-        });
-        await logActivity(
-          "bgremoval.run",
-          `Separated "${design.name}" after upload with the ${out.engine} engine (${Math.round(out.removed * 100)}% of pixels changed)`,
-        );
-        separated++;
-      } catch (e) {
-        toast.error(
-          `"${design.name}": ${e instanceof Error ? e.message : "could not be separated"}`,
-        );
-      }
-    }
-    if (separated > 0) {
-      toast.success(
-        `Separated ${separated} design${separated > 1 ? "s" : ""} from the background`,
-      );
-    }
   };
 
   /**
@@ -285,11 +227,10 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
    * The work is CPU-bound, so it is done sequentially with a yield between
    * designs: otherwise the progress bar never paints and the tab freezes.
    *
-   * The engine picks itself ("auto") unless the user asks for a specific
-   * one: the cheap flood key runs first and the AI segmenter is only used
-   * when the cheap one provably cannot help. The stage is shown as it
-   * happens, because the AI engine downloads a ~25 MB model on its first
-   * run and a silent spinner there looks like a freeze.
+   * There is exactly one remover: the flood key for a solid background, then
+   * the border model for a faded one. Both are local, need no key and have no
+   * limit, and the engine throws a message the user can act on when the image
+   * is outside what they can do.
    */
   const removeBackgrounds = async () => {
     if (selected.length === 0) return;
@@ -307,14 +248,11 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       setBusy((b) => (b ? { ...b, current: design.name } : b));
       resetStages();
       try {
-        const sourceId = design.originalAssetId;
-        const blob = await getAssetBlob(sourceId);
+        // The ORIGINAL file, never the cutout: re-running on a transparent
+        // image would have nothing left to remove.
+        const blob = await getAssetBlob(design.originalAssetId);
         if (!blob) throw new Error(`Could not read "${design.name}" from storage`);
-        const out = await removeBackgroundAuto(blob, {
-          engine,
-          tolerance,
-          onProgress: showStage,
-        });
+        const out = await removeBackgroundAuto(blob, { onProgress: showStage });
         // The engine does the honest checks itself - "nothing was removed"
         // and "the artwork itself was the background" are both thrown as
         // messages that are safe to show, so all that is left here is to
@@ -361,32 +299,29 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
     setSelected([]);
   };
 
-  const hasAny = (designs?.length ?? 0) > 0;
+  /**
+   * Ticks every design, or clears the tick.
+   *
+   * Only the batch scope: "Ink variants" is a per-design decision and is
+   * never applied in bulk, because that is exactly the guess this page no
+   * longer makes.
+   */
+  const toggleAll = () => {
+    if (selected.length === (designs ?? []).length) setSelected([]);
+    else setSelected((designs ?? []).map((d) => d.id));
+  };
 
   return (
     <div className="space-y-5 pb-16">
-      <div className="flex items-start gap-3">
-        <UploadDropzone
-          className="flex-1"
-          label={
-            uploading > 0
-              ? `Processing ${uploading} file${uploading > 1 ? "s" : ""}…`
-              : "Drop designs here, or click to browse"
-          }
-          hint="PNG, JPEG or WebP · up to 40 MB each · multiple files welcome"
-          onFiles={handleFiles}
-        />
-        {hasAny && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setPaused((p) => !p)}
-            className="shrink-0"
-          >
-            {paused ? "Resume the wave" : "Pause the wave"}
-          </Button>
-        )}
-      </div>
+      <UploadDropzone
+        label={
+          uploading > 0
+            ? `Processing ${uploading} file${uploading > 1 ? "s" : ""}…`
+            : "Drop designs here, or click to browse"
+        }
+        hint="PNG, JPEG or WebP · up to 40 MB each · multiple files welcome"
+        onFiles={handleFiles}
+      />
 
       {busy && (
         <div
@@ -421,47 +356,12 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           <span className="text-[13px] font-medium text-ink">
             {selected.length} design{selected.length > 1 ? "s" : ""} selected
           </span>
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="w-[190px] space-y-1">
-              <Label className="text-[11px] text-ink-muted">Engine</Label>
-              <Select value={engine} onValueChange={(v) => setEngine(v as RemoveEngine)}>
-                <SelectTrigger className="h-8 text-[12px]" aria-label="Background removal engine">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto (recommended)</SelectItem>
-                  <SelectItem value="flood-key">Flood-key (solid backgrounds)</SelectItem>
-                  <SelectItem value="border-model">Border-model (faded backdrops)</SelectItem>
-                  <SelectItem value="ai-segmenter">AI segmentation (photos)</SelectItem>
-                  <SelectItem value="api">API (your own key)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {engine !== "ai-segmenter" && (
-              <div className="w-[120px] space-y-1">
-                <Label className="text-[11px] text-ink-muted">Tolerance {tolerance}</Label>
-                <input
-                  type="range"
-                  min={5}
-                  max={120}
-                  value={tolerance}
-                  onChange={(e) => setTolerance(Number(e.target.value))}
-                  className="h-8 w-full accent-[#314d3d]"
-                />
-              </div>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={removeBackgrounds} disabled={!!busy}>
               <Wand2 className="h-3.5 w-3.5" /> Remove background
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setSelected((designs ?? []).map((d) => d.id))}
-            >
-              Select all
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setSelected([])}>
-              Clear
+            <Button size="sm" variant="outline" onClick={toggleAll}>
+              {selected.length === (designs ?? []).length ? "Clear" : "Select all"}
             </Button>
             <Button size="sm" variant="ghost" className="text-danger" onClick={removeSelected}>
               <Trash2 className="h-3.5 w-3.5" /> Delete
@@ -481,8 +381,8 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           selectedIds={selected}
           showCheckbox
           onToggle={toggle}
-          indexOffset={row === "ink" ? rows.plain.length : 0}
-          paused={paused}
+          inkPairIds={inkPairIds}
+          onToggleInkPair={toggleInkPair}
         />
       ))}
     </div>

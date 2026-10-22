@@ -8,8 +8,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { credentialsFromRequest, DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL } from "@/lib/server/creds";
 import {
   EMPTY_INTEGRATIONS,
-  bgRemoveHeaders,
-  hasBgRemoveKey,
   integrationHeaders,
   migrateIntegrations,
   selectModel,
@@ -101,14 +99,12 @@ describe("integrationHeaders", () => {
   it("emits the active provider even with no keys", () => {
     expect(integrationHeaders(EMPTY_INTEGRATIONS)).toEqual({
       "x-ai-provider": "custom",
-      "x-bg-remove-provider": "remove-bg",
     });
   });
 
   it("emits provider-scoped headers and a base-URL override for custom", () => {
     const headers = integrationHeaders({
       printifyKey: "  pp_live  ",
-      bgRemove: { provider: "remove-bg", apiKey: "" },
       activeProvider: "custom",
       activeModel: "",
       providers: { custom: { apiKey: "sk-x", baseUrl: " https://x/v1 ", model: "my-model" } },
@@ -119,14 +115,12 @@ describe("integrationHeaders", () => {
       "x-ai-base-url": "https://x/v1",
       "x-ai-key": "sk-x",
       "x-ai-model": "my-model",
-      "x-bg-remove-provider": "remove-bg",
     });
   });
 
   it("does not leak a base-URL override for a known provider", () => {
     const headers = integrationHeaders({
       printifyKey: "",
-      bgRemove: { provider: "remove-bg", apiKey: "" },
       activeProvider: "nvidia",
       activeModel: "meta/llama-3.1-8b-instruct",
       providers: { nvidia: { apiKey: "nvapi-x", baseUrl: "https://evil.example/v1" } },
@@ -240,90 +234,30 @@ describe("POST /api/printify/products", () => {
   });
 });
 
-describe("the background-removal credentials", () => {
-  it("sends the key for the configured service", () => {
+describe("the background remover needs no credentials", () => {
+  it("sends no background-removal headers", () => {
+    // The remover runs entirely in the browser with the two local engines.
+    // There is no service to call, so there is no header to send and no key
+    // to leak.
     const headers = integrationHeaders({
-      printifyKey: "",
-      bgRemove: { provider: "photoroom", apiKey: "  pr_key  " },
+      printifyKey: "pp",
       activeProvider: "custom",
       activeModel: "",
       providers: {},
     });
-    expect(headers["x-bg-remove-provider"]).toBe("photoroom");
-    expect(headers["x-bg-remove-key"]).toBe("pr_key");
+    expect(Object.keys(headers).some((h) => h.includes("bg-remove"))).toBe(false);
   });
 
-  it("sends no key for Gemini, which uses the Google AI Studio key", () => {
-    const headers = integrationHeaders({
-      printifyKey: "",
-      bgRemove: { provider: "gemini", apiKey: "ignored" },
-      activeProvider: "custom",
-      activeModel: "",
-      providers: {},
-    });
-    expect(headers["x-bg-remove-provider"]).toBe("gemini");
-    expect(headers["x-bg-remove-key"]).toBeUndefined();
-  });
-
-  it("sends the GOOGLE key for Gemini, not whichever provider is active", () => {
-    // The AI Studio key is held as the "google" provider. If the user has a
-    // different provider active, sending that key would ask the wrong
-    // account.
-    const headers = bgRemoveHeaders({
-      printifyKey: "",
-      bgRemove: { provider: "gemini", apiKey: "" },
+  it("ignores a background-removal section left by an older version", () => {
+    // An older build stored `bgRemove` in IndexedDB. Loading it must not
+    // resurrect a setting the app no longer has - and must not crash.
+    const migrated = migrateIntegrations({
+      printifyKey: "pp",
       activeProvider: "groq",
-      activeModel: "",
-      providers: { google: { apiKey: "AIza-google" }, groq: { apiKey: "gsk-groq" } },
+      bgRemove: { provider: "photoroom", apiKey: "left-over" },
     });
-    expect(headers["x-ai-provider"]).toBe("google");
-    expect(headers["x-ai-key"]).toBe("AIza-google");
-    // The chat model is not the image model; the server picks the image one.
-    expect(headers["x-ai-model"]).toBeUndefined();
-  });
-
-  it("knows whether a background-removal key is configured", () => {
-    expect(
-      hasBgRemoveKey({
-        printifyKey: "",
-        bgRemove: { provider: "remove-bg", apiKey: "" },
-        activeProvider: "custom",
-        activeModel: "",
-        providers: {},
-      }),
-    ).toBe(false);
-    expect(
-      hasBgRemoveKey({
-        printifyKey: "",
-        bgRemove: { provider: "remove-bg", apiKey: "k" },
-        activeProvider: "custom",
-        activeModel: "",
-        providers: {},
-      }),
-    ).toBe(true);
-    // Gemini counts only when the Google key is there.
-    expect(
-      hasBgRemoveKey({
-        printifyKey: "",
-        bgRemove: { provider: "gemini", apiKey: "" },
-        activeProvider: "custom",
-        activeModel: "",
-        providers: {},
-      }),
-    ).toBe(false);
-    expect(
-      hasBgRemoveKey({
-        printifyKey: "",
-        bgRemove: { provider: "gemini", apiKey: "" },
-        activeProvider: "custom",
-        activeModel: "",
-        providers: { google: { apiKey: "AIza" } },
-      }),
-    ).toBe(true);
-  });
-
-  it("migrates a stored config that has no background-removal section", () => {
-    const migrated = migrateIntegrations({ printifyKey: "pp", activeProvider: "groq" });
-    expect(migrated.bgRemove).toEqual({ provider: "remove-bg", apiKey: "" });
+    expect(migrated.printifyKey).toBe("pp");
+    expect(migrated.activeProvider).toBe("groq");
+    expect(Object.prototype.hasOwnProperty.call(migrated, "bgRemove")).toBe(false);
   });
 });
