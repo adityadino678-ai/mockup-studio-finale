@@ -502,3 +502,65 @@ The gallery's broken look was a grid-track overflow:
 
 - Rotate the Printify key that was pasted in plain text during this pass:
   `npx wrangler secret put PRINTIFY_API_KEY`, and update `.dev.vars`.
+
+---
+
+# Fifth pass - pair two designs as one listing, and clip the adjustment preview
+
+### 1. The adjustment panel no longer lets the design escape
+
+`print-area-preview.tsx` sized the artwork as `scale x area width` and let its
+height follow the artwork's own aspect, but nothing clipped it. A tall design,
+or the width slider at 200%, painted straight over the sliders and out of the
+dialog.
+
+- The artwork layer now sits inside an `absolute inset-0 overflow-hidden`
+  wrapper, so it is cut at the dashed print-area frame - the crop Printify
+  actually applies. Guides, the snap badge and the rotation handle stay
+  outside the clip.
+- The rotation handle is clamped inside the preview box. It is placed beyond
+  the artwork's top edge, so large artwork used to push it over the controls
+  or off the panel entirely.
+- The caption now says that anything outside the frame is cropped.
+- The drag / rotate / snap maths and the stored placement are untouched.
+
+### 2. Two designs can be paired as ONE Printify listing
+
+The ink split used to require the ink artwork to live on the SAME design. The
+user uploads the black-ink and white-ink designs separately instead, so the
+studio now pairs them.
+
+- New `session.inkPairs: StudioInkPair[]`, `{ blackInkDesignId,
+  whiteInkDesignId }`. `loadSession` repairs it, and `pruneStudioDesign`
+  removes a pair when either design is deleted. Old sessions load as `[]`, so
+  nothing changes for them.
+- **Designs tab -> "Pair for one listing"**, enabled when exactly two designs
+  are ticked. The first ticked is the black-ink half; the roles are swappable
+  on the cards. Each card shows its partner and two boxes: **Black ink** /
+  **White ink**, plus **Unpair**.
+- The black-ink design prints the plain colours AND the black-ink colours;
+  the white-ink design prints the rest of the ink colours. `pairedColourGroups`
+  and `planPairedDesignColours` are pure and unit-tested, and together they
+  cover every colour exactly once.
+- One pair = one product: the black-ink design owns the title, price and
+  placement, and the partner is excluded from the product loop. A pair only
+  applies when both designs are in the batch scope.
+- A design can be in one pair only (`withInkPair` replaces the old one).
+  Unticking either half, or Unpair, breaks the pair and returns both designs
+  to the no-ink-variants row. A paired design is never reported as "missing
+  ink": its partner is the artwork for the other half.
+
+### 3. Tests and gates
+
+- `tests/design-colours.test.ts` gains 13 cases for the role split, the pair
+  helpers and the role swap.
+- New `e2e/ink-pairs.spec.ts` covers pairing, role swap, reload persistence,
+  card layout, and the clipping + handle clamp. It lives in its own file so
+  the numbered tests in `workflow.spec.ts` do not shift.
+- `npm run lint` - clean.
+- `npm run typecheck` - 0 errors.
+- `npm run test` - **316** unit tests pass.
+- `npm run build` - succeeds; `dist/.assetsignore` written.
+- `e2e/ink-pairs.spec.ts` - 2/2 pass. The rest of the e2e suite still has the
+  other session's in-progress print-area failures (tests 25-27).
+

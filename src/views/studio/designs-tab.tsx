@@ -12,7 +12,14 @@ import {
   storeAsset,
 } from "@/lib/db/repo";
 import { removeBackgroundAuto } from "@/lib/printify/remove-background";
-import { planDesignColours } from "@/lib/printify/design-colours";
+import {
+  pairForDesign,
+  planDesignColours,
+  planPairedDesignColours,
+  setInkPairRole,
+  withInkPair,
+  withoutInkPair,
+} from "@/lib/printify/design-colours";
 import {
   DesignGallery,
   productColourGroups,
@@ -27,7 +34,7 @@ import { Button } from "@/components/ui/button";
 import { hexForColourName, suggestInk } from "@/lib/printify/colors";
 import { ROWS } from "@/lib/printify/studio-session";
 import type { StudioRowId, StudioSession } from "@/types/domain";
-import { Loader2, Trash2, Wand2 } from "lucide-react";
+import { Loader2, Link2, Trash2, Wand2 } from "lucide-react";
 
 interface DesignRow {
   id: string;
@@ -125,13 +132,72 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
 
   /** The designs the user marked as "has ink variants". */
   const inkPairIds = React.useMemo(() => session.inkPairIds ?? [], [session.inkPairIds]);
+  /** The pairs of designs that print as ONE listing. */
+  const inkPairs = React.useMemo(() => session.inkPairs ?? [], [session.inkPairs]);
 
-  const toggleInkPair = (id: string) =>
+  const toggleInkPair = (id: string) => {
+    if (inkPairIds.includes(id)) {
+      // Unticking one half of a pair breaks the pair: half of it would print
+      // nothing, and the box says "this design has ink artwork", which is no
+      // longer true.
+      const found = pairForDesign(inkPairs, id);
+      const members = found
+        ? [found.pair.blackInkDesignId, found.pair.whiteInkDesignId]
+        : [id];
+      update({
+        inkPairIds: inkPairIds.filter((x) => !members.includes(x)),
+        inkPairs: withoutInkPair(inkPairs, id),
+      });
+      return;
+    }
+    update({ inkPairIds: [...inkPairIds, id] });
+  };
+
+  /**
+   * Pairs the two ticked designs as ONE listing.
+   *
+   * The first one ticked becomes the black-ink half (and therefore owns the
+   * title, price and placement); the other becomes the white-ink half. The
+   * roles are swappable on the cards, and nothing about the artwork infers
+   * which is which.
+   */
+  const pairSelected = () => {
+    if (selected.length !== 2) return;
+    const [blackId, whiteId] = selected;
+    if (blackId === whiteId) return;
+    const existing = pairForDesign(inkPairs, blackId);
+    if (
+      existing &&
+      (existing.pair.blackInkDesignId === whiteId || existing.pair.whiteInkDesignId === whiteId)
+    ) {
+      toast.info("Those two designs are already paired.");
+      return;
+    }
     update({
-      inkPairIds: inkPairIds.includes(id)
-        ? inkPairIds.filter((x) => x !== id)
-        : [...inkPairIds, id],
+      inkPairs: withInkPair(inkPairs, blackId, whiteId),
+      inkPairIds: [...new Set([...inkPairIds, blackId, whiteId])],
     });
+    toast.success(
+      "Paired as one listing — use the Black ink / White ink boxes to set each design's role",
+    );
+  };
+
+  /** Moves a paired design to the other half of its pair. */
+  const setRole = (id: string, role: "black" | "white") => {
+    update({ inkPairs: setInkPairRole(inkPairs, id, role) });
+  };
+
+  /** Breaks the pair a design belongs to. */
+  const unpair = (id: string) => {
+    const found = pairForDesign(inkPairs, id);
+    if (!found) return;
+    const members = [found.pair.blackInkDesignId, found.pair.whiteInkDesignId];
+    update({
+      inkPairs: withoutInkPair(inkPairs, id),
+      inkPairIds: inkPairIds.filter((x) => !members.includes(x)),
+    });
+    toast.success("Pair broken — both designs are back in the no-ink-variants row");
+  };
 
   const designs = useLiveQuery(async () => {
     const all = await db.designs.toArray();
@@ -153,6 +219,19 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       })
       .sort((a, b) => a.createdAt - b.createdAt);
   }, []);
+
+  /** The partner's name and this design's role, for the card. */
+  const pairInfo = React.useCallback(
+    (id: string) => {
+      const found = pairForDesign(inkPairs, id);
+      if (!found) return undefined;
+      const partnerId =
+        found.role === "black" ? found.pair.whiteInkDesignId : found.pair.blackInkDesignId;
+      const partner = (designs ?? []).find((d) => d.id === partnerId);
+      return { partnerName: partner?.name ?? "a deleted design", role: found.role };
+    },
+    [inkPairs, designs],
+  );
 
   /**
    * The gallery split into the two rows.
@@ -190,18 +269,22 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
    */
   const designColours = React.useCallback(
     (design: DesignCardData): DesignColours => {
-      const plan = planDesignColours(
-        {
-          hasInkPair: inkPairIds.includes(design.id),
-          hasBlackInk: Boolean(design.blackInkAssetId),
-          hasWhiteInk: Boolean(design.whiteInkAssetId),
-        },
-        productColourGroups(session),
-      );
+      const groups = productColourGroups(session);
+      const pair = pairForDesign(inkPairs, design.id);
+      const plan = pair
+        ? planPairedDesignColours(pair.role, groups)
+        : planDesignColours(
+            {
+              hasInkPair: inkPairIds.includes(design.id),
+              hasBlackInk: Boolean(design.blackInkAssetId),
+              hasWhiteInk: Boolean(design.whiteInkAssetId),
+            },
+            groups,
+          );
       const hexFor = (name: string) => hexByColour.get(name) ?? hexForColourName(name);
       return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
     },
-    [session, hexByColour, inkPairIds],
+    [session, hexByColour, inkPairIds, inkPairs],
   );
 
   const toggle = (id: string) =>
@@ -360,6 +443,19 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
             <Button size="sm" onClick={removeBackgrounds} disabled={!!busy}>
               <Wand2 className="h-3.5 w-3.5" /> Remove background
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={pairSelected}
+              disabled={selected.length !== 2}
+              title={
+                selected.length === 2
+                  ? "Print these two designs on one listing: the first is the black-ink half"
+                  : "Tick exactly two designs to pair them"
+              }
+            >
+              <Link2 className="h-3.5 w-3.5" /> Pair for one listing
+            </Button>
             <Button size="sm" variant="outline" onClick={toggleAll}>
               {selected.length === (designs ?? []).length ? "Clear" : "Select all"}
             </Button>
@@ -383,6 +479,9 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           onToggle={toggle}
           inkPairIds={inkPairIds}
           onToggleInkPair={toggleInkPair}
+          pairInfo={pairInfo}
+          onSetInkRole={setRole}
+          onUnpair={unpair}
         />
       ))}
     </div>

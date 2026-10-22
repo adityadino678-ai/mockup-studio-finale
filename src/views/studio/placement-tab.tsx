@@ -32,7 +32,13 @@ import {
 import { buildPartition, resolveVariantIds } from "@/lib/printify/variants";
 import {
   inkArtworkProblems,
+  pairedColourGroups,
+  pairedDesignIds,
+  pairForDesign,
   planDesignColours,
+  planPairedDesignColours,
+  setInkPairRole,
+  withoutInkPair,
   type InkArtworkProblem,
 } from "@/lib/printify/design-colours";
 import { assertCompletePartition } from "@/lib/printify/print-areas";
@@ -113,11 +119,55 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
 
   const designs = React.useMemo(() => (gallery ?? []).map((g) => g.design), [gallery]);
 
+  /** The pairs of designs that print as ONE listing. */
+  const inkPairs = React.useMemo(() => session.inkPairs ?? [], [session.inkPairs]);
+  const pairIds = React.useMemo(() => pairedDesignIds(inkPairs), [inkPairs]);
+
   /** Ticks / unticks a design as "has ink variants", from this tab too. */
   const toggleInkPair = (id: string) => {
     const ids = session.inkPairIds ?? [];
-    update({ inkPairIds: ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id] });
+    if (ids.includes(id)) {
+      // Unticking one half of a pair breaks the pair, so the other half never
+      // points at artwork that is no longer marked for the ink colours.
+      const found = pairForDesign(inkPairs, id);
+      const members = found ? [found.pair.blackInkDesignId, found.pair.whiteInkDesignId] : [id];
+      update({
+        inkPairIds: ids.filter((x) => !members.includes(x)),
+        inkPairs: withoutInkPair(inkPairs, id),
+      });
+      return;
+    }
+    update({ inkPairIds: [...ids, id] });
   };
+
+  /** Moves a paired design to the other half of its pair. */
+  const setRole = (id: string, role: "black" | "white") => {
+    update({ inkPairs: setInkPairRole(inkPairs, id, role) });
+  };
+
+  /** Breaks the pair a design belongs to. */
+  const unpair = (id: string) => {
+    const found = pairForDesign(inkPairs, id);
+    if (!found) return;
+    const members = [found.pair.blackInkDesignId, found.pair.whiteInkDesignId];
+    update({
+      inkPairs: withoutInkPair(inkPairs, id),
+      inkPairIds: (session.inkPairIds ?? []).filter((x) => !members.includes(x)),
+    });
+  };
+
+  /** The partner's name and this design's role, for the card. */
+  const pairInfo = React.useCallback(
+    (id: string) => {
+      const found = pairForDesign(inkPairs, id);
+      if (!found) return undefined;
+      const partnerId =
+        found.role === "black" ? found.pair.whiteInkDesignId : found.pair.blackInkDesignId;
+      const partner = designs.find((d) => d.id === partnerId);
+      return { partnerName: partner?.name ?? "a deleted design", role: found.role };
+    },
+    [inkPairs, designs],
+  );
 
   /**
    * The gallery split into the two rows.
@@ -145,17 +195,21 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
    */
   const designColours = React.useCallback(
     (design: DesignCardData): DesignColours => {
-      const plan = planDesignColours(
-        {
-          hasInkPair: (session.inkPairIds ?? []).includes(design.id),
-          hasBlackInk: Boolean(design.blackInkAssetId),
-          hasWhiteInk: Boolean(design.whiteInkAssetId),
-        },
-        productColourGroups(session),
-      );
+      const groups = productColourGroups(session);
+      const pair = pairForDesign(inkPairs, design.id);
+      const plan = pair
+        ? planPairedDesignColours(pair.role, groups)
+        : planDesignColours(
+            {
+              hasInkPair: (session.inkPairIds ?? []).includes(design.id),
+              hasBlackInk: Boolean(design.blackInkAssetId),
+              hasWhiteInk: Boolean(design.whiteInkAssetId),
+            },
+            groups,
+          );
       return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
     },
-    [session, hexFor],
+    [session, hexFor, inkPairs],
   );
 
   /** The colour swatches of a row, so every card in it shows its colours. */
@@ -224,18 +278,66 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   /**
    * What each design will be printed with, for this product.
    *
-   * The plan comes from the product's colour groups and the design's own ink
-   * artwork, so it always covers EVERY colour of the product: the plain ones
-   * with the main artwork, the ink ones with the ink artwork the design
-   * actually has. A design with no ink artwork prints its main artwork
-   * everywhere - that is reported as a problem, never dropped silently.
+   * A PAIR is one product: the black-ink design prints the plain and
+   * black-ink colours, its partner the white-ink ones, and the black-ink
+   * design owns the listing (name, title, price, placement). Both designs
+   * must be ticked - a half-pair is left as an ordinary design rather than
+   * guessed at.
+   *
+   * An UNPAIRED design keeps the old rule and always covers EVERY colour of
+   * the product: the plain ones with the main artwork, the ink ones with the
+   * ink artwork the design actually has.
    */
   const plan = React.useMemo(() => {
     if (!designs || !session.blueprintId || !session.printProviderId) return null;
     const colourIndex = buildIndexFromVariants(catalog.variants);
     const groups = productColourGroups(session);
+    const split = pairedColourGroups(groups);
+    const byId = new Map(designs.map((d) => [d.id, d]));
+    const scoped = new Set(scope.map((d) => d.id));
     const items: DesignPlan[] = [];
+    const handled = new Set<string>();
+
+    for (const pair of inkPairs) {
+      if (handled.has(pair.blackInkDesignId) || handled.has(pair.whiteInkDesignId)) continue;
+      if (!scoped.has(pair.blackInkDesignId) || !scoped.has(pair.whiteInkDesignId)) continue;
+      const black = byId.get(pair.blackInkDesignId);
+      const white = byId.get(pair.whiteInkDesignId);
+      if (!black || !white) continue;
+      handled.add(black.id);
+      handled.add(white.id);
+      const pairedGroups: DesignGroup[] = [];
+      // The absorber is the last group that holds variants, so the group that
+      // can safely swallow the catalogue's hidden extras is the last non-empty
+      // one. Both groups are complete by construction here.
+      if (split.black.length > 0) {
+        pairedGroups.push({
+          ink: "main",
+          assetId: designMainAssetId(black),
+          colors: split.black,
+          label: `Black ink · ${black.name}`,
+          fallback: false,
+        });
+      }
+      if (split.white.length > 0) {
+        pairedGroups.push({
+          ink: "white",
+          assetId: designMainAssetId(white),
+          colors: split.white,
+          label: `White ink · ${white.name}`,
+          fallback: false,
+        });
+      }
+      items.push({
+        designId: black.id,
+        designName: black.name,
+        row: "ink",
+        groups: pairedGroups,
+      });
+    }
+
     for (const design of scope) {
+      if (handled.has(design.id)) continue;
       const colourPlan = planDesignColours(
         {
           hasInkPair: (session.inkPairIds ?? []).includes(design.id),
@@ -274,7 +376,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
       });
     }
     return { items, colourIndex };
-  }, [designs, scope, session, catalog.variants]);
+  }, [designs, scope, session, catalog.variants, inkPairs]);
 
   // --- the problems ----------------------------------------------------------
   /**
@@ -289,8 +391,15 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
    * everywhere by design.
    */
   const artworkProblems = React.useMemo(
-    () => inkArtworkProblems(scope, productColourGroups(session), session.inkPairIds ?? []),
-    [scope, session],
+    () =>
+      inkArtworkProblems(
+        // A paired design is never "missing" its ink artwork: its partner IS
+        // the artwork for the other half.
+        scope.filter((d) => !pairIds.includes(d.id)),
+        productColourGroups(session),
+        session.inkPairIds ?? [],
+      ),
+    [scope, session, pairIds],
   );
 
   /** How many of the batch's designs are affected. */
@@ -603,6 +712,9 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           designColours={designColours}
           inkPairIds={session.inkPairIds ?? []}
           onToggleInkPair={toggleInkPair}
+          pairInfo={pairInfo}
+          onSetInkRole={setRole}
+          onUnpair={unpair}
           onOpen={(id) => setEditingDesignId(id)}
         />
       ))}

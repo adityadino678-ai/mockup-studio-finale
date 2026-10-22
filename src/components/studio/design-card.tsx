@@ -50,6 +50,19 @@ export interface DesignCardProps {
   inkPair?: boolean;
   /** Ticks / unticks "has ink variants". Omit to hide the checkbox. */
   onToggleInkPair?: () => void;
+  /**
+   * The pair this design belongs to, when the user paired two designs.
+   *
+   * A paired design prints half of one product: the black-ink design on the
+   * plain and black-ink colours, the white-ink one on the remaining ink
+   * colours. The partner name is shown so the two cards describe the same
+   * listing.
+   */
+  pairInfo?: { partnerName: string; role: "black" | "white" };
+  /** Moves this design to the other half of its pair. */
+  onSetInkRole?: (role: "black" | "white") => void;
+  /** Breaks the pair. */
+  onUnpair?: () => void;
   /** Called when the card BODY is clicked (opens the adjustment panel). */
   onOpen?: () => void;
   className?: string;
@@ -78,6 +91,9 @@ export function DesignCard({
   colors,
   inkPair = false,
   onToggleInkPair,
+  pairInfo,
+  onSetInkRole,
+  onUnpair,
   onOpen,
   className,
 }: DesignCardProps): React.JSX.Element {
@@ -181,11 +197,66 @@ export function DesignCard({
             >
               Ink variants
             </label>
-            {missingInk && (
+            {missingInk && !pairInfo && (
               <span className="text-[10px] text-warning" data-ink-missing="">
                 make them first
               </span>
             )}
+          </div>
+        )}
+
+        {pairInfo && onSetInkRole && (
+          // The pair's role: WHICH design prints on the black-ink colours and
+          // which on the white-ink ones. The two boxes behave as radios - a
+          // design is one half of the pair, never both.
+          <div className="space-y-1 pt-0.5" data-ink-pair-role="">
+            <p
+              className="truncate text-[10px] text-ink-subtle"
+              title={`Paired with "${pairInfo.partnerName}"`}
+            >
+              Paired with “{pairInfo.partnerName}”
+            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="flex items-center gap-1">
+                <Checkbox
+                  id={`ink-role-black-${design.id}`}
+                  checked={pairInfo.role === "black"}
+                  onCheckedChange={() => onSetInkRole("black")}
+                  aria-label={`${design.name} prints black ink`}
+                  className="h-3.5 w-3.5"
+                />
+                <label
+                  htmlFor={`ink-role-black-${design.id}`}
+                  className="cursor-pointer text-[10.5px] text-ink-muted"
+                >
+                  Black ink
+                </label>
+              </span>
+              <span className="flex items-center gap-1">
+                <Checkbox
+                  id={`ink-role-white-${design.id}`}
+                  checked={pairInfo.role === "white"}
+                  onCheckedChange={() => onSetInkRole("white")}
+                  aria-label={`${design.name} prints white ink`}
+                  className="h-3.5 w-3.5"
+                />
+                <label
+                  htmlFor={`ink-role-white-${design.id}`}
+                  className="cursor-pointer text-[10.5px] text-ink-muted"
+                >
+                  White ink
+                </label>
+              </span>
+              {onUnpair && (
+                <button
+                  type="button"
+                  onClick={onUnpair}
+                  className="ml-auto cursor-pointer text-[10px] text-ink-subtle underline"
+                >
+                  Unpair
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

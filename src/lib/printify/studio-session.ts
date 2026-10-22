@@ -11,6 +11,7 @@
 
 import { getSetting, setSetting } from "@/lib/db/schema";
 import type {
+  StudioInkPair,
   StudioPlacement,
   StudioProductResult,
   StudioRowId,
@@ -46,6 +47,7 @@ export function emptySession(): StudioSession {
     rows: { plain: emptyRowState(), ink: emptyRowState() },
     designIds: [],
     inkPairIds: [],
+    inkPairs: [],
     universal: true,
     universalPlacement: { ...DEFAULT_PLACEMENT },
     placements: {},
@@ -62,6 +64,31 @@ function stringArray(value: unknown): string[] {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Reads the stored pairs, dropping anything malformed.
+ *
+ * A design can only be in one pair, so the second pair naming an id already
+ * seen is ignored. That keeps a half-written blob from printing one design on
+ * two listings.
+ */
+function inkPairArray(value: unknown): StudioInkPair[] {
+  if (!Array.isArray(value)) return [];
+  const out: StudioInkPair[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const black = (entry as Partial<StudioInkPair>).blackInkDesignId;
+    const white = (entry as Partial<StudioInkPair>).whiteInkDesignId;
+    if (typeof black !== "string" || typeof white !== "string") continue;
+    if (!black || !white || black === white) continue;
+    if (seen.has(black) || seen.has(white)) continue;
+    seen.add(black);
+    seen.add(white);
+    out.push({ blackInkDesignId: black, whiteInkDesignId: white });
+  }
+  return out;
 }
 
 /**
@@ -128,6 +155,7 @@ export async function loadSession(): Promise<StudioSession> {
     rows,
     designIds: stringArray(stored.designIds),
     inkPairIds: stringArray(stored.inkPairIds),
+    inkPairs: inkPairArray(stored.inkPairs),
     universal: stored.universal !== false,
     universalPlacement,
     placements,
@@ -167,11 +195,18 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
   if (session.inkPairIds.includes(designId)) {
     changed = true;
   }
+  const inkPairs = session.inkPairs.filter(
+    (pair) => pair.blackInkDesignId !== designId && pair.whiteInkDesignId !== designId,
+  );
+  if (inkPairs.length !== session.inkPairs.length) {
+    changed = true;
+  }
   if (changed) {
     await saveSession({
       ...session,
       designIds: session.designIds.filter((id) => id !== designId),
       inkPairIds: session.inkPairIds.filter((id) => id !== designId),
+      inkPairs,
       placements,
     });
   }

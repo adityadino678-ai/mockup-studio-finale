@@ -183,8 +183,19 @@ export function PrintAreaPreview({
   // ends up on the artwork's right edge.
   const handleRadius = (drawnHeight / 2 + HANDLE_GAP + HANDLE_SIZE / 2);
   const angleRad = (placement.angle * Math.PI) / 180;
-  const handleX = centreX + Math.sin(angleRad) * handleRadius;
-  const handleY = centreY - Math.cos(angleRad) * handleRadius;
+  // The handle is kept INSIDE the preview: artwork wider or taller than the
+  // print area would otherwise push it over the controls, or off the panel.
+  const handleHalf = HANDLE_SIZE / 2 + 2;
+  const handleX = clamp(
+    centreX + Math.sin(angleRad) * handleRadius,
+    handleHalf,
+    Math.max(handleHalf, box.width - handleHalf),
+  );
+  const handleY = clamp(
+    centreY - Math.cos(angleRad) * handleRadius,
+    handleHalf,
+    Math.max(handleHalf, box.height - handleHalf),
+  );
 
   const containerRect = () => containerRef.current?.getBoundingClientRect() ?? null;
 
@@ -400,32 +411,39 @@ export function PrintAreaPreview({
       <div className="pointer-events-none absolute inset-0 rounded-lg border-2 border-dashed border-forest/35" />
 
       {artworkUrl && measured && (
-        <div
-          data-artwork=""
-          className={cn(
-            "absolute",
-            onChange ? "cursor-grab active:cursor-grabbing" : "cursor-default",
-          )}
-          style={{
-            left: "50%",
-            top: "50%",
-            width: `${drawnWidth}px`,
-            height: `${drawnHeight}px`,
-            // The artwork is centred by its OWN size first, then moved by the
-            // placement offset, then rotated about its centre. Offsetting the
-            // element with `left`/`top` as well would count the offset twice
-            // and throw the artwork out of the print area.
-            transform: `translate(-50%, -50%) translate(${(placement.x - 0.5) * box.width}px, ${(placement.y - 0.5) * box.height}px) rotate(${placement.angle}deg)`,
-          }}
-        >
-          <img
-            src={artworkUrl}
-            alt=""
-            draggable={false}
-            className="pointer-events-none h-full w-full select-none object-contain"
-          />
-          {/* The artwork's own bounds, so the edge snapping is visible. */}
-          <div className="pointer-events-none absolute inset-0 border border-dashed border-forest/45" />
+        // The artwork is clipped to the print area. Printify CROPS anything
+        // outside the placeholder, so drawing it beyond the dashed frame
+        // would promise a print the buyer never gets - and a tall design at a
+        // large scale used to paint straight over the panel's controls.
+        // Guides, snap badge and rotation handle stay OUTSIDE this layer.
+        <div className="absolute inset-0 overflow-hidden rounded-lg">
+          <div
+            data-artwork=""
+            className={cn(
+              "absolute",
+              onChange ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+            )}
+            style={{
+              left: "50%",
+              top: "50%",
+              width: `${drawnWidth}px`,
+              height: `${drawnHeight}px`,
+              // The artwork is centred by its OWN size first, then moved by the
+              // placement offset, then rotated about its centre. Offsetting the
+              // element with `left`/`top` as well would count the offset twice
+              // and throw the artwork out of the print area.
+              transform: `translate(-50%, -50%) translate(${(placement.x - 0.5) * box.width}px, ${(placement.y - 0.5) * box.height}px) rotate(${placement.angle}deg)`,
+            }}
+          >
+            <img
+              src={artworkUrl}
+              alt=""
+              draggable={false}
+              className="pointer-events-none h-full w-full select-none object-contain"
+            />
+            {/* The artwork's own bounds, so the edge snapping is visible. */}
+            <div className="pointer-events-none absolute inset-0 border border-dashed border-forest/45" />
+          </div>
         </div>
       )}
 
@@ -537,4 +555,9 @@ function normaliseAngle(angle: number): number {
 function clamp01(value: number): number {
   if (Number.isNaN(value)) return 0.5;
   return Math.min(1, Math.max(0, value));
+}
+
+/** Limits a screen-pixel value to a range, keeping the handle on screen. */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

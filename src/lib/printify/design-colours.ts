@@ -13,6 +13,11 @@
 // separates the two rows. Nothing here infers a pairing from the artwork on
 // file, from the product, or from the colours.
 //
+// Two UPLOADED designs can also be paired as one listing (`session.inkPairs`):
+// one supplies the black-ink artwork, the other the white-ink artwork. The
+// black half covers the plain and black-ink colours, the white half the rest,
+// and the pair creates ONE product. See `pairedColourGroups` below.
+//
 // The rule that stops a design printing on nothing:
 //
 //   A design the user PAIRED prints the ink artwork on the ink colours and
@@ -168,6 +173,125 @@ export function planDesignColours(
 /** True when the user marked this design as "has ink variants". */
 export function isInkPair(inkPairIds: readonly string[], designId: string): boolean {
   return inkPairIds.includes(designId);
+}
+
+// ---------------------------------------------------------------------------
+// Pairing two uploaded designs
+//
+// A pair is two designs that print as ONE product: one carries the black-ink
+// artwork, the other the white-ink artwork. The user creates it on the
+// Designs tab; nothing here infers a partner.
+// ---------------------------------------------------------------------------
+
+/** Two designs that print as one product. */
+export interface DesignInkPair {
+  /** Printed on the plain colours and the colours marked for black ink. */
+  blackInkDesignId: string;
+  /** Printed on the remaining ink colours. */
+  whiteInkDesignId: string;
+}
+
+/** Which half of a pair a design prints. */
+export type InkPairRole = "black" | "white";
+
+/** The pair a design belongs to, and the role it plays in it. */
+export function pairForDesign(
+  pairs: readonly DesignInkPair[],
+  designId: string,
+): { pair: DesignInkPair; role: InkPairRole } | undefined {
+  for (const pair of pairs) {
+    if (pair.blackInkDesignId === designId) return { pair, role: "black" };
+    if (pair.whiteInkDesignId === designId) return { pair, role: "white" };
+  }
+  return undefined;
+}
+
+/** Every design that belongs to a pair, in pair order. */
+export function pairedDesignIds(pairs: readonly DesignInkPair[]): string[] {
+  return unique(pairs.flatMap((pair) => [pair.blackInkDesignId, pair.whiteInkDesignId]));
+}
+
+/**
+ * Adds a pair, replacing any pair either design was already in.
+ *
+ * A design can be in ONE pair: it supplies one artwork for one product, and
+ * letting it sit in two pairs would print it on two listings the user did not
+ * ask for.
+ */
+export function withInkPair(
+  pairs: readonly DesignInkPair[],
+  blackInkDesignId: string,
+  whiteInkDesignId: string,
+): DesignInkPair[] {
+  const touched = new Set([blackInkDesignId, whiteInkDesignId]);
+  const kept = pairs.filter(
+    (pair) =>
+      !touched.has(pair.blackInkDesignId) && !touched.has(pair.whiteInkDesignId),
+  );
+  return [...kept, { blackInkDesignId, whiteInkDesignId }];
+}
+
+/** Moves a design to the other role inside its own pair. */
+export function setInkPairRole(
+  pairs: readonly DesignInkPair[],
+  designId: string,
+  role: InkPairRole,
+): DesignInkPair[] {
+  return pairs.map((pair) => {
+    if (pair.blackInkDesignId !== designId && pair.whiteInkDesignId !== designId) return pair;
+    const partner =
+      pair.blackInkDesignId === designId ? pair.whiteInkDesignId : pair.blackInkDesignId;
+    return role === "black"
+      ? { blackInkDesignId: designId, whiteInkDesignId: partner }
+      : { blackInkDesignId: partner, whiteInkDesignId: designId };
+  });
+}
+
+/** Drops the pair a design belongs to. */
+export function withoutInkPair(
+  pairs: readonly DesignInkPair[],
+  designId: string,
+): DesignInkPair[] {
+  return pairs.filter(
+    (pair) => pair.blackInkDesignId !== designId && pair.whiteInkDesignId !== designId,
+  );
+}
+
+/**
+ * The colours a pair covers, split between its two artworks.
+ *
+ * The black-ink design covers the plain colours AND the colours the user
+ * marked for black ink; the white-ink design covers the rest of the ink
+ * colours. Together they cover every colour of the product exactly once.
+ */
+export function pairedColourGroups(groups: ProductColourGroups): {
+  black: string[];
+  white: string[];
+} {
+  const { plain, black, white } = normaliseColourGroups(groups);
+  return { black: unique([...plain, ...black]), white };
+}
+
+/**
+ * What ONE member of a pair prints.
+ *
+ * Unlike `planDesignColours`, this never reports a missing ink: the partner
+ * design IS the artwork for the other half, so a pair is complete by
+ * construction. The result is shaped like `DesignColourPlan` so the cards and
+ * the swatches can treat both cases the same way.
+ */
+export function planPairedDesignColours(
+  role: InkPairRole,
+  groups: ProductColourGroups,
+): DesignColourPlan {
+  const split = pairedColourGroups(groups);
+  const colors = role === "black" ? split.black : split.white;
+  return {
+    groups: colors.length > 0 ? [{ ink: "main", colors }] : [],
+    missing: [],
+    usesInkArtwork: true,
+    colors,
+  };
 }
 
 /**

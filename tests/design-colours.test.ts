@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   inkArtworkProblems,
   normaliseColourGroups,
+  pairedColourGroups,
+  pairedDesignIds,
+  pairForDesign,
   planDesignColours,
+  planPairedDesignColours,
+  setInkPairRole,
   splitDesignsByInkPair,
+  withInkPair,
+  withoutInkPair,
 } from "@/lib/printify/design-colours";
 import type { ProductColourGroups, SeparableDesign } from "@/lib/printify/design-colours";
 
@@ -427,5 +434,119 @@ describe("degenerate input", () => {
     expect(plan.groups).toEqual([]);
     expect(plan.missing).toEqual([]);
     expect(plan.colors).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pairing two UPLOADED designs
+//
+// Two designs can print as ONE listing: one carries the black-ink artwork, the
+// other the white-ink artwork. The black-ink design covers the plain AND the
+// black-ink colours (black ink reads on a light garment), its partner the
+// remaining ink colours. Together they cover every colour exactly once.
+// ---------------------------------------------------------------------------
+
+describe("pairedColourGroups", () => {
+  it("gives the plain and black-ink colours to the black half", () => {
+    expect(pairedColourGroups(PRODUCT)).toEqual({
+      black: ["White", "Natural", "Black", "Navy"],
+      white: ["Red"],
+    });
+  });
+
+  it("never puts a colour in both halves", () => {
+    const split = pairedColourGroups(PRODUCT);
+    expect(hasDuplicates([...split.black, ...split.white])).toBe(false);
+    expect([...split.black, ...split.white].sort()).toEqual([...PRODUCT_COLOURS].sort());
+  });
+
+  it("has no white half when every ink colour uses black ink", () => {
+    expect(pairedColourGroups({ plain: ["White"], ink: ["Black"], blackInk: ["Black"] })).toEqual({
+      black: ["White", "Black"],
+      white: [],
+    });
+  });
+});
+
+describe("planPairedDesignColours", () => {
+  it("prints the black half on plain + black-ink colours only", () => {
+    const plan = planPairedDesignColours("black", PRODUCT);
+
+    expect(plan.colors).toEqual(["White", "Natural", "Black", "Navy"]);
+    expect(plan.groups).toEqual([
+      { ink: "main", colors: ["White", "Natural", "Black", "Navy"] },
+    ]);
+    // The partner IS the white artwork, so nothing is missing.
+    expect(plan.missing).toEqual([]);
+    expect(plan.usesInkArtwork).toBe(true);
+  });
+
+  it("prints the white half on the remaining ink colours only", () => {
+    const plan = planPairedDesignColours("white", PRODUCT);
+
+    expect(plan.colors).toEqual(["Red"]);
+    expect(plan.groups).toEqual([{ ink: "main", colors: ["Red"] }]);
+    expect(plan.missing).toEqual([]);
+  });
+
+  it("plans nothing for a half with no colours of its own", () => {
+    const plan = planPairedDesignColours("white", {
+      plain: ["White"],
+      ink: ["Black"],
+      blackInk: ["Black"],
+    });
+
+    expect(plan.groups).toEqual([]);
+    expect(plan.colors).toEqual([]);
+  });
+
+  it("covers every product colour exactly once across the two halves", () => {
+    const all = [
+      ...planPairedDesignColours("black", PRODUCT).groups,
+      ...planPairedDesignColours("white", PRODUCT).groups,
+    ].flatMap((group) => group.colors);
+
+    expect(hasDuplicates(all)).toBe(false);
+    expect([...all].sort()).toEqual([...PRODUCT_COLOURS].sort());
+  });
+});
+
+describe("the pair itself", () => {
+  const PAIR = { blackInkDesignId: "d-black", whiteInkDesignId: "d-white" };
+
+  it("finds each design's role", () => {
+    expect(pairForDesign([PAIR], "d-black")).toEqual({ pair: PAIR, role: "black" });
+    expect(pairForDesign([PAIR], "d-white")).toEqual({ pair: PAIR, role: "white" });
+    expect(pairForDesign([PAIR], "d-other")).toBeUndefined();
+  });
+
+  it("lists every paired design once", () => {
+    expect(pairedDesignIds([PAIR])).toEqual(["d-black", "d-white"]);
+  });
+
+  it("keeps a design in ONE pair when it is paired again", () => {
+    const first = withInkPair([], "a", "b");
+    const second = withInkPair(first, "b", "c");
+
+    expect(second).toEqual([{ blackInkDesignId: "b", whiteInkDesignId: "c" }]);
+    expect(pairForDesign(second, "b")?.role).toBe("black");
+  });
+
+  it("swaps the roles without changing the partner", () => {
+    const swapped = setInkPairRole([PAIR], "d-white", "black");
+
+    expect(swapped).toEqual([{ blackInkDesignId: "d-white", whiteInkDesignId: "d-black" }]);
+    expect(pairForDesign(swapped, "d-white")?.role).toBe("black");
+  });
+
+  it("leaves other pairs alone when one role moves", () => {
+    const other = { blackInkDesignId: "x", whiteInkDesignId: "y" };
+    expect(setInkPairRole([PAIR, other], "d-black", "white")).toContainEqual(other);
+  });
+
+  it("drops the pair from either side", () => {
+    expect(withoutInkPair([PAIR], "d-black")).toEqual([]);
+    expect(withoutInkPair([PAIR], "d-white")).toEqual([]);
+    expect(withoutInkPair([PAIR], "d-other")).toEqual([PAIR]);
   });
 });

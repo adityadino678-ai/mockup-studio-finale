@@ -253,6 +253,29 @@ Two things were removed on purpose; do not bring them back:
 - the one-click `coloursToMoveToPlain` fix, which silently rewrote the
   user's colour groups.
 
+### Pairing two uploaded designs as ONE listing
+
+`session.inkPairs` holds the pairs. The **"Pair for one listing"** button on
+the Designs tab pairs exactly the two ticked designs: the first ticked becomes
+the **black-ink** half and owns the listing (title, price, placement), the
+other becomes the **white-ink** half. Each card then names its partner and
+shows a **Black ink / White ink** box, because which design is which is the
+user's decision, not a guess.
+
+- The black-ink design prints the plain colours AND the colours marked for
+  black ink; the white-ink design prints the remaining ink colours. Together
+  they cover every colour exactly once (`pairedColourGroups` and
+  `planPairedDesignColours` in `design-colours.ts`).
+- **One pair = ONE product.** The partner is excluded from the product loop,
+  so it never creates a listing of its own.
+- Both designs must be ticked for the batch: a half-pair is left as two
+  ordinary designs instead of being guessed at.
+- A design can only be in one pair (`withInkPair` replaces an old pair), and
+  unticking either half, or **Unpair**, breaks it and moves both back to the
+  no-ink-variants row.
+- Pairing is additive: a design's OWN white/black ink files still work for
+  designs that are not paired, and no AI or automatic split is involved.
+
 ## Placement: drag, rotate, snap
 
 `src/lib/printify/snap.ts` is the pure core and `print-area-preview.tsx` is
@@ -267,6 +290,12 @@ the React surface.
   (y-0.5)*H) rotate(a)`.** Positioning it with `left:50%` PLUS an absolute
   `translate(cx, cy)` double-counts the offset and throws the artwork out of
   the print area - a bug the prototype caught before it could ship.
+- **The preview is clipped to the print area.** The artwork layer sits inside
+  an `overflow-hidden` wrapper, so a tall design (or a scale above 100%) is
+  cut at the dashed frame instead of painting over the panel's controls -
+  the same crop Printify applies. The rotation handle is clamped inside the
+  preview for the same reason; it used to sit beyond the artwork's edge and
+  could land off the dialog entirely. Covered by `e2e/ink-pairs.spec.ts`.
 
 ## Print areas (the Mockups tab)
 

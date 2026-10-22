@@ -158,6 +158,12 @@ export interface DesignGalleryProps {
   inkPairIds?: readonly string[];
   /** Ticks / unticks a design as "has ink variants". Omit to hide the box. */
   onToggleInkPair?: (id: string) => void;
+  /** The pair a design belongs to: the partner's name and the design's role. */
+  pairInfo?: (id: string) => { partnerName: string; role: "black" | "white" } | undefined;
+  /** Moves a paired design to the other half of its pair. */
+  onSetInkRole?: (id: string, role: "black" | "white") => void;
+  /** Breaks a design's pair. */
+  onUnpair?: (id: string) => void;
   /** Called when a card's body is clicked. */
   onOpen?: (id: string) => void;
 }
@@ -178,6 +184,9 @@ export function DesignGallery({
   onToggle,
   inkPairIds,
   onToggleInkPair,
+  pairInfo,
+  onSetInkRole,
+  onUnpair,
   onOpen,
 }: DesignGalleryProps) {
   return (
@@ -210,6 +219,9 @@ export function DesignGallery({
                 colors={own?.colors}
                 inkPair={inkPairIds?.includes(d.id) ?? false}
                 onToggleInkPair={onToggleInkPair ? () => onToggleInkPair(d.id) : undefined}
+                pairInfo={pairInfo?.(d.id)}
+                onSetInkRole={onSetInkRole ? (role) => onSetInkRole(d.id, role) : undefined}
+                onUnpair={onUnpair ? () => onUnpair(d.id) : undefined}
                 onOpen={onOpen ? () => onOpen(d.id) : undefined}
               />
             );
@@ -470,7 +482,8 @@ export function DesignAdjustmentPanel({
             />
             <p className="text-[11px] leading-relaxed text-ink-subtle">
               The dashed frame is the print area; Printify does not publish where that frame sits on
-              the garment, so the position on the shirt itself is an approximation.
+              the garment, so the position on the shirt itself is an approximation. Anything outside
+              the frame is cropped, exactly as Printify crops it.
             </p>
           </div>
         </div>

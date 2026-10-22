@@ -435,6 +435,22 @@ export interface StudioPlacement {
   angle: number;
 }
 
+/**
+ * Two uploaded designs that print as ONE product.
+ *
+ * One design carries the artwork for the colours that need black ink, the
+ * other the artwork for the colours that need white ink. The black-ink design
+ * owns the listing: its name, title, price and placement are the product's.
+ * The pairing is the user's own decision, made on the Designs tab - nothing
+ * here is inferred from the artwork on file.
+ */
+export interface StudioInkPair {
+  /** Printed on the plain colours and on the colours marked for black ink. */
+  blackInkDesignId: string;
+  /** Printed on the remaining ink colours. */
+  whiteInkDesignId: string;
+}
+
 export interface StudioSession {
   blueprintId?: number;
   printProviderId?: number;
@@ -457,6 +473,15 @@ export interface StudioSession {
    * printed.
    */
   inkPairIds: string[];
+  /**
+   * The designs the user paired as ONE listing.
+   *
+   * A pair creates a single product: the black-ink design prints on the plain
+   * and black-ink colours, its partner on the white-ink colours. A design in
+   * a pair never creates a product of its own, and a design in no pair keeps
+   * the old behaviour (its own ink files, or one artwork on every colour).
+   */
+  inkPairs: StudioInkPair[];
   /** When true, every design uses `universalPlacement`. */
   universal: boolean;
   universalPlacement: StudioPlacement;
