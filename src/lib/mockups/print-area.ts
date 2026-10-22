@@ -1,28 +1,21 @@
 // ---------------------------------------------------------------------------
 // Print areas: mapping a real Printify print area onto a mockup photo.
 //
-// A print area is a rectangle on the photo whose PIXEL SIZE is a real
-// Printify print area (e.g. 4500 x 5400 for a DTG tee front). The design
-// inside it is placed with the Printify Studio's own numbers - `scale` is the
-// artwork's width as a fraction of the area's width, `x`/`y` are the CENTRE
-// of the artwork inside the area - so the mockup shows exactly what Printify
-// prints, and whatever falls outside the area is clipped away.
+// A print area is a FRAME on the photo that the design is attached to.
+//
+//   * the design's placement INSIDE the area (where it sits, how wide, at
+//     what angle) belongs to the Printify Studio - Printify's own numbers:
+//     `scale` is the artwork width / area width, `x`/`y` are the CENTRE of
+//     the artwork inside the area, `angle` is its rotation;
+//   * the frame's own transform (where it sits on the photo, how big, how
+//     rotated) belongs to the mockup.
+//
+// The two compose: the design is drawn inside the frame, so moving, scaling
+// or rotating the frame moves, scales or rotates the design with it.
 //
 // This module is the pure core: no DOM, no React, no IndexedDB. The preview,
-// the batch render and the print-file export all call the same functions, so
-// they are pixel-identical by construction rather than by discipline.
-//
-// Two coordinate spaces are in play:
-//
-//   * the PRINT AREA space - Printify's, centred on 0.5/0.5, `scale` is the
-//     artwork width / area width. This is what the Studio session stores.
-//   * the MOCKUP space - `Transform`, where x/y/scale are fractions of the
-//     mockup's width/height. This is what the canvas and the batch engine
-//     draw.
-//
-// `mapStudioPlacement` converts the first into the second, and
-// `studioPlacementFromTransform` converts back - the second is what a drag
-// gesture produces.
+// the batch render, the editor and the print file all call the same
+// functions, so they agree by construction rather than by discipline.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -34,16 +27,30 @@ import type {
 } from "@/types/domain";
 import type { CatalogVariant } from "@/lib/printify/types";
 
-/** A rectangle in mockup pixels. */
-export interface Rect {
+/** The frame, in mockup pixels. */
+export interface FramePixels {
+  /** The frame's centre. */
+  cx: number;
+  cy: number;
+  width: number;
+  height: number;
+  /** Degrees, clockwise. */
+  rotation: number;
+}
+
+/** A rectangle that can be rotated - the clip region. */
+export interface RotatedRect {
+  /** The centre. */
   x: number;
   y: number;
   width: number;
   height: number;
+  /** Degrees, clockwise. */
+  rotation: number;
 }
 
-/** The box on the photo, in fractions of the mockup. */
-export type AreaBox = MockupPrintArea["box"];
+/** The frame on the photo. */
+export type AreaFrame = MockupPrintArea["frame"];
 
 /** The area's height / width. */
 export function areaAspect(area: { areaWidth: number; areaHeight: number }): number {
@@ -52,86 +59,103 @@ export function areaAspect(area: { areaWidth: number; areaHeight: number }): num
 }
 
 /**
- * The box on the photo, in mockup pixels.
+ * The frame, in mockup pixels.
  *
  * The width comes from the stored fraction; the height is ALWAYS the area's
- * own aspect ratio, which is what keeps the box the same shape as the
- * Printify print area. A box can be moved and scaled, never distorted.
+ * own aspect ratio, which is what keeps the frame the same shape as the
+ * Printify print area. A frame can be moved, scaled and rotated, never
+ * distorted.
  */
-export function boxToPixels(
-  box: AreaBox,
+export function frameToPixels(
+  frame: AreaFrame,
   area: { areaWidth: number; areaHeight: number },
   mockupW: number,
   mockupH: number,
-): Rect {
-  const width = Math.max(1, box.width * mockupW);
+): FramePixels {
+  const width = Math.max(1, frame.scale * mockupW);
   const height = width * areaAspect(area);
   return {
-    x: (box.x - box.width / 2) * mockupW,
-    y: (box.y - height / mockupH / 2) * mockupH,
+    cx: frame.x * mockupW,
+    cy: frame.y * mockupH,
     width,
     height,
+    rotation: frame.rotation || 0,
   };
 }
 
 /**
- * The clip rectangle for the design, in mockup pixels.
+ * The clip region for the design: the frame's rectangle, rotated.
  *
  * Everything outside the print area is cut off: on the real product it would
  * not be printable either.
  */
-export function clipRect(
-  box: AreaBox,
+export function clipFor(
   area: { areaWidth: number; areaHeight: number },
+  frame: AreaFrame,
   mockupW: number,
   mockupH: number,
-): Rect {
-  return boxToPixels(box, area, mockupW, mockupH);
+): RotatedRect {
+  const px = frameToPixels(frame, area, mockupW, mockupH);
+  return {
+    x: px.cx,
+    y: px.cy,
+    width: px.width,
+    height: px.height,
+    rotation: px.rotation,
+  };
 }
 
 /**
- * A sensible starting box: the area centred on the upper chest, 40% of the
- * photo's width.
+ * A sensible starting frame: the area centred on the upper chest, 40% of the
+ * photo's width, not rotated.
  */
-export function defaultBox(
+export function defaultFrame(
   area: { areaWidth: number; areaHeight: number },
   mockupW: number,
   mockupH: number,
-): AreaBox {
-  const width = 0.4;
-  const height = width * mockupW * areaAspect(area);
+): AreaFrame {
+  const scale = 0.4;
+  const height = scale * mockupW * areaAspect(area);
+  const half = height / mockupH / 2;
   return {
     x: 0.5,
-    // The chest sits above the middle of a flat-lay photo.
-    y: Math.max(height / mockupH / 2 + 0.02, 0.45 - height / mockupH / 2),
-    width,
+    // The chest sits above the middle of a flat-lay photo, with a little room
+    // above it for the rotate handle.
+    y: Math.max(half + 0.06, 0.45 - half),
+    scale,
+    rotation: 0,
   };
 }
 
 /**
  * The Printify Studio's placement, expressed in the mockup's own coordinates.
  *
- * `scale` (artwork width / area width) becomes a fraction of the mockup's
- * width, and the artwork's centre lands where the Studio put it inside the
- * area. The artwork's aspect ratio is preserved - Printify scales artwork
+ * The placement is inside the area, so it is first placed in the FRAME's
+ * local space and then carried by the frame's own transform: the design's
+ * centre is rotated with the frame, and its size scales with it.
+ *
+ * The artwork's aspect ratio is preserved - Printify scales artwork
  * uniformly, so a non-uniform stretch would be a lie.
  */
 export function mapStudioPlacement(
   placement: StudioPlacement,
   area: { areaWidth: number; areaHeight: number },
-  box: AreaBox,
+  frame: AreaFrame,
   mockupW: number,
   mockupH: number,
 ): Transform {
-  const px = boxToPixels(box, area, mockupW, mockupH);
+  const px = frameToPixels(frame, area, mockupW, mockupH);
+  const rad = (px.rotation * Math.PI) / 180;
+  const localX = (placement.x - 0.5) * px.width;
+  const localY = (placement.y - 0.5) * px.height;
+  const cx = px.cx + localX * Math.cos(rad) - localY * Math.sin(rad);
+  const cy = px.cy + localX * Math.sin(rad) + localY * Math.cos(rad);
   const designWidthPx = Math.max(0.01, placement.scale) * px.width;
-  const cx = px.x + placement.x * px.width;
-  const cy = px.y + placement.y * px.height;
   return {
     x: mockupW > 0 ? cx / mockupW : 0.5,
     y: mockupH > 0 ? cy / mockupH : 0.5,
     scale: mockupW > 0 ? designWidthPx / mockupW : 0.1,
-    rotation: placement.angle,
+    rotation: px.rotation + placement.angle,
     flipX: false,
     flipY: false,
     opacity: 1,
@@ -142,28 +166,31 @@ export function mapStudioPlacement(
 /**
  * The inverse: a mockup-space transform back into the Studio's placement.
  *
- * This is what a drag in the mockups tab produces, and it is what gets
- * written back into the Studio session, so the product Printify receives and
- * the mockup the buyer sees can never disagree.
+ * The frame's own rotation and scale are taken back off, so what lands in the
+ * Studio session is the design's placement INSIDE the area - which is what
+ * Printify is told.
  */
 export function studioPlacementFromTransform(
   transform: Transform,
   area: { areaWidth: number; areaHeight: number },
-  box: AreaBox,
+  frame: AreaFrame,
   mockupW: number,
   mockupH: number,
   position: string,
 ): StudioPlacement {
-  const px = boxToPixels(box, area, mockupW, mockupH);
+  const px = frameToPixels(frame, area, mockupW, mockupH);
+  const dx = transform.x * mockupW - px.cx;
+  const dy = transform.y * mockupH - px.cy;
+  const rad = (-px.rotation * Math.PI) / 180;
+  const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+  const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
   const designWidthPx = transform.scale * mockupW;
-  const cx = transform.x * mockupW;
-  const cy = transform.y * mockupH;
   return {
     position,
-    x: px.width > 0 ? (cx - px.x) / px.width : 0.5,
-    y: px.height > 0 ? (cy - px.y) / px.height : 0.5,
+    x: px.width > 0 ? localX / px.width + 0.5 : 0.5,
+    y: px.height > 0 ? localY / px.height + 0.5 : 0.5,
     scale: px.width > 0 ? designWidthPx / px.width : 0.5,
-    angle: transform.rotation,
+    angle: transform.rotation - px.rotation,
   };
 }
 
@@ -236,8 +263,8 @@ export function pixelsPerInch(linePixels: number, inches: number): number {
  * The print area's real size on the garment, in inches.
  *
  * The area's pixel size is a PRINT resolution, not a photo measurement, so
- * the physical size comes from the box on the photo: how big the box is in
- * photo pixels, converted through the reference.
+ * the physical size comes from the frame on the photo: how big the frame is
+ * in photo pixels, converted through the reference.
  */
 export function areaInches(
   area: MockupPrintArea,
@@ -246,7 +273,7 @@ export function areaInches(
 ): { width: number; height: number } | null {
   const ppi = area.reference?.pixelsPerInch ?? 0;
   if (!ppi) return null;
-  const px = boxToPixels(area.box, area, mockupW, mockupH);
+  const px = frameToPixels(area.frame, area, mockupW, mockupH);
   return { width: px.width / ppi, height: px.height / ppi };
 }
 
@@ -284,7 +311,7 @@ export function printAreaTemplateFrom(area: MockupPrintArea): PrintAreaTemplateP
     areaHeight: area.areaHeight,
     source: area.source,
     label: area.label,
-    box: { ...area.box },
+    frame: { ...area.frame },
     reference: area.reference ? { ...area.reference } : undefined,
     clipMode: area.clipMode,
   };
@@ -293,7 +320,7 @@ export function printAreaTemplateFrom(area: MockupPrintArea): PrintAreaTemplateP
 /**
  * Applies a template to a mockup.
  *
- * The box travels as a FRACTION of the photo, so a template written on one
+ * The frame travels as a FRACTION of the photo, so a template written on one
  * mockup lands in the same relative spot on another.
  */
 export function printAreaFromTemplate(payload: PrintAreaTemplatePayload): MockupPrintArea {
@@ -302,7 +329,7 @@ export function printAreaFromTemplate(payload: PrintAreaTemplatePayload): Mockup
     areaHeight: payload.areaHeight,
     source: payload.source,
     label: payload.label,
-    box: { ...payload.box },
+    frame: { ...payload.frame },
     reference: payload.reference ? { ...payload.reference } : undefined,
     clipMode: payload.clipMode,
     updatedAt: Date.now(),
@@ -312,7 +339,7 @@ export function printAreaFromTemplate(payload: PrintAreaTemplatePayload): Mockup
 /** A one-line description of a template, for the template list. */
 export function describePrintAreaTemplate(payload: PrintAreaTemplatePayload): string {
   const source =
-    payload.source.kind === "printify"
+    payload.source.kind === "studio"
       ? `Printify · ${payload.source.position}`
       : payload.source.kind === "preset"
         ? "Preset"
@@ -320,9 +347,77 @@ export function describePrintAreaTemplate(payload: PrintAreaTemplatePayload): st
   return `${source} · ${payload.areaWidth}×${payload.areaHeight}`;
 }
 
-/** The source's short label, for the mockup list badges. */
-export function describePrintAreaSource(source: PrintAreaSource): string {
-  if (source.kind === "printify") return source.position;
-  if (source.kind === "preset") return "preset";
-  return "manual";
+// ---------------------------------------------------------------------------
+// Reading a stored area.
+// ---------------------------------------------------------------------------
+
+/**
+ * The print area of a mockup, normalised.
+ *
+ * Every read of a mockup's area goes through this, so an area stored in the
+ * old shape is upgraded on the way in.
+ */
+export function printAreaOf(mockup: { printArea?: unknown }): MockupPrintArea | undefined {
+  return normalisePrintArea(mockup.printArea);
+}
+
+/**
+ * Normalises a stored print area.
+ *
+ * The frame replaced an axis-aligned `box`, and the `studio` source replaced
+ * `printify`. A browser that already used the feature keeps its setup: the
+ * old box becomes a frame with no rotation, and the old source becomes a
+ * studio source (the same blueprint, provider and position).
+ */
+export function normalisePrintArea(value: unknown): MockupPrintArea | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<MockupPrintArea> & {
+    box?: { x: number; y: number; width: number };
+    source?: PrintAreaSource | { kind: "printify"; blueprintId: number; printProviderId: number; position: string };
+  };
+  if (!raw.areaWidth || !raw.areaHeight) return undefined;
+
+  const frame: AreaFrame | undefined = raw.frame
+    ? {
+        x: raw.frame.x ?? 0.5,
+        y: raw.frame.y ?? 0.5,
+        scale: raw.frame.scale ?? 0.4,
+        rotation: raw.frame.rotation ?? 0,
+      }
+    : raw.box
+      ? { x: raw.box.x, y: raw.box.y, scale: raw.box.width, rotation: 0 }
+      : undefined;
+  if (!frame) return undefined;
+
+  let source: PrintAreaSource = { kind: "manual" };
+  const rawSource = raw.source as PrintAreaSource | undefined;
+  if (rawSource && rawSource.kind === "studio") {
+    source = rawSource;
+  } else if (rawSource && rawSource.kind === "preset") {
+    source = rawSource;
+  } else if (rawSource && (rawSource as unknown as { kind: string }).kind === "printify") {
+    const legacy = rawSource as unknown as {
+      kind: "printify";
+      blueprintId: number;
+      printProviderId: number;
+      position: string;
+    };
+    source = {
+      kind: "studio",
+      blueprintId: legacy.blueprintId,
+      printProviderId: legacy.printProviderId,
+      position: legacy.position,
+    };
+  }
+
+  return {
+    areaWidth: raw.areaWidth,
+    areaHeight: raw.areaHeight,
+    source,
+    label: raw.label ?? "Print area",
+    frame,
+    reference: raw.reference ? { ...raw.reference } : undefined,
+    clipMode: raw.clipMode ?? "area",
+    updatedAt: raw.updatedAt ?? Date.now(),
+  };
 }

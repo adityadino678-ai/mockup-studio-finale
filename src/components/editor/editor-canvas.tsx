@@ -4,8 +4,7 @@ import * as React from "react";
 import { Stage, Layer, Image as KonvaImage, Transformer, Rect, Group } from "react-konva";
 import type Konva from "konva";
 import type { MockupPrintArea, Transform } from "@/types/domain";
-import { boxToPixels } from "@/lib/mockups/print-area";
-
+import { clipFor } from "@/lib/mockups/print-area";
 interface EditorCanvasProps {
   mockupUrl: string;
   mockupW: number;
@@ -146,6 +145,33 @@ export function EditorCanvas({
     transformer.keepRatio(lockAspect);
   }, [lockAspect]);
 
+  // The print area, in mockup pixels. The design is clipped to it, and the
+  // area is drawn as a guide - the guide is never part of a render.
+  const areaRect = printArea
+    ? clipFor(printArea, printArea.frame, mockupW, mockupH)
+    : null;
+
+  /**
+   * The clip, as a path.
+   *
+   * Konva clips a node in its own coordinate space, and a clip on the
+   * artwork would rotate with the artwork. The area's frame, though, has its
+   * own rotation, so the path is built by hand: the frame's rectangle,
+   * turned around its centre.
+   */
+  const clipPath = React.useCallback(
+    (ctx: Konva.Context) => {
+      if (!areaRect) return;
+      const rad = ((areaRect.rotation || 0) * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(areaRect.x, areaRect.y);
+      ctx.rotate(rad);
+      ctx.rect(-areaRect.width / 2, -areaRect.height / 2, areaRect.width, areaRect.height);
+      ctx.restore();
+    },
+    [areaRect],
+  );
+
   if (!mockupImg || !designImg) {
     return (
       <div
@@ -203,22 +229,13 @@ export function EditorCanvas({
     />
   );
 
-  // The print area, in mockup pixels. The design is clipped to it, so what
-  // is on the canvas is what the product gets.
-  const areaRect = printArea
-    ? boxToPixels(printArea.box, printArea, mockupW, mockupH)
-    : null;
 
-  // The clip lives on a Group around the artwork: Konva clips a group's
-  // children in the group's own coordinate space, which is the canvas space
-  // here because the group is not transformed.
+
+  // The clip lives on a Group around the artwork: a group clips its children
+  // in the group's own coordinate space, which is the canvas space here
+  // because the group is not transformed.
   const artwork = areaRect ? (
-    <Group
-      clipX={areaRect.x}
-      clipY={areaRect.y}
-      clipWidth={areaRect.width}
-      clipHeight={areaRect.height}
-    >
+    <Group clipFunc={clipPath}>
       {designNode}
     </Group>
   ) : (
@@ -231,6 +248,9 @@ export function EditorCanvas({
       y={areaRect.y}
       width={areaRect.width}
       height={areaRect.height}
+      offsetX={areaRect.width / 2}
+      offsetY={areaRect.height / 2}
+      rotation={areaRect.rotation || 0}
       stroke="#314d3d"
       strokeWidth={1.5 / displayScale}
       dash={[6 / displayScale, 4 / displayScale]}

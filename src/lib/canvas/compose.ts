@@ -6,6 +6,8 @@ export interface ClipRect {
   y: number;
   width: number;
   height: number;
+  /** Degrees, clockwise. The print area's frame can be rotated. */
+  rotation?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,10 +67,18 @@ export function drawPlacement(
   ctx.globalAlpha = Math.max(0, Math.min(1, t.opacity));
   // The clip is applied in CANVAS space, before the design's own transform, so
   // the cut follows the print area on the mockup and not the artwork's angle.
+  // The area's frame can be rotated, so the path is turned around its centre -
+  // and the transform is put back afterwards, or the design would be drawn
+  // turned with it.
   if (clip) {
+    const rad = ((clip.rotation ?? 0) * Math.PI) / 180;
     ctx.beginPath();
-    ctx.rect(clip.x, clip.y, clip.width, clip.height);
+    ctx.translate(clip.x, clip.y);
+    if (rad) ctx.rotate(rad);
+    ctx.rect(-clip.width / 2, -clip.height / 2, clip.width, clip.height);
     ctx.clip();
+    ctx.translate(-clip.x, -clip.y);
+    if (rad) ctx.rotate(-rad);
   }
   ctx.translate(cx, cy);
   if (t.rotation % 360 !== 0) {

@@ -83,22 +83,31 @@ export interface Mockup {
 /**
  * Where a print area's size came from.
  *
- * `printify` is the authoritative one: the real placeholder size of a
- * blueprint + print provider + position. `preset` and `manual` are the
- * fallbacks for when there is no Printify key.
+ * `studio` is the authoritative one: the real placeholder size of the product
+ * selected in the Printify Studio. `preset` and `manual` are the fallbacks
+ * for when there is no product, or when the user wants a typical size for the
+ * mockup's category instead.
  */
 export type PrintAreaSource =
-  | { kind: "printify"; blueprintId: number; printProviderId: number; position: string }
+  | {
+      kind: "studio";
+      blueprintId: number;
+      printProviderId: number;
+      position: string;
+      /** The decoration method, when the provider reports one. */
+      method?: string;
+    }
   | { kind: "preset"; presetId: string }
   | { kind: "manual" };
 
 /**
  * A print area on a mockup photo.
  *
- * The box is stored in FRACTIONS of the mockup, so it survives a resize and
- * can be copied to another mockup as a template. Its height is never stored:
- * it is always the area's own aspect ratio, which is what makes the box the
- * same shape as the Printify print area.
+ * It is a FRAME on the photo that the design is attached to: the design's
+ * placement inside the area belongs to the Printify Studio, and the frame's
+ * own transform (where it sits, how big, how rotated) belongs to the mockup.
+ * Moving, scaling or rotating the frame moves, scales or rotates the design
+ * with it.
  */
 export interface MockupPrintArea {
   /** The print area's real size, in Printify pixels. */
@@ -107,8 +116,15 @@ export interface MockupPrintArea {
   source: PrintAreaSource;
   /** Display name, e.g. "Front (DTG)". */
   label: string;
-  /** The box on the photo. `x`/`y` are the box's centre, `width` its width. */
-  box: { x: number; y: number; width: number };
+  /**
+   * The frame on the photo.
+   *
+   * `x`/`y` are the frame's centre as fractions of the photo, `scale` is its
+   * width as a fraction of the photo's width, and `rotation` is in degrees.
+   * The frame's HEIGHT is never stored: it is always the area's own aspect
+   * ratio, so the frame stays the same shape as the Printify print area.
+   */
+  frame: { x: number; y: number; scale: number; rotation: number };
   /**
    * The garment reference: a real-world measurement of the photo, so the
    * app can report the design's printed size in inches. Optional.
@@ -308,7 +324,7 @@ export interface PrintAreaTemplatePayload {
   areaHeight: number;
   source: PrintAreaSource;
   label: string;
-  box: { x: number; y: number; width: number };
+  frame: MockupPrintArea["frame"];
   reference?: MockupPrintArea["reference"];
   clipMode: "area" | "behind-garment";
 }

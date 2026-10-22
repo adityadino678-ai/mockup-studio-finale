@@ -303,60 +303,101 @@ The Mockups page has two tabs in its upper section: `Mockups` (the library)
 and `Print areas`. A **print area** maps a REAL Printify print area onto a
 mockup photo, so the mockup shows what the product actually gets.
 
-- `src/lib/mockups/print-area.ts` is the pure core: the box maths, the
-  mapping between Printify's placement and the mockup's `Transform`, the
-  area list derived from the catalogue, the physical sizes, and the template
-  payload. No DOM, no React, no IndexedDB - so it is unit-tested on its own.
-- `src/components/mockups/print-area-editor.tsx` draws the box on the photo
-  and the artwork inside it. `src/views/mockups/print-areas-tab.tsx` is the
-  screen; the editor canvas clips with a Konva `Group` and the batch/export
-  compositor clips with `ctx.rect(...)` + `ctx.clip()`.
+- `src/lib/mockups/print-area.ts` is the pure core: the frame maths, the
+  composed mapping between Printify's placement and the mockup's `Transform`,
+  the area list derived from the catalogue, the physical sizes, and the
+  template payload. No DOM, no React, no IndexedDB - so it is unit-tested on
+  its own.
+- `src/components/mockups/print-area-canvas.tsx` is the Konva canvas (lazy
+  loaded). `src/views/mockups/print-areas-tab.tsx` is the screen.
 
-**The Printify Studio owns the design's placement. The mockup owns the area.**
+**The print area is a FRAME that carries the design.**
 That is the whole design, and it is deliberate:
 
-- The area is a real Printify print area: the catalogue (blueprint → print
-  provider → position) gives its exact pixel size, with named presets and a
-  manual W x H as the fallback when there is no Printify key. Printify's
-  placeholder size is per variant, so the **smallest** placeholder for a
-  position is used - a design sized against it never exceeds the real area.
-- The box's aspect is ALWAYS the area's aspect. It is stored as fractions of
-  the photo (`x`, `y` = centre, `width`), so it survives a resize and travels
-  to another mockup as a template.
-- The artwork inside the box is placed by the Studio's own numbers (`scale` =
-  artwork width / area width, `x`/`y` = the artwork's CENTRE in the area).
-  **The mockups tab does not invent a placement.** Dragging the artwork there
-  writes a per-design override back into the Studio session, so the mockup
-  the buyer sees and the product Printify prints cannot disagree.
-- For a mockup WITH an area, the Studio placement wins over a saved
-  placement, in the editor and in the batch. Without an area, nothing about
-  the old behaviour changed.
-- **The design is clipped to the area** - in the editor preview, in every
-  batch render and in the export. The part of the artwork that falls outside
-  the printable area is not on the product either. Two acceptance tests prove
-  it at the pixel level (`e2e/workflow.spec.ts`).
-- A print-area **template** carries the area spec, the garment reference and
-  the box position as a fraction of the photo - not the design placement,
-  which belongs to the Studio. Apply it from `Mockups → Print areas` by
-  ticking the target mockups.
-- The optional **garment reference** (a line drawn across the garment, typed
-  in inches) turns the photo into a scale, and the app can then report the
-  design's printed size in inches.
+- The frame is moveable, uniformly scalable and rotatable on the photo. The
+  design sits INSIDE the frame in the frame's local space, so moving,
+  scaling or rotating the frame moves, scales and rotates the design with it.
+- **The design is NOT moveable in the mockups tab.** Its placement belongs to
+  the Printify Studio: `StudioPlacement.scale` = artwork width / area width,
+  `x`/`y` = the artwork's CENTRE in the area, `angle` = its rotation. Nudge
+  it in the Studio, not here.
+- The frame's transform is **staging only**: it is the garment's pose on the
+  photo. It changes no product and no print file - `print-file.ts` renders
+  from the Studio placement alone.
+- The frame's aspect is ALWAYS the area's aspect. It is stored as fractions of
+  the photo (`x`, `y` = centre, `scale` = width / photo width, `rotation` in
+  degrees), so it survives a resize and travels as a template.
+- The frame's rotation composes with the Studio's angle: the drawn rotation
+  is `frame.rotation + placement.angle`. `studioPlacementFromTransform` takes
+  the frame back off when the editor writes to the Studio session.
+- **The design is clipped to the frame** - in the preview, the editor, every
+  batch render and the export. Cut is `clipFor(...)` -> a centre + size +
+  rotation, consumed by `compose.ts` (`translate -> rotate -> rect -> clip`)
+  and by the editor's Konva `clipFunc`.
+
+**The right-hand panel is deliberately small.** The mockup's TYPE is already
+known from the Mockups tab, so there are no blueprint / print provider /
+position pickers here:
+
+- **Print area**: the size and aspect, where it came from ("The Studio's
+  product · front", a preset, or custom), a `Use the Studio's area` button
+  that reads the exact catalogue placeholder of the product selected in the
+  Studio, and a `Typical size for a T-shirt / hoodie / mug ...` dropdown
+  driven by the mockup's category (`src/lib/mockups/categories.ts`,
+  `presetsForCategory`). Exact size wins over typical size.
+- **Garment reference**: collapsed until asked for. A line drawn across the
+  garment plus a real width in inches gives the photo a scale, and the app
+  reports the area's and the design's printed size in inches.
+- **Compositing**: clip to area, or draw under a transparent mockup PNG.
+- **Reuse**: print-area templates and the print-file export.
+- `Set as the placeholder for all designs` drops the per-design Studio
+  overrides, so every design lands at the Studio's universal placement.
 
 **Traps in this feature:**
 
-- The clip in Konva must live on a `Group` around the artwork. A clip on the
-  artwork itself rotates with it. And a `Group` parent makes Konva bound the
-  drag to the group's client rect - the artwork's own bounds - so the
-  artwork would be pinned in place. The node needs an explicit
-  `dragBoundFunc={(pos) => pos}`.
+- **Konva's pointer is in CANVAS pixels, not mockup pixels.** The stage is
+  scaled down to fit the panel, so every pointer reading must be divided by
+  `displayScale` before it is compared with anything in the mockup's space.
+  This bug made the rotate handle jump and the measure line miss.
+- **Konva's `Transformer` is what makes the frame draggable,** so its
+  `shouldOverdrawWholeArea` overlay sits on top of the artwork and swallows
+  the artwork's own click. The chrome toggle is therefore handled at the
+  STAGE level: a click whose target is the stage hides the chrome, anything
+  else shows it. A click handler on the artwork never fires.
+- **The rotate handle is ours, not the Transformer's.** `rotateEnabled` is
+  off; a `Circle` above the frame's edge (26 screen px, i.e. `26 /
+  displayScale` stage units) turns the group around its centre. Konva's own
+  rotate anchor is a wedge that is fiddly to hit in a test and in the hand.
+- **The handle must stay on the photo.** Above the frame's top edge is the
+  default, but when that lands off the canvas (a short mockup, a frame near
+  the top) it flips below the bottom edge. It was drawn off-canvas once and
+  was invisible and unclickable.
+- **`compose.ts`'s clip rectangle is CENTRE-based,** like `clipFor`. When it
+  was briefly treated as a top-left, the design was cut to a quarter of the
+  area. The path restores the canvas transform after `clip()`, or the design
+  is drawn rotated by the clip.
+- **react-konva re-applies props on every render.** The group's position,
+  rotation and scale, the artwork's geometry and the handle's position are
+  all set IMPERATIVELY; only committed values (the frame's size) come from
+  props. A prop on a dragged node snaps it back.
+- **A Konva clip on a `Group` clips in the group's local space,** which is
+  what makes the frame's clip turn with the frame. The editor needs a
+  rotated, centre-based clip too, so it uses `clipFunc` on an untransformed
+  group - the artwork keeps its composed transform and the Store stays right.
 - The design's pixel size is NOT needed for the mapping: Printify scales
   artwork uniformly, and the renderer preserves the artwork's own aspect.
-  Only the area's size and the box matter.
+  Only the area's size and the frame matter.
 - `StudioPlacement.scale` may exceed 1 (the artwork is wider than the area
   and gets cropped). The Studio's width slider used to stop at 100% and had
   to be raised to 200%, or the mockups tab could set something the Studio
   could not show.
+- **A new lazy chunk means a stale Vite optimiser.** Adding
+  `print-area-canvas.tsx` as `React.lazy` gave `504 (Outdated Optimize Dep)`
+  and the whole React tree unmounted (a blank page). Restart the dev server
+  and delete `node_modules/.vite`; a cold cache then reloads once per
+  discovered dep, so warm the routes before trusting a first e2e run. The
+  suite only passed reliably with a server started outside Playwright and
+  left running (`reuseExistingServer: true`).
 
 ## Traps that will bite you again
 

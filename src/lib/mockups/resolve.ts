@@ -3,8 +3,8 @@
 //
 // One rule, used everywhere:
 //
-//   A mockup WITH a print area  -> the Printify Studio's placement, mapped
-//                                  into the mockup and clipped to the area.
+//   A mockup WITH a print area  -> the Printify Studio's placement, carried
+//                                  by the mockup's frame and clipped to it.
 //   A mockup WITHOUT one         -> the saved placement, the batch's
 //                                  placement template, or the default.
 //
@@ -13,14 +13,8 @@
 // ---------------------------------------------------------------------------
 
 import { loadSession, placementFor, saveSession } from "@/lib/printify/studio-session";
-import { mapStudioPlacement, studioPlacementFromTransform } from "@/lib/mockups/print-area";
-import type {
-  Mockup,
-  MockupPrintArea,
-  StudioPlacement,
-  StudioSession,
-  Transform,
-} from "@/types/domain";
+import { mapStudioPlacement, printAreaOf, studioPlacementFromTransform } from "@/lib/mockups/print-area";
+import type { Mockup, MockupPrintArea, StudioPlacement, StudioSession, Transform } from "@/types/domain";
 
 /** The Studio placement that applies to a design. */
 export async function studioPlacementForDesign(
@@ -34,21 +28,23 @@ export async function studioPlacementForDesign(
 /**
  * The transform for a design on a mockup, when the mockup has a print area.
  *
- * Returns null when the mockup has no area, or when the artwork's size is
- * unknown - in both cases the caller falls back to its own rules.
+ * The frame's own transform is included: the design is carried by it.
+ *
+ * Returns null when the mockup has no area - in that case the caller falls
+ * back to its own rules.
  */
 export async function transformFromPrintArea(params: {
   designId: string;
   mockup: Mockup;
   session?: StudioSession;
 }): Promise<Transform | null> {
-  const area = params.mockup.printArea;
+  const area = printAreaOf(params.mockup);
   if (!area) return null;
   const placement = await studioPlacementForDesign(params.designId, params.session);
   return mapStudioPlacement(
     placement,
     area,
-    area.box,
+    area.frame,
     params.mockup.width,
     params.mockup.height,
   );
@@ -79,10 +75,11 @@ export async function writeBackStudioPlacement(
 }
 
 /**
- * The Studio placement for a transform the user dragged in the mockups tab.
+ * The Studio placement for a transform the user dragged in the editor.
  *
  * The inverse of `mapStudioPlacement`, so the numbers that go back into the
- * Studio are exactly the ones the preview was drawn from.
+ * Studio are exactly the ones the preview was drawn from - the frame's own
+ * rotation and scale are taken back off.
  */
 export function placementForTransform(params: {
   transform: Transform;
@@ -94,7 +91,7 @@ export function placementForTransform(params: {
   return studioPlacementFromTransform(
     params.transform,
     params.area,
-    params.area.box,
+    params.area.frame,
     params.mockupW,
     params.mockupH,
     params.position,

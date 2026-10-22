@@ -9,7 +9,7 @@ import {
 } from "@/lib/db/repo";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
 import { composeToCanvas } from "@/lib/canvas/compose";
-import { clipRect } from "@/lib/mockups/print-area";
+import { clipFor, printAreaOf } from "@/lib/mockups/print-area";
 import { transformFromPrintArea } from "@/lib/mockups/resolve";
 import {
   DEFAULT_TRANSFORM,
@@ -64,9 +64,9 @@ export async function renderComposition(params: {
     const canvas = document.createElement("canvas");
     // A mockup with a print area clips the design to it: whatever falls
     // outside the printable area is not on the product either.
-    const area = mockup.printArea;
+    const area = printAreaOf(mockup);
     const clip = area
-      ? clipRect(area.box, area, mockup.width, mockup.height)
+      ? clipFor(area, area.frame, mockup.width, mockup.height)
       : undefined;
     const composed = composeToCanvas(canvas, mockupBmp, designBmp, params.transform, {
       drawDesignFirst: params.behindMockup ?? area?.clipMode === "behind-garment",
@@ -115,7 +115,7 @@ async function resolveTransform(
   // mockup and the product cannot disagree. It wins over a saved placement
   // for the same reason.
   const mockup = await db.mockups.get(mockupId);
-  if (mockup?.printArea) {
+  if (mockup && printAreaOf(mockup)) {
     const fromStudio = await transformFromPrintArea({ designId, mockup });
     if (fromStudio) return { transform: fromStudio };
   }

@@ -8,7 +8,7 @@ import { db } from "@/lib/db/schema";
 import { getAssetBlob, getPlacement, savePlacement, storeAsset } from "@/lib/db/repo";
 import { sanitizeFilename, decodeImage, canvasToBlob } from "@/lib/image/image";
 import { composeToCanvas } from "@/lib/canvas/compose";
-import { clipRect } from "@/lib/mockups/print-area";
+import { clipFor, printAreaOf } from "@/lib/mockups/print-area";
 import { transformFromPrintArea, writeBackStudioPlacement } from "@/lib/mockups/resolve";
 import { placementForTransform } from "@/lib/mockups/resolve";
 import { loadSession } from "@/lib/printify/studio-session";
@@ -143,7 +143,8 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
       // mockup and the product cannot disagree. It wins over a saved
       // placement for the same reason.
       let transform: Transform = existing ? { ...existing.transform } : { ...DEFAULT_TRANSFORM };
-      if (m.printArea) {
+      const area = printAreaOf(m);
+      if (area) {
         const fromStudio = await transformFromPrintArea({
           designId,
           mockup: m,
@@ -154,7 +155,7 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
       const snapshot: EditorSnapshot = {
         designAssetId,
         transform,
-        behindMockup: existing?.behindMockup ?? m.printArea?.clipMode === "behind-garment",
+        behindMockup: existing?.behindMockup ?? area?.clipMode === "behind-garment",
       };
       const savedSnap: EditorSnapshot | null = existing
         ? { designAssetId: existing.designAssetId, transform: { ...existing.transform }, behindMockup: existing.behindMockup ?? false }
@@ -243,13 +244,16 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
 
   const handleSave = async () => {
     if (!current) return;
+    const area = printAreaOf(mockup);
     // With a print area, the Studio owns the placement: saving writes the
-    // new numbers back into the Studio session, for this design.
-    if (mockup.printArea) {
+    // new numbers back into the Studio session, for this design. The frame's
+    // own rotation and scale are taken back off, because they belong to the
+    // mockup, not to the product.
+    if (area) {
       const session = await loadSession();
       const placement = placementForTransform({
         transform: current.transform,
-        area: mockup.printArea,
+        area,
         mockupW: mockup.width,
         mockupH: mockup.height,
         position: session.universalPlacement.position,
@@ -307,11 +311,12 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
     const canvas = document.createElement("canvas");
     // A mockup with a print area clips the design to it, exactly like the
     // product does.
-    const clip = mockup.printArea
-      ? clipRect(mockup.printArea.box, mockup.printArea, mockup.width, mockup.height)
+    const area = printAreaOf(mockup);
+    const clip = area
+      ? clipFor(area, area.frame, mockup.width, mockup.height)
       : undefined;
     const result = composeToCanvas(canvas, mockupBmp, designBmp, current.transform, {
-      drawDesignFirst: current.behindMockup || mockup.printArea?.clipMode === "behind-garment",
+      drawDesignFirst: current.behindMockup || area?.clipMode === "behind-garment",
       clip,
     });
     mockupBmp.close();
@@ -530,7 +535,7 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
               lockAspect={lockAspect}
               selected={selected}
               zoom={zoom}
-              printArea={mockup.printArea}
+              printArea={printAreaOf(mockup)}
               onTransformChange={(t) => setTransform(t, false)}
               onCommit={() => commit()}
               onSelect={setSelected}

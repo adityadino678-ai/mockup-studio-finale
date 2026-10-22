@@ -16,6 +16,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { PrintAreasTab } from "@/views/mockups/print-areas-tab";
+import { CATEGORY_LABELS } from "@/lib/mockups/categories";
 import {
   Dialog,
   DialogContent,
@@ -47,15 +48,6 @@ import {
   Trash2,
 } from "lucide-react";
 
-const CATEGORY_LABELS: Record<MockupCategory, string> = {
-  tshirt: "T-shirts",
-  hoodie: "Hoodies",
-  mug: "Mugs",
-  poster: "Posters",
-  tote: "Tote bags",
-  sticker: "Stickers",
-  other: "Other",
-};
 
 export function MockupsPage() {
   const router = useRouter();

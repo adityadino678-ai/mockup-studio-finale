@@ -776,9 +776,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
     await expect(page.getByText("4500 × 5400 px")).toBeVisible({ timeout: 10_000 });
-
-    // The area is drawn on the mockup.
-    await expect(page.getByText(/Tee · DTG front · 4500 × 5400/)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Tee · DTG front", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // Saving it stores it on the mockup, and it is still there after a reload.
     await page.getByRole("button", { name: /^Save$/ }).click();
@@ -818,11 +816,11 @@ test.describe("core workflow", () => {
     await expect(canvas).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1500);
 
-    // The area is 4500 x 5400 on a 1200 x 1200 photo, centred at 50% / 26%,
-    // and the design is 200% of the area's width = 80% of the photo.
+    // The area is 4500 x 5400 on a 1200 x 1200 photo; the frame sits at 50% /
+    // 30% of the photo and the design is 200% of the area's width = 80% of it.
     const fields = page.getByRole("spinbutton");
     await expect(fields.nth(0)).toHaveValue("50");
-    await expect(fields.nth(1)).toHaveValue("26");
+    await expect(fields.nth(1)).toHaveValue("30");
     await expect(fields.nth(2)).toHaveValue("80");
 
     // The design is clipped to the area: the painted red is the AREA's shape
@@ -905,7 +903,7 @@ test.describe("core workflow", () => {
         const rq = db.transaction(["blobs"], "readonly").objectStore("blobs").get(metas[0].id);
         rq.onsuccess = () => res(rq.result.blob);
       });
-      const mockups: Array<{ width: number; height: number; printArea?: { box: { x: number; y: number; width: number }; areaWidth: number; areaHeight: number } }> =
+      const mockups: Array<{ width: number; height: number; printArea?: { frame: { x: number; y: number; scale: number; rotation: number }; areaWidth: number; areaHeight: number } }> =
         await new Promise((res) => {
           const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
           rq.onsuccess = () => res(rq.result);
@@ -921,11 +919,11 @@ test.describe("core workflow", () => {
       const mockup = mockups.find((m) => m.printArea);
       if (!mockup) return { found: false as const, reason: "no print area" };
       const area = mockup.printArea!;
-      // The area's box in photo pixels.
-      const areaW = area.box.width * mockup.width;
+      // The area's frame in photo pixels.
+      const areaW = area.frame.scale * mockup.width;
       const areaH = areaW * (area.areaHeight / area.areaWidth);
-      const areaX = (area.box.x - area.box.width / 2) * mockup.width;
-      const areaY = (area.box.y - areaH / mockup.height / 2) * mockup.height;
+      const areaX = (area.frame.x - area.frame.scale / 2) * mockup.width;
+      const areaY = (area.frame.y - areaH / mockup.height / 2) * mockup.height;
       const areaCY = areaY + areaH / 2;
       return {
         found: true as const,
@@ -949,6 +947,178 @@ test.describe("core workflow", () => {
       // Just outside it: NOT the design's red - it was cut off.
       expect(samples.justOutside[0]).toBeLessThan(samples.justOutside[2] + 50);
     }
+  });
+
+  test("27. the print area is a frame that carries the design", async ({ page }) => {
+    await seedLibrary(page);
+
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1200);
+
+    const canvas = page.locator("canvas").first();
+    await expect(canvas).toBeVisible({ timeout: 30_000 });
+
+    const readFrame = () =>
+      page.evaluate(async () => {
+        const db: IDBDatabase = await new Promise((res) => {
+          const r = indexedDB.open("mockup-studio");
+          r.onsuccess = () => res(r.result);
+        });
+        const mockups: Array<{ printArea?: { frame: { x: number; y: number; scale: number; rotation: number } } }> =
+          await new Promise((res) => {
+            const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+            rq.onsuccess = () => res(rq.result);
+          });
+        return mockups.find((m) => m.printArea)?.printArea?.frame;
+      });
+
+    const before = await readFrame();
+    expect(before).toBeTruthy();
+    expect(before!.rotation).toBe(0);
+
+    // The frame is turned by its own handle, above the frame's edge.
+    const geometry = await page.evaluate(() => {
+      const el = document.querySelector("canvas") as HTMLCanvasElement;
+      const wrapper = el.parentElement!.parentElement!;
+      const r = wrapper.getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    });
+
+    const state = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const mockups: Array<{ width: number; height: number; printArea?: { frame: { x: number; y: number; scale: number; rotation: number }; areaWidth: number; areaHeight: number } }> =
+        await new Promise((res) => {
+          const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+          rq.onsuccess = () => res(rq.result);
+        });
+      return mockups.find((m) => m.printArea)!;
+    });
+
+    const stageScale = geometry.width / state.width;
+    const frame = state.printArea!.frame;
+    const cx = geometry.left + frame.x * state.width * stageScale;
+
+    // The rotate handle is the only white thing on the frame's layer: find it
+    // rather than compute where it should be.
+    const handle = await page.evaluate(() => {
+      const layers = document.querySelectorAll("canvas");
+      const el = layers[1] as HTMLCanvasElement;
+      const ctx = el.getContext("2d")!;
+      const d = ctx.getImageData(0, 0, el.width, el.height).data;
+      let n = 0;
+      let sx = 0;
+      let sy = 0;
+      for (let y = 0; y < el.height; y++) {
+        for (let x = 0; x < el.width; x++) {
+          const i = (y * el.width + x) * 4;
+          if (d[i] > 250 && d[i + 1] > 250 && d[i + 2] > 250 && d[i + 3] > 250) {
+            n++;
+            sx += x;
+            sy += y;
+          }
+        }
+      }
+      if (!n) return null;
+      const rect = el.getBoundingClientRect();
+      return { x: rect.left + sx / n, y: rect.top + sy / n };
+    });
+    expect(handle).toBeTruthy();
+    const handleX = handle!.x;
+    const handleY = handle!.y;
+    expect(Math.abs(handleX - cx)).toBeLessThan(30);
+
+    await page.mouse.move(handleX, handleY);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) {
+      const a = (i / 10) * (Math.PI / 4);
+      await page.mouse.move(
+        handleX + Math.sin(a) * 110,
+        handleY + (1 - Math.cos(a)) * 110,
+      );
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(600);
+
+    // The frame turned, and the turn is saved with it.
+    await expect(page.getByText(/Frame \d+% of the photo/)).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    const after = await readFrame();
+    expect(Math.abs(after!.rotation)).toBeGreaterThan(20);
+
+    // Clicking the empty photo hides the frame's chrome; the design stays.
+    // The chrome is the dashed outline AND the Transformer: the Transformer
+    // lives outside the frame's group, so detaching its nodes is what stops
+    // its border and its four corner anchors from being left on the design.
+    const designInk = () =>
+      page.evaluate(() => {
+        const layers = document.querySelectorAll("canvas");
+        const frameLayer = layers[1];
+        const ctx = frameLayer.getContext("2d")!;
+        const d = ctx.getImageData(0, 0, frameLayer.width, frameLayer.height).data;
+        let reds = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] > 150 && d[i + 1] < 90 && d[i + 2] < 90) reds++;
+        }
+        return reds;
+      });
+    const chromeInk = () =>
+      page.evaluate(() => {
+        const layers = document.querySelectorAll("canvas");
+        const chromeLayer = layers[2];
+        if (!chromeLayer) return -1;
+        const ctx = chromeLayer.getContext("2d")!;
+        const d = ctx.getImageData(0, 0, chromeLayer.width, chromeLayer.height).data;
+        let painted = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 8) painted++;
+        return painted;
+      });
+
+    expect(await designInk()).toBeGreaterThan(1000);
+    expect(await chromeInk()).toBeGreaterThan(0);
+
+    await page.mouse.click(geometry.left + 8, geometry.top + 8);
+    await page.waitForTimeout(500);
+    expect(await chromeInk()).toBe(0);
+    expect(await designInk()).toBeGreaterThan(1000);
+
+    // Clicking the design itself brings the chrome back.
+    const design = await page.evaluate(() => {
+      const el = document.querySelectorAll("canvas")[1] as HTMLCanvasElement;
+      const d = el.getContext("2d")!.getImageData(0, 0, el.width, el.height).data;
+      let n = 0;
+      let sx = 0;
+      let sy = 0;
+      for (let y = 0; y < el.height; y++) {
+        for (let x = 0; x < el.width; x++) {
+          const i = (y * el.width + x) * 4;
+          if (d[i] > 150 && d[i + 1] < 90 && d[i + 2] < 90) {
+            n++;
+            sx += x;
+            sy += y;
+          }
+        }
+      }
+      if (!n) return null;
+      const rect = el.getBoundingClientRect();
+      return {
+        x: rect.left + (sx / n) * (rect.width / el.width),
+        y: rect.top + (sy / n) * (rect.height / el.height),
+      };
+    });
+    expect(design).toBeTruthy();
+    await page.mouse.click(design!.x, design!.y);
+    await page.waitForTimeout(500);
+    expect(await chromeInk()).toBeGreaterThan(0);
   });
 
   test("22. the studio's ink rows follow what the user ticks, not the product", async ({ page }) => {
