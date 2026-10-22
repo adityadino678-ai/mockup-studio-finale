@@ -13,6 +13,11 @@
 // AI is provider-aware: the browser sends `x-ai-provider` (an id from
 // lib/ai/providers) plus the key/base-url/model. The provider's base URL is used
 // unless the user overrides it (the `custom` provider).
+//
+// Background removal follows the same rule: `x-bg-remove-provider` picks the
+// engine and `x-bg-remove-key` carries its key, with a server secret as the
+// fallback. Gemini is the exception — it IS Google AI Studio, so it reuses the
+// AI key.
 
 import { serverEnv } from "@/lib/server/env";
 import {
@@ -42,6 +47,37 @@ export interface AiCredentials {
 export interface Credentials {
   printify?: PrintifyCredentials;
   ai?: AiCredentials;
+  bgRemove?: BgRemoveCredentials;
+}
+
+/**
+ * The background-removal providers that can be called from the server.
+ *
+ * `remove-bg` and `photoroom` are dedicated cutout APIs and need their own
+ * key. `gemini` is different: it is Google AI Studio, so it reuses the AI
+ * key the visitor already pasted under AI providers.
+ */
+export type BgRemoveProvider = "remove-bg" | "photoroom" | "gemini";
+
+export interface BgRemoveCredentials {
+  apiKey: string;
+  provider: BgRemoveProvider;
+  source: CredentialSource;
+}
+
+const BG_REMOVE_PROVIDERS: readonly string[] = ["remove-bg", "photoroom", "gemini"];
+
+/**
+ * Turns a raw header value into a known provider id.
+ *
+ * The header is attacker-controlled, so an unknown value must never reach a
+ * URL. Anything unrecognised resolves to `undefined` and the caller falls
+ * back to the default provider.
+ */
+export function parseBgRemoveProvider(value: string | null | undefined): BgRemoveProvider | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  return BG_REMOVE_PROVIDERS.includes(normalized) ? (normalized as BgRemoveProvider) : undefined;
 }
 
 // Re-exported for callers/tests that predate the provider registry.
@@ -62,6 +98,8 @@ function clean(value: string | null | undefined): string | undefined {
  *   x-ai-key         OpenAI-compatible API key
  *   x-ai-base-url    base URL override (used for the `custom` provider)
  *   x-ai-model       model id
+ *   x-bg-remove-provider  background-removal provider id
+ *   x-bg-remove-key       background-removal API key
  */
 export function credentialsFromRequest(request: Request): Credentials {
   const headers = request.headers;
@@ -86,6 +124,27 @@ export function credentialsFromRequest(request: Request): Credentials {
   const model =
     clean(headers.get("x-ai-model")) ?? clean(serverEnv.aiModel()) ?? def?.defaultModel ?? DEFAULT_MODEL;
 
+  // --- background removal -------------------------------------------------
+  // The provider is chosen by the browser (the Settings picker), and only the
+  // three known ids are honoured — the value is never interpolated into a URL
+  // unvalidated.
+  const bgRemoveProvider = parseBgRemoveProvider(headers.get("x-bg-remove-provider")) ?? "remove-bg";
+  const browserBgRemoveKey = clean(headers.get("x-bg-remove-key"));
+  let bgRemoveKey: string | undefined;
+  let bgRemoveSource: CredentialSource = "server";
+  if (bgRemoveProvider === "gemini") {
+    // Gemini IS Google AI Studio, so it reuses the AI key the visitor pasted
+    // under AI providers — `x-bg-remove-key` is not required for it. The
+    // dedicated header still wins when present, so a visitor can keep a
+    // Google key for cutouts separate from their chat provider.
+    bgRemoveKey = browserBgRemoveKey ?? aiKey;
+    bgRemoveSource = browserBgRemoveKey || browserAiKey ? "browser" : "server";
+  } else {
+    // remove.bg and PhotoRoom are separate services with their own keys.
+    bgRemoveKey = browserBgRemoveKey ?? clean(serverEnv.bgRemoveApiKey());
+    bgRemoveSource = browserBgRemoveKey ? "browser" : "server";
+  }
+
   return {
     printify: printifyKey
       ? { apiKey: printifyKey, source: browserPrintifyKey ? "browser" : "server" }
@@ -98,6 +157,9 @@ export function credentialsFromRequest(request: Request): Credentials {
           provider: def?.id ?? "custom",
           source: browserAiKey ? "browser" : "server",
         }
+      : undefined,
+    bgRemove: bgRemoveKey
+      ? { apiKey: bgRemoveKey, provider: bgRemoveProvider, source: bgRemoveSource }
       : undefined,
   };
 }

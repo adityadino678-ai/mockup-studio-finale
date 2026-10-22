@@ -1,14 +1,16 @@
 import { floodKeyRemoveBackground, FLOOD_KEY_DEFAULTS, transparentFraction } from "./flood-key";
+import { borderModelRemoveBackground, BORDER_MODEL_DEFAULTS } from "./border-model";
 
 // ---------------------------------------------------------------------------
-// Background removal engine abstraction. Two local engines:
+// Background removal engine abstraction. Three local engines:
 //   1. flood-key    — instant, deterministic, works on solid backgrounds
-//   2. ai-segmenter — transformers.js U2Net in a Web Worker (first use
+//   2. border-model — instant, deterministic, follows a gradient or a vignette
+//   3. ai-segmenter — transformers.js MODNet in a Web Worker (first use
 //                     downloads the model, cached by the browser afterwards)
 // The original blob is never modified; engines return a new PNG blob.
 // ---------------------------------------------------------------------------
 
-export type BgRemovalEngineId = "flood-key" | "ai-segmenter";
+export type BgRemovalEngineId = "flood-key" | "border-model" | "ai-segmenter";
 
 export interface BgRemovalResult {
   blob: Blob;
@@ -69,8 +71,41 @@ export async function removeBgFloodKey(
   return { blob: outBlob, transparency, removed };
 }
 
-let workerInstance: Worker | null = null;
-const pendingRequests = new Map<
+/**
+ * Removes the background by modelling it from the image border.
+ *
+ * The second cheap engine: it follows a gradient or a vignette where the
+ * flood key cannot, and it needs no network, so it still works when the AI
+ * model cannot be downloaded.
+ */
+export async function removeBgBorderModel(
+  blob: Blob,
+  tolerance: number = BORDER_MODEL_DEFAULTS.tolerance,
+): Promise<BgRemovalResult> {
+  const bmp = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("Could not get 2D context");
+  ctx.drawImage(bmp, 0, 0);
+  bmp.close();
+  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const before = new Uint8ClampedArray(image.data);
+  borderModelRemoveBackground(image.data, canvas.width, canvas.height, {
+    ...BORDER_MODEL_DEFAULTS,
+    tolerance,
+  });
+  const transparency = transparentFraction(image.data);
+  const removed = alphaChangeFraction(before, image.data);
+  ctx.putImageData(image, 0, 0);
+  const outBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Canvas export failed"))), "image/png");
+  });
+  return { blob: outBlob, transparency, removed };
+}
+
+let workerInstance: Worker | null = null;const pendingRequests = new Map<
   string,
   {
     resolve: (r: BgRemovalResult) => void;
@@ -167,6 +202,9 @@ export async function removeBackground(
 ): Promise<BgRemovalResult> {
   if (engine === "flood-key") {
     return removeBgFloodKey(blob, tolerance);
+  }
+  if (engine === "border-model") {
+    return removeBgBorderModel(blob, tolerance);
   }
   return removeBgAI(blob, onProgress);
 }

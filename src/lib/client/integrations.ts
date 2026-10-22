@@ -29,8 +29,26 @@ export interface AiProviderConfig {
   model?: string;
 }
 
+/**
+ * The hosted services that can remove a background.
+ *
+ * `gemini` uses the Google AI Studio key, which is already held as the
+ * `google` AI provider - so choosing it needs no second key.
+ */
+export type BgRemoveProvider = "remove-bg" | "photoroom" | "gemini";
+
+export const BG_REMOVE_PROVIDERS: BgRemoveProvider[] = ["remove-bg", "photoroom", "gemini"];
+
+export interface BgRemoveConfig {
+  provider: BgRemoveProvider;
+  /** The key for remove.bg / PhotoRoom. Not used by `gemini`. */
+  apiKey: string;
+}
+
 export interface IntegrationConfig {
   printifyKey: string;
+  /** The background-removal service and its key. */
+  bgRemove: BgRemoveConfig;
   /** Provider id currently selected. */
   activeProvider: string;
   /** Model id currently selected (mirror of providers[activeProvider].model). */
@@ -40,6 +58,7 @@ export interface IntegrationConfig {
 
 export const EMPTY_INTEGRATIONS: IntegrationConfig = {
   printifyKey: "",
+  bgRemove: { provider: "remove-bg", apiKey: "" },
   activeProvider: DEFAULT_PROVIDER_ID,
   activeModel: "",
   providers: {},
@@ -53,6 +72,7 @@ interface LegacyIntegrations {
   aiKey?: string;
   aiBaseUrl?: string;
   aiModel?: string;
+  bgRemove?: Partial<BgRemoveConfig>;
 }
 
 function asString(value: unknown): string {
@@ -63,6 +83,12 @@ function asString(value: unknown): string {
 export function migrateIntegrations(stored: Partial<IntegrationConfig> & LegacyIntegrations): IntegrationConfig {
   const config: IntegrationConfig = {
     printifyKey: asString(stored.printifyKey),
+    bgRemove: {
+      provider: BG_REMOVE_PROVIDERS.includes(stored.bgRemove?.provider as BgRemoveProvider)
+        ? (stored.bgRemove!.provider as BgRemoveProvider)
+        : "remove-bg",
+      apiKey: asString(stored.bgRemove?.apiKey),
+    },
     activeProvider: asString(stored.activeProvider) || DEFAULT_PROVIDER_ID,
     activeModel: asString(stored.activeModel),
     providers: {},
@@ -158,6 +184,14 @@ export function integrationHeaders(config: IntegrationConfig): Record<string, st
   const printifyKey = config.printifyKey.trim();
   if (printifyKey) headers["x-printify-key"] = printifyKey;
 
+  // The background-removal service and its key. `gemini` sends no key here:
+  // it uses the Google AI Studio key, which travels as the AI key.
+  headers["x-bg-remove-provider"] = config.bgRemove.provider;
+  const bgRemoveKey = config.bgRemove.apiKey.trim();
+  if (bgRemoveKey && config.bgRemove.provider !== "gemini") {
+    headers["x-bg-remove-key"] = bgRemoveKey;
+  }
+
   const def = activeProvider(config);
   const providerConfig = activeProviderConfig(config);
   const aiKey = providerConfig.apiKey.trim();
@@ -168,6 +202,26 @@ export function integrationHeaders(config: IntegrationConfig): Record<string, st
   const override = providerConfig.baseUrl?.trim();
   if (override && (!def || def.id === "custom")) headers["x-ai-base-url"] = override;
   if (model) headers["x-ai-model"] = model;
+  return headers;
+}
+
+/**
+ * The headers for a background-removal call.
+ *
+ * The Google AI Studio path needs the GOOGLE key specifically, not whichever
+ * AI provider happens to be active - so for `gemini` the Google provider's
+ * key is sent as the AI key, and the provider is named as `google`.
+ */
+export function bgRemoveHeaders(config: IntegrationConfig): Record<string, string> {
+  const headers = integrationHeaders(config);
+  if (config.bgRemove.provider !== "gemini") return headers;
+  const google = config.providers.google;
+  if (google?.apiKey?.trim()) {
+    headers["x-ai-provider"] = "google";
+    headers["x-ai-key"] = google.apiKey.trim();
+  }
+  // The AI model is the chat model; the image model is chosen by the server.
+  delete headers["x-ai-model"];
   return headers;
 }
 
@@ -186,7 +240,24 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
 
 export function hasAnyKey(config: IntegrationConfig): boolean {
   const hasProviderKey = Object.values(config.providers).some((p) => p.apiKey.trim());
-  return !!(config.printifyKey.trim() || hasProviderKey);
+  const hasBgRemoveKey =
+    config.bgRemove.provider === "gemini"
+      ? !!config.providers.google?.apiKey.trim()
+      : !!config.bgRemove.apiKey.trim();
+  return !!(config.printifyKey.trim() || hasProviderKey || hasBgRemoveKey);
+}
+
+/**
+ * True when the background remover can reach a hosted service.
+ *
+ * Used to decide whether an upload should be separated automatically, and
+ * whether the API engine is offered at all.
+ */
+export function hasBgRemoveKey(config: IntegrationConfig): boolean {
+  if (config.bgRemove.provider === "gemini") {
+    return !!config.providers.google?.apiKey.trim();
+  }
+  return !!config.bgRemove.apiKey.trim();
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import type {
   InkVariant,
   Mockup,
   MockupCategory,
+  MockupPrintArea,
   Placement,
   Transform,
 } from "@/types/domain";
@@ -312,11 +313,39 @@ export async function createMockupFromFile(file: File, category: MockupCategory 
 
 export async function updateMockup(
   mockupId: string,
-  patch: Partial<Pick<Mockup, "name" | "category" | "tags" | "favorite">>,
+  patch: Partial<Pick<Mockup, "name" | "category" | "tags" | "favorite" | "printArea">>,
 ): Promise<void> {
   const mockup = await db.mockups.get(mockupId);
   if (!mockup) return;
   await db.mockups.put({ ...mockup, ...patch });
+}
+
+/**
+ * Saves a mockup's print area.
+ *
+ * The area lives on the mockup record itself: one area per mockup, and a
+ * Dexie record is schemaless, so no schema migration is needed for it.
+ */
+export async function savePrintArea(mockupId: string, area: MockupPrintArea): Promise<void> {
+  const mockup = await db.mockups.get(mockupId);
+  if (!mockup) return;
+  await db.mockups.put({ ...mockup, printArea: { ...area, updatedAt: Date.now() } });
+  await logActivity(
+    "mockup.update",
+    `Set the print area on "${mockup.name}" (${area.areaWidth}×${area.areaHeight})`,
+    { mockupId },
+  );
+}
+
+/** Removes a mockup's print area. The mockup itself is untouched. */
+export async function clearPrintArea(mockupId: string): Promise<void> {
+  const mockup = await db.mockups.get(mockupId);
+  if (!mockup || !mockup.printArea) return;
+  const { printArea: _removed, ...rest } = mockup;
+  await db.mockups.put(rest);
+  await logActivity("mockup.update", `Removed the print area from "${mockup.name}"`, {
+    mockupId,
+  });
 }
 
 export async function deleteMockup(mockupId: string): Promise<void> {

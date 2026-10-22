@@ -13,11 +13,11 @@ import {
   suggestInk,
 } from "@/lib/printify/colors";
 import { MAX_UPSCALE, clampPlacement, computeFit } from "@/lib/printify/fit";
+import { planDesignColours } from "@/lib/printify/design-colours";
 import {
   buildCatalogueIndex,
   buildPartition,
   enabledVariantIds,
-  inkGroupsForDesign,
   resolveVariantIds,
 } from "@/lib/printify/variants";
 import {
@@ -327,56 +327,18 @@ describe("the variant partition", () => {
     expect(new Set(allReverse).size).toBe(allReverse.length);
   });
 
-  it("builds one ink group for a design without ink variants", () => {
-    const groups = inkGroupsForDesign({
-      hasInkVariants: false,
-      selectedColors: ["Solid Black", "Solid White"],
-      blackInkColors: [],
-    });
-    expect(groups).toHaveLength(1);
-    expect(groups[0].ink).toBe("main");
-    expect(groups[0].colors).toEqual(["Solid Black", "Solid White"]);
+  it("keeps a trailing group so the partition can be completed", () => {
+    // The groups are built by planDesignColours now (see design-colours.ts)
+    // and a group with no colours is never emitted, so the partition always
+    // has a group that holds variants for Printify to complete.
+    const plan = planDesignColours(
+      { hasBlackInk: true, hasWhiteInk: true },
+      { plain: [], ink: ["Solid Black"], blackInk: ["Solid Black"] },
+    );
+    expect(plan.groups.every((group) => group.colors.length > 0)).toBe(true);
+    expect(plan.groups[plan.groups.length - 1].colors.length).toBeGreaterThan(0);
   });
 
-  it("builds a black group and a white group for a design with ink variants", () => {
-    const groups = inkGroupsForDesign({
-      hasInkVariants: true,
-      selectedColors: ["Solid Black", "Solid White"],
-      blackInkColors: ["Solid Black"],
-    });
-    expect(groups).toHaveLength(2);
-    expect(groups[0].ink).toBe("black");
-    expect(groups[0].colors).toEqual(["Solid Black"]);
-    expect(groups[1].ink).toBe("white");
-    expect(groups[1].colors).toEqual(["Solid White"]);
-  });
-
-  it("keeps the ink label when NO colour is marked for the black ink", () => {
-    // This is the case that shipped a bug: with the black group empty, the
-    // white group shifted into position 0 and the artwork was chosen by
-    // INDEX, so the white-ink colours got the black-ink file. The ink must
-    // travel with the group, never with its position.
-    const groups = inkGroupsForDesign({
-      hasInkVariants: true,
-      selectedColors: ["Solid Black", "Solid White"],
-      blackInkColors: [],
-    });
-    expect(groups).toHaveLength(2);
-    expect(groups[0].ink).toBe("black");
-    expect(groups[0].colors).toEqual([]);
-    expect(groups[1].ink).toBe("white");
-    expect(groups[1].colors).toEqual(["Solid Black", "Solid White"]);
-  });
-
-  it("always keeps a trailing group so the partition can be completed", () => {
-    const groups = inkGroupsForDesign({
-      hasInkVariants: true,
-      selectedColors: ["Solid Black"],
-      blackInkColors: ["Solid Black"],
-    });
-    expect(groups).toHaveLength(2);
-    expect(groups[1].colors).toEqual([]);
-  });
 });
 
 describe("the print_areas payload", () => {

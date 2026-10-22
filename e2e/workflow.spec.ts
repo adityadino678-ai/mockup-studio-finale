@@ -220,7 +220,9 @@ test.describe("core workflow", () => {
     await page.getByRole("menuitem", { name: /Remove background/ }).click();
     await page.getByRole("button", { name: /^Remove background$/ }).click();
 
-    await expect(page.getByText(/transparent background/i)).toBeVisible({ timeout: 30_000 });
+    // The dialog reports how much it removed; the cut-out itself is proved
+    // by the pixels below, not by the wording.
+    await expect(page.getByText(/background removed/i).first()).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /Apply to design/ }).click();
     await expect(page.getByText(/Applied to/)).toBeVisible({ timeout: 30_000 });
 
@@ -742,7 +744,329 @@ test.describe("core workflow", () => {
       await expect(panel.locator("#studio-angle")).toHaveValue("90");
     });
   });
+
+  test("20. a mockup gets a print area that survives a refresh", async ({ page }) => {
+    await seedLibrary(page);
+    await gotoApp(page, "/mockups");
+
+    // The upper section of the Mockups page has two tabs now.
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await expect(page.locator("#area-preset")).toBeVisible({ timeout: 30_000 });
+
+    // A preset gives the mockup a real Printify area size.
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await expect(page.getByText("4500 × 5400 px")).toBeVisible({ timeout: 10_000 });
+
+    // The area is drawn on the mockup.
+    await expect(page.getByText(/Tee · DTG front · 4500 × 5400/)).toBeVisible({ timeout: 10_000 });
+
+    // Saving it stores it on the mockup, and it is still there after a reload.
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+
+    await page.reload();
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await expect(page.getByText("4500×5400")).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("23. the editor follows the Studio and clips to the print area", async ({ page }) => {
+    const { designId, mockupId } = await seedLibrary(page);
+
+    // A print area on the mockup.
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+
+    // A design twice as wide as the area, so there is something to clip.
+    await gotoApp(page, "/printify-studio");
+    await toleratingReload(page, async () => {
+      await page.getByRole("tab", { name: "Design panel" }).click();
+      await page.getByRole("button", { name: "Open design-a" }).click();
+    });
+    await expect(page.locator("#studio-scale")).toBeVisible({ timeout: 30_000 });
+    await page.locator("#studio-scale").fill("200");
+    await page.locator("#studio-scale").press("Enter");
+    await page.waitForTimeout(500);
+
+    // The editor takes the Studio's placement for a mockup with an area.
+    await gotoApp(page, "/editor?design=" + designId + "&mockup=" + mockupId);
+    const canvas = page.locator("canvas").first();
+    await expect(canvas).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1500);
+
+    // The area is 4500 x 5400 on a 1200 x 1200 photo, centred at 50% / 26%,
+    // and the design is 200% of the area's width = 80% of the photo.
+    const fields = page.getByRole("spinbutton");
+    await expect(fields.nth(0)).toHaveValue("50");
+    await expect(fields.nth(1)).toHaveValue("26");
+    await expect(fields.nth(2)).toHaveValue("80");
+
+    // The design is clipped to the area: the painted red is the AREA's shape
+    // (4500 x 5400, so 0.833 wide per tall), not the artwork's own square.
+    const painted = await page.evaluate(() => {
+      const el = document.querySelector("canvas") as HTMLCanvasElement;
+      const ctx = el.getContext("2d")!;
+      const data = ctx.getImageData(0, 0, el.width, el.height).data;
+      let minX = 1e9;
+      let maxX = -1;
+      let minY = 1e9;
+      let maxY = -1;
+      let reds = 0;
+      for (let y = 0; y < el.height; y++) {
+        for (let x = 0; x < el.width; x++) {
+          const i = (y * el.width + x) * 4;
+          if (data[i] > 150 && data[i + 1] < 90 && data[i + 2] < 90) {
+            reds++;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      return { reds, width: maxX - minX, height: maxY - minY };
+    });
+
+    expect(painted.reds).toBeGreaterThan(1000);
+    // The painted area is the print area's shape (4500/5400 = 0.833).
+    expect(painted.width / painted.height).toBeCloseTo(4500 / 5400, 1);
+  });
+  test("21. the print area clips the design in a rendered output", async ({ page }) => {
+    await seedLibrary(page);
+
+    // A print area on the mockup.
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+
+    // A design that is WIDER than the print area: the part that falls outside
+    // is not printable, so it must not appear on the product.
+    await gotoApp(page, "/printify-studio");
+    await toleratingReload(page, async () => {
+      await page.getByRole("tab", { name: "Design panel" }).click();
+      await page.getByRole("button", { name: "Open design-a" }).click();
+    });
+    await expect(page.locator("#studio-scale")).toBeVisible({ timeout: 30_000 });
+    await page.locator("#studio-scale").fill("200");
+    await page.locator("#studio-scale").press("Enter");
+    await page.waitForTimeout(500);
+
+    // The mockup follows the Studio: the design is 200% of the area width.
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await expect(page.getByText(/200% of the print area/)).toBeVisible({ timeout: 30_000 });
+
+    // Render it.
+    await gotoApp(page, "/batch");
+    await page.getByRole("checkbox", { name: /design-a/ }).click();
+    await page.getByRole("checkbox", { name: /mockup-a/ }).click();
+    await page.getByRole("button", { name: /Start job/ }).click();
+    await expect(page.getByText("1 done").first()).toBeVisible({ timeout: 90_000 });
+
+    const samples = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const metas: Array<{ id: string }> = await new Promise((res) => {
+        const rq = db.transaction(["assets"], "readonly").objectStore("assets").index("kind").getAll("mockup-render");
+        rq.onsuccess = () => res(rq.result);
+      });
+      if (!metas.length) return { found: false as const };
+      const blob: Blob = await new Promise((res) => {
+        const rq = db.transaction(["blobs"], "readonly").objectStore("blobs").get(metas[0].id);
+        rq.onsuccess = () => res(rq.result.blob);
+      });
+      const mockups: Array<{ width: number; height: number; printArea?: { box: { x: number; y: number; width: number }; areaWidth: number; areaHeight: number } }> =
+        await new Promise((res) => {
+          const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+          rq.onsuccess = () => res(rq.result);
+        });
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement("canvas");
+      c.width = bmp.width;
+      c.height = bmp.height;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(bmp, 0, 0);
+      const px = (x: number, y: number) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+
+      const mockup = mockups.find((m) => m.printArea);
+      if (!mockup) return { found: false as const, reason: "no print area" };
+      const area = mockup.printArea!;
+      // The area's box in photo pixels.
+      const areaW = area.box.width * mockup.width;
+      const areaH = areaW * (area.areaHeight / area.areaWidth);
+      const areaX = (area.box.x - area.box.width / 2) * mockup.width;
+      const areaY = (area.box.y - areaH / mockup.height / 2) * mockup.height;
+      const areaCY = areaY + areaH / 2;
+      return {
+        found: true as const,
+        width: bmp.width,
+        height: bmp.height,
+        // The design is 200% of the area's width and its red circle covers 70%
+        // of the artwork, so the circle reaches well past the area's edges.
+        //   justInside  - inside the area AND inside the red circle
+        //   justOutside - outside the area, but still inside the red circle
+        // The pair is the control: if justInside is red, the artwork really is
+        // painted there, so a grey justOutside can only mean it was clipped.
+        justInside: px(Math.round(areaX + areaW * 0.05), Math.round(areaCY)),
+        justOutside: px(Math.round(areaX - areaW * 0.1), Math.round(areaCY)),
+      };
+    });
+
+    expect(samples.found).toBe(true);
+    if (samples.found) {
+      // Just inside the area: the design's red.
+      expect(samples.justInside[0]).toBeGreaterThan(samples.justInside[2] + 50);
+      // Just outside it: NOT the design's red - it was cut off.
+      expect(samples.justOutside[0]).toBeLessThan(samples.justOutside[2] + 50);
+    }
+  });
+
+  test("22. the studio separates the designs by the product that is selected", async ({ page }) => {
+    await gotoApp(page, "/printify-studio");
+    await page.setInputFiles('input[type=file]', [
+      fixture("design-a.png"),
+      fixture("design-solid.png"),
+    ]);
+    await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
+
+    // Give one design an ink variant, so there is something to separate.
+    await gotoApp(page, "/designs");
+    await page.getByRole("button", { name: /Actions for design-a/ }).click();
+    await page.getByRole("menuitem", { name: /Ink variants/ }).click();
+    await page.getByRole("button", { name: "Auto-generate" }).first().click();
+    await expect(page.getByText("White ink variant created")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Done" }).click();
+
+    await gotoApp(page, "/printify-studio");
+    // No product is chosen yet, so the split falls back to which designs have
+    // their own ink artwork on file.
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Has ink variants (1)")).toBeVisible();
+
+    // Now choose a product whose ink group is EMPTY. The product decides:
+    // no colour of it needs the ink artwork, so no design needs it either -
+    // even design-a, which has an ink variant on file.
+    await setStudioSession(page, {
+      blueprintId: 6,
+      printProviderId: 30,
+      rows: {
+        plain: { colors: ["White"], blackInkColors: [] },
+        ink: { colors: [], blackInkColors: [] },
+      },
+    });
+    await page.reload();
+    await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
+
+    // The separation follows the ONE product: with its ink group empty, both
+    // designs are "no ink variants" designs for this product.
+    await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Has ink variants (0)")).toBeVisible();
+  });
+
+  test("23. the studio says why a design cannot print every colour, and offers the fix", async ({
+    page,
+  }) => {
+    await gotoApp(page, "/printify-studio");
+    await page.setInputFiles('input[type=file]', [fixture("design-a.png")]);
+    await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
+
+    // A product whose colours need the ink artwork, for a design that has
+    // none.
+    await setStudioSession(page, {
+      blueprintId: 6,
+      printProviderId: 30,
+      rows: {
+        plain: { colors: [], blackInkColors: [] },
+        ink: { colors: ["Black", "Navy"], blackInkColors: [] },
+      },
+    });
+    await page.reload();
+    await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
+
+    // The problems are about the batch that is about to be created, so the
+    // design has to be ticked for it to have one.
+    await page.getByRole("checkbox", { name: "Select design-a" }).click();
+
+    await page.getByRole("tab", { name: "Design panel" }).click();
+    await expect(page.getByRole("tab", { name: "Design panel" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // The reason is a plain sentence, not "132 variants are not in any group".
+    const problem = page.locator("[data-ink-problem]").first();
+    await expect(problem).toBeVisible({ timeout: 30_000 });
+    await expect(problem).toContainText(/white-ink artwork/i);
+    await expect(problem).not.toContainText(/not in any group/i);
+
+    // And there is a one-click fix.
+    const fix = page.locator("[data-move-to-plain]");
+    await expect(fix).toBeVisible();
+    await fix.click();
+    await expect(page.locator("[data-ink-problem]")).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test("24. the hosted background remover answers clearly when no key is set", async ({ request }) => {
+    // The endpoint is reachable without any credentials and says exactly
+    // which key is missing, rather than failing silently.
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const response = await request.post("/api/bg-remove", {
+      data: { image: png, mimeType: "image/png" },
+    });
+    expect(response.status()).toBe(503);
+    const body = (await response.json()) as { error?: string };
+    expect(body.error).toMatch(/background-removal key/i);
+
+    // The Gemini path says which key IT wants, because it is a different one.
+    const gemini = await request.post("/api/bg-remove", {
+      headers: { "x-bg-remove-provider": "gemini" },
+      data: { image: png, mimeType: "image/png" },
+    });
+    expect(gemini.status()).toBe(503);
+    const geminiBody = (await gemini.json()) as { error?: string };
+    expect(geminiBody.error).toMatch(/Google AI Studio key/i);
+  });
 });
+
+/**
+ * Sets the Printify Studio's stored session directly.
+ *
+ * The studio keeps its state in one row of the `settings` table, so the
+ * product and its colour groups can be chosen without driving the whole
+ * catalogue picker - and without needing a Printify key in the test.
+ */
+async function setStudioSession(page: Page, patch: Record<string, unknown>) {
+  await page.evaluate(async (changes) => {
+    const db: IDBDatabase = await new Promise((res) => {
+      const r = indexedDB.open("mockup-studio");
+      r.onsuccess = () => res(r.result);
+    });
+    const read = await new Promise<{ value?: Record<string, unknown> } | undefined>((res) => {
+      const rq = db.transaction(["settings"], "readonly").objectStore("settings").get(
+        "printifyStudio:session",
+      );
+      rq.onsuccess = () => res(rq.result);
+    });
+    const session = { ...((read?.value ?? {}) as Record<string, unknown>), ...changes };
+    await new Promise<void>((res) => {
+      const tx = db.transaction(["settings"], "readwrite");
+      tx.objectStore("settings").put({ key: "printifyStudio:session", value: session });
+      tx.oncomplete = () => res();
+    });
+  }, patch);
+}
 
 /** Uploads fixture assets into the library (waits for each upload to land)
  * and returns the ids of design-a and mockup-a. */

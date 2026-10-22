@@ -3,12 +3,8 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
-import { designMainAssetId, getAssetBlob, logActivity } from "@/lib/db/repo";
-import {
-  removeBackground,
-  setBgRemovalProgressCallback,
-  type BgRemovalEngineId,
-} from "@/lib/bg-removal/engine";
+import { getAssetBlob, logActivity } from "@/lib/db/repo";
+import { removeBackgroundAuto, type RemoveEngine, type RemoveOutcome } from "@/lib/printify/remove-background";
 import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
 import type { Design } from "@/types/domain";
 import { AssetThumb } from "@/components/asset-thumb";
@@ -28,9 +24,23 @@ import { Download, Loader2, RotateCcw, Wand2 } from "lucide-react";
 
 type ProcessingState = "idle" | "processing" | "done" | "failed";
 
+/**
+ * How long a stage of the work stays on screen.
+ *
+ * The engine reports its stages as it works and two of them can arrive
+ * within the same frame. The message that explains the ~25 MB model download
+ * would then be replaced before it was ever painted, which is exactly the
+ * silent freeze that message exists to prevent. So every stage stays up for
+ * a moment and the next one waits its turn.
+ */
+const MIN_STAGE_MS = 900;
+
 interface BgResult {
   blob: Blob;
-  transparency: number;
+  /** Fraction of pixels whose ALPHA CHANGED - the honest measure of a removal. */
+  removed: number;
+  /** Which engine actually did the work. */
+  engine: RemoveOutcome["engine"];
 }
 
 export function BgRemovalDialog({
@@ -40,7 +50,7 @@ export function BgRemovalDialog({
   designs: Design[];
   onClose: () => void;
 }) {
-  const [engine, setEngine] = React.useState<BgRemovalEngineId>("flood-key");
+  const [engine, setEngine] = React.useState<RemoveEngine>("auto");
   const [tolerance, setTolerance] = React.useState(FLOOD_KEY_DEFAULTS.tolerance);
   const [state, setState] = React.useState<ProcessingState>("idle");
   const [stage, setStage] = React.useState<string>("");
@@ -48,10 +58,52 @@ export function BgRemovalDialog({
   const [result, setResult] = React.useState<BgResult | null>(null);
   const [savedCount, setSavedCount] = React.useState(0);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
+  /** The stages that are waiting for their turn on screen - see `showStage`. */
+  const stageQueue = React.useRef<string[]>([]);
+  const stageShownAt = React.useRef(0);
+  const stageTimer = React.useRef<number | null>(null);
 
-  React.useEffect(() => {
-    setBgRemovalProgressCallback((s) => setStage(s));
-    return () => setBgRemovalProgressCallback(null);
+  /**
+   * Shows a stage of the work and keeps it up long enough to read it.
+   *
+   * The stages are queued rather than replaced: one that arrives while
+   * another is on screen waits for its turn, so the message that explains a
+   * slow step is never swallowed by the step that follows it.
+   */
+  const showStage = React.useCallback((next: string) => {
+    stageQueue.current.push(next);
+    if (stageTimer.current !== null) return;
+    const wait = Math.max(0, MIN_STAGE_MS - (Date.now() - stageShownAt.current));
+    const pump = () => {
+      const pending = stageQueue.current.shift();
+      if (pending === undefined) {
+        stageTimer.current = null;
+        return;
+      }
+      setStage(pending);
+      stageShownAt.current = Date.now();
+      if (stageQueue.current.length > 0) {
+        stageTimer.current = window.setTimeout(pump, MIN_STAGE_MS);
+      } else {
+        stageTimer.current = null;
+      }
+    };
+    if (wait === 0) {
+      pump();
+    } else {
+      stageTimer.current = window.setTimeout(pump, wait);
+    }
+  }, []);
+
+  /** Throws the queued stages away - the run they belonged to is over. */
+  const resetStages = React.useCallback(() => {
+    if (stageTimer.current !== null) {
+      window.clearTimeout(stageTimer.current);
+      stageTimer.current = null;
+    }
+    stageQueue.current = [];
+    stageShownAt.current = 0;
+    setStage("");
   }, []);
 
   // Show before/after for a single result.
@@ -71,27 +123,40 @@ export function BgRemovalDialog({
       setError(null);
       if (!retrying) setResult(null);
       setSavedCount(0);
+      resetStages();
       try {
         let last: BgResult | null = null;
         let saved = 0;
         for (const design of designs) {
-          const sourceId = designMainAssetId(design);
+          const sourceId = design.originalAssetId;
           const blob = await getAssetBlob(sourceId);
           if (!blob) throw new Error(`Could not read "${design.name}" from storage`);
-          const out = await removeBackground(engine, blob, tolerance);
-          last = out;
-          // `removed` is how much actually changed. The output's total
-          // transparency cannot answer this: an artwork that was already
-          // transparent scores 1.0 without a pixel being touched, and a
-          // solid-colour artwork scores 1.0 because the ARTWORK was erased.
-          if (out.removed < 0.005) {
+          resetStages();
+          let out: RemoveOutcome;
+          try {
+            // The per-call `onProgress` is used instead of the global sink so
+            // another caller cannot steal the stages mid-run.
+            out = await removeBackgroundAuto(blob, {
+              engine,
+              tolerance,
+              onProgress: showStage,
+            });
+          } catch (e) {
+            // The engine's own message is written for one image and says
+            // nothing about WHICH design failed, which is ambiguous in a
+            // batch - so the design's name is put in front of it.
+            const message = e instanceof Error ? e.message : "Background removal failed";
             throw new Error(
-              `"${design.name}": no background was detected. Try a higher tolerance, or the AI engine for photos/complex backgrounds.`,
+              message.startsWith(`"${design.name}"`) ? message : `"${design.name}": ${message}`,
             );
           }
-          if (out.transparency > 0.999) {
+          last = { blob: out.blob, removed: out.removed, engine: out.engine };
+          // The engine refuses a no-op and an emptied image itself, so all
+          // that is left is a light guard: a result that changed less than
+          // half a percent must never be shown to the user as a success.
+          if (out.removed < 0.005) {
             throw new Error(
-              `"${design.name}": the whole image was removed - the artwork itself looked like the background. Try a lower tolerance.`,
+              `"${design.name}": no background was detected, so the image was left unchanged. Try a higher tolerance, or the AI segmentation engine for photos and complex backgrounds.`,
             );
           }
           if (designs.length > 1) {
@@ -101,7 +166,10 @@ export function BgRemovalDialog({
               parentId: design.originalAssetId,
             });
             await db.designs.update(design.id, { processedAssetId: asset.id, updatedAt: Date.now() });
-            await logActivity("bgremoval.run", `Removed background from "${design.name}" (${Math.round(out.transparency * 100)}% transparent)`);
+            await logActivity(
+              "bgremoval.run",
+              `Removed background from "${design.name}" with the ${out.engine} engine (${Math.round(out.removed * 100)}% of pixels changed)`,
+            );
             saved++;
             setSavedCount(saved);
           }
@@ -109,7 +177,7 @@ export function BgRemovalDialog({
         if (last) setResult(last);
         setState("done");
         if (designs.length === 1) {
-          toast.success("Background removed â€” review the result, then apply it to the design");
+          toast.success("Background removed — review the result, then apply it to the design");
         } else {
           toast.success(`Background removed and applied to ${saved} design${saved > 1 ? "s" : ""}`);
           onClose();
@@ -119,7 +187,7 @@ export function BgRemovalDialog({
         setError(e instanceof Error ? e.message : "Background removal failed");
       }
     },
-    [designs, engine, tolerance, onClose],
+    [designs, engine, tolerance, onClose, showStage, resetStages],
   );
 
   const applyToDesign = async () => {
@@ -130,8 +198,11 @@ export function BgRemovalDialog({
       parentId: design.originalAssetId,
     });
     await db.designs.update(design.id, { processedAssetId: asset.id, updatedAt: Date.now() });
-    await logActivity("bgremoval.run", `Removed background from "${design.name}" (${Math.round(result.transparency * 100)}% transparent)`);
-    toast.success(`Applied to "${design.name}" â€” the original file is preserved`);
+    await logActivity(
+      "bgremoval.run",
+      `Removed background from "${design.name}" with the ${result.engine} engine (${Math.round(result.removed * 100)}% of pixels changed)`,
+    );
+    toast.success(`Applied to "${design.name}" — the original file is preserved`);
     onClose();
   };
 
@@ -151,7 +222,7 @@ export function BgRemovalDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-forest" />
-            Remove background â€” {single ? designs[0].name : `${designs.length} designs`}
+            Remove background — {single ? designs[0].name : `${designs.length} designs`}
           </DialogTitle>
           <DialogDescription>
             The original file is always preserved. The processed cutout becomes the design&rsquo;s placed artwork.
@@ -162,17 +233,20 @@ export function BgRemovalDialog({
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-[220px] space-y-1">
               <Label className="text-ink-muted">Engine</Label>
-              <Select value={engine} onValueChange={(v) => setEngine(v as BgRemovalEngineId)}>
+              <Select value={engine} onValueChange={(v) => setEngine(v as RemoveEngine)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="auto">Auto (recommended)</SelectItem>
                   <SelectItem value="flood-key">Flood-key (solid backgrounds, instant)</SelectItem>
+                  <SelectItem value="border-model">Border-model (gradients and vignettes, instant)</SelectItem>
                   <SelectItem value="ai-segmenter">AI segmentation (photos, complex)</SelectItem>
+                  <SelectItem value="api">API (your own key)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {engine === "flood-key" && (
+            {(engine === "auto" || engine === "flood-key" || engine === "border-model") && (
               <div className="w-[200px] space-y-1">
                 <div className="flex items-center justify-between">
                   <Label className="text-ink-muted">Color tolerance</Label>
@@ -193,9 +267,14 @@ export function BgRemovalDialog({
             </Button>
           </div>
 
+          <p className="text-[12px] leading-relaxed text-ink-muted">
+            Auto runs the instant engines first and only downloads the AI model (~25 MB, first use only)
+            when they cannot do it.
+          </p>
+
           {engine === "ai-segmenter" && (
             <p className="text-[12px] leading-relaxed text-ink-muted">
-              Runs the open-source MODNet model (MIT license) entirely in your browser â€” images never
+              Runs the open-source MODNet model (MIT license) entirely in your browser — images never
               leave this machine. First use downloads ~25 MB, cached afterwards. MODNet is trained for
               photos of people and product shots; for flat artwork on solid backgrounds the flood-key
               engine is usually faster and cleaner.
@@ -205,7 +284,7 @@ export function BgRemovalDialog({
           {state === "processing" && (
             <div className="flex items-center gap-2 rounded-md bg-surface-muted px-3 py-2 text-[13px] text-ink-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {stage || "Processingâ€¦"}
+              {stage || "Processing…"}
               {!single && savedCount > 0 && ` Â· ${savedCount} saved`}
             </div>
           )}
@@ -223,10 +302,10 @@ export function BgRemovalDialog({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-[12px] font-medium text-ink-muted">
-                  Before / after â€” {Math.round(result.transparency * 100)}% of pixels now transparent
+                  Before / after - {Math.round(result.removed * 100)}% of pixels removed
                 </span>
-                <Badge variant={result.transparency > 0.05 ? "default" : "warning"}>
-                  {result.transparency > 0.05 ? "transparent background" : "little transparency detected"}
+                <Badge variant={result.removed >= 0.05 ? "default" : "warning"}>
+                  {result.removed >= 0.05 ? "background removed" : "little was removed"}
                 </Badge>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -242,6 +321,13 @@ export function BgRemovalDialog({
                 />
               </div>
               <div className="mt-1 text-center text-[11px] text-ink-subtle">processed (checkered = transparency)</div>
+              {result.removed < 0.05 && (
+                <p className="mt-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-[12px] leading-relaxed text-warning">
+                  Only {Math.round(result.removed * 100)}% of the pixels changed - the {result.engine}{" "}
+                  engine could not find a background to remove. Try the AI segmentation engine for
+                  photos and complex backgrounds.
+                </p>
+              )}
             </div>
           )}
 
@@ -264,7 +350,7 @@ export function BgRemovalDialog({
               </Button>
             </>
           )}
-          {!single && state === "done" && <span className="text-[13px] text-forest">All done â€” results applied.</span>}
+          {!single && state === "done" && <span className="text-[13px] text-forest">All done — results applied.</span>}
           <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>

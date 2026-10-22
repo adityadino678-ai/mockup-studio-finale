@@ -26,6 +26,7 @@ import {
   saveIntegrations,
   selectModel,
   selectProvider,
+  type BgRemoveProvider,
   type IntegrationConfig,
 } from "@/lib/client/integrations";
 import { providerList, type ModelInfo } from "@/lib/ai/providers";
@@ -42,6 +43,7 @@ import {
   KeyRound,
   Loader2,
   RefreshCw,
+  Scissors,
   Search,
   Server,
   Settings as SettingsIcon,
@@ -346,6 +348,99 @@ export function SettingsPage() {
                   </Button>
                 </div>
                 <ResultLine result={results.printify} testing={testing === "printify"} />
+              </section>
+
+              <Separator />
+
+              {/* Background removal */}
+              <section className="space-y-3 rounded-md border border-border-subtle p-3">
+                <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
+                  <Scissors className="h-4 w-4 text-ink-subtle" /> Background removal
+                </div>
+                <p className="text-[11px] leading-relaxed text-ink-subtle">
+                  A hosted service removes the background of a photograph better than the local
+                  engines can. The image is sent to the service you choose and is never stored
+                  anywhere.
+                </p>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="bg-remove-provider">Service</Label>
+                  <select
+                    id="bg-remove-provider"
+                    value={config.bgRemove.provider}
+                    onChange={(e) =>
+                      patchConfig({
+                        bgRemove: {
+                          ...config.bgRemove,
+                          provider: e.target.value as BgRemoveProvider,
+                        },
+                      })
+                    }
+                    className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+                  >
+                    <option value="remove-bg">remove.bg</option>
+                    <option value="photoroom">PhotoRoom</option>
+                    <option value="gemini">Google AI Studio (Gemini)</option>
+                  </select>
+                </div>
+
+                {config.bgRemove.provider === "gemini" ? (
+                  <p className="text-[11px] leading-relaxed text-ink-subtle">
+                    Gemini uses the <strong>Google AI Studio key</strong> you saved above under the
+                    Google Gemini provider
+                    {config.providers.google?.apiKey?.trim() ? "" : " — none is saved yet"}.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="bg-remove-key">
+                      {config.bgRemove.provider === "photoroom" ? "PhotoRoom" : "remove.bg"} API key
+                    </Label>
+                    <SecretInput
+                      id="bg-remove-key"
+                      value={config.bgRemove.apiKey}
+                      reveal={!!reveal.bgRemoveKey}
+                      onToggleReveal={() => setReveal((r) => ({ ...r, bgRemoveKey: !r.bgRemoveKey }))}
+                      onChange={(v) =>
+                        patchConfig({ bgRemove: { ...config.bgRemove, apiKey: v } })
+                      }
+                      placeholder={
+                        config.bgRemove.provider === "photoroom"
+                          ? "Paste your PhotoRoom API key"
+                          : "Paste your remove.bg API key"
+                      }
+                    />
+                    <p className="text-[11px] text-ink-subtle">
+                      {config.bgRemove.provider === "photoroom" ? (
+                        <>
+                          Create one at{" "}
+                          <a
+                            href="https://www.photoroom.com/api"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-forest underline"
+                          >
+                            photoroom.com/api
+                          </a>
+                          .
+                        </>
+                      ) : (
+                        <>
+                          Create one at{" "}
+                          <a
+                            href="https://www.remove.bg/api"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-forest underline"
+                          >
+                            remove.bg/api
+                          </a>
+                          .
+                        </>
+                      )}{" "}
+                      Used to cut the subject out of a design you upload.
+                    </p>
+                  </div>
+                )}
               </section>
 
               <Separator />

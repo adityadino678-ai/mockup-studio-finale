@@ -1,5 +1,13 @@
 import type { Transform } from "@/types/domain";
 
+/** A rectangle in canvas pixels. */
+export interface ClipRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 // ---------------------------------------------------------------------------
 // Transform math. This module is the single source of truth for how a
 // placement is rendered. The Konva editor, the batch worker, and the export
@@ -49,11 +57,19 @@ export function drawPlacement(
   design: CanvasImageSource | ImageBitmap,
   geo: PlacementGeometry,
   t: Transform,
+  clip?: ClipRect,
 ): void {
   const { cx, cy, drawW, drawH } = geo;
   if (drawW <= 0 || drawH <= 0) return;
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, t.opacity));
+  // The clip is applied in CANVAS space, before the design's own transform, so
+  // the cut follows the print area on the mockup and not the artwork's angle.
+  if (clip) {
+    ctx.beginPath();
+    ctx.rect(clip.x, clip.y, clip.width, clip.height);
+    ctx.clip();
+  }
   ctx.translate(cx, cy);
   if (t.rotation % 360 !== 0) {
     ctx.rotate((t.rotation * Math.PI) / 180);
@@ -77,7 +93,7 @@ export function composeToCanvas(
   mockupBmp: ImageBitmap,
   designBmp: ImageBitmap,
   t: Transform,
-  opts: { drawDesignFirst?: boolean } = {},
+  opts: { drawDesignFirst?: boolean; clip?: ClipRect } = {},
 ): Canvas2DSource | null {
   const w = mockupBmp.width;
   const h = mockupBmp.height;
@@ -89,11 +105,11 @@ export function composeToCanvas(
   ctx.imageSmoothingQuality = "high";
   const geo = computeGeometry(w, h, designBmp.width, designBmp.height, t);
   if (opts.drawDesignFirst) {
-    drawPlacement(ctx, designBmp, geo, t);
+    drawPlacement(ctx, designBmp, geo, t, opts.clip);
     ctx.drawImage(mockupBmp, 0, 0, w, h);
   } else {
     ctx.drawImage(mockupBmp, 0, 0, w, h);
-    drawPlacement(ctx, designBmp, geo, t);
+    drawPlacement(ctx, designBmp, geo, t, opts.clip);
   }
   return canvas;
 }

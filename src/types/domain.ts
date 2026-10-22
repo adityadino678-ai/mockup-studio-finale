@@ -68,7 +68,55 @@ export interface Mockup {
   height: number;
   /** user = uploaded by the user; provider = fetched from an external provider. */
   source: "user" | "provider";
+  /**
+   * The print area drawn on this mockup, if the user set one.
+   *
+   * It maps a REAL Printify print area onto the photo: the box's size is the
+   * area's size (in Printify pixels), and the design inside it is placed with
+   * the Printify Studio's own numbers, so the mockup shows what Printify
+   * prints. See `src/lib/mockups/print-area.ts`.
+   */
+  printArea?: MockupPrintArea;
   createdAt: number;
+}
+
+/**
+ * Where a print area's size came from.
+ *
+ * `printify` is the authoritative one: the real placeholder size of a
+ * blueprint + print provider + position. `preset` and `manual` are the
+ * fallbacks for when there is no Printify key.
+ */
+export type PrintAreaSource =
+  | { kind: "printify"; blueprintId: number; printProviderId: number; position: string }
+  | { kind: "preset"; presetId: string }
+  | { kind: "manual" };
+
+/**
+ * A print area on a mockup photo.
+ *
+ * The box is stored in FRACTIONS of the mockup, so it survives a resize and
+ * can be copied to another mockup as a template. Its height is never stored:
+ * it is always the area's own aspect ratio, which is what makes the box the
+ * same shape as the Printify print area.
+ */
+export interface MockupPrintArea {
+  /** The print area's real size, in Printify pixels. */
+  areaWidth: number;
+  areaHeight: number;
+  source: PrintAreaSource;
+  /** Display name, e.g. "Front (DTG)". */
+  label: string;
+  /** The box on the photo. `x`/`y` are the box's centre, `width` its width. */
+  box: { x: number; y: number; width: number };
+  /**
+   * The garment reference: a real-world measurement of the photo, so the
+   * app can report the design's printed size in inches. Optional.
+   */
+  reference?: { label: string; inches: number; pixelsPerInch: number };
+  /** How the design is composited onto the photo. */
+  clipMode: "area" | "behind-garment";
+  updatedAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +243,8 @@ export type TemplateCategory =
   | "ink-rules"
   | "listing"
   | "workflow"
-  | "seo";
+  | "seo"
+  | "print-area";
 
 export interface PlacementTemplatePayload {
   type: "placement";
@@ -244,13 +293,34 @@ export interface SeoTemplatePayload {
   savedAt: number;
 }
 
+/**
+ * A reusable print-area setup.
+ *
+ * It carries the AREA (which Printify print area, its real pixel size, the
+ * garment reference) and the box's position as a fraction of the photo, so
+ * applying it to another mockup lands in the same relative spot. The design's
+ * own placement is NOT here: that belongs to the Printify Studio, which is
+ * the single source of truth for where a design sits on a garment.
+ */
+export interface PrintAreaTemplatePayload {
+  type: "print-area";
+  areaWidth: number;
+  areaHeight: number;
+  source: PrintAreaSource;
+  label: string;
+  box: { x: number; y: number; width: number };
+  reference?: MockupPrintArea["reference"];
+  clipMode: "area" | "behind-garment";
+}
+
 export type TemplatePayload =
   | PlacementTemplatePayload
   | MockupCollectionTemplatePayload
   | InkRulesTemplatePayload
   | ListingTemplatePayload
   | WorkflowTemplatePayload
-  | SeoTemplatePayload;
+  | SeoTemplatePayload
+  | PrintAreaTemplatePayload;
 
 export interface Template {
   id: string;
@@ -445,6 +515,7 @@ export type ActivityType =
   | "design.update"
   | "mockup.upload"
   | "mockup.delete"
+  | "mockup.update"
   | "placement.save"
   | "batch.start"
   | "batch.item"

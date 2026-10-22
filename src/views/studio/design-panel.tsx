@@ -30,12 +30,100 @@ import { FieldLabel, Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/primitives";
 import { designMainAssetId, getAssetBlob } from "@/lib/db/repo";
 import { decodeImage } from "@/lib/image/image";
+import {
+  type DesignColourPlan,
+} from "@/lib/printify/design-colours";
 import { ROW_HINTS, ROW_LABELS } from "@/lib/printify/studio-session";
+import {
+  splitDesignsByInkArtwork,
+  splitDesignsByProduct,
+  type ProductColourGroups,
+  type SeparableDesign,
+} from "@/lib/printify/design-colours";
 import type { Design, StudioPlacement, StudioRowId, StudioSession } from "@/types/domain";
 import { Crosshair } from "lucide-react";
 
 /** A swatch, as the cards draw them. */
 export type DesignSwatch = { name: string; hex: string; ink?: "black" | "white" | "ambiguous" };
+
+/**
+ * What ONE design prints on, for its card.
+ *
+ * The rows are split by the product, so a card can no longer show its row's
+ * colours: a design without ink artwork prints on the plain AND the ink
+ * colours with its main artwork, and a design with ink artwork prints on
+ * the plain ones with its main artwork and on the ink ones with its ink
+ * artwork. The caller knows the product, so the caller says what each card
+ * shows.
+ */
+export interface DesignColours {
+  /** The colour names this design will be printed on. */
+  colors: string[];
+  /** The swatch data for those colours. */
+  swatches: DesignSwatch[];
+}
+
+/**
+ * The colour groups of the ONE product in the session.
+ *
+ * The colours are split into two groups ONCE, in the Colors tab, and every
+ * other view reads them from here. That is what keeps the Designs tab and
+ * the Design panel from disagreeing about which colours print with the ink
+ * artwork - the disagreement that used to leave a design printing on
+ * nothing.
+ */
+export function productColourGroups(session: StudioSession): ProductColourGroups {
+  return {
+    plain: session.rows.plain?.colors ?? [],
+    ink: session.rows.ink?.colors ?? [],
+    blackInk: session.rows.ink?.blackInkColors ?? [],
+  };
+}
+
+/**
+ * The split to show, for the product that is selected.
+ *
+ * With a product chosen, the split follows THAT product: a design belongs
+ * with the ink colours only when it has the ink artwork the product's
+ * colours actually need.
+ *
+ * With NO product chosen there is nothing to separate the designs by - the
+ * colour groups belong to the product - and the Designs tab is usable before
+ * a product is picked, because that is where designs are uploaded and their
+ * ink variants are made. In that state the split falls back to which
+ * designs have their own ink artwork on file.
+ */
+export function splitDesignsForSession<T extends SeparableDesign>(
+  designs: T[],
+  session: StudioSession,
+): { plain: T[]; ink: T[] } {
+  if (!session.blueprintId || !session.printProviderId) {
+    return splitDesignsByInkArtwork(designs);
+  }
+  return splitDesignsByProduct(designs, productColourGroups(session));
+}
+
+/**
+ * The swatches a design's plan prints on.
+ *
+ * A colour printed with the MAIN artwork carries no ink badge - the artwork
+ * is the design itself. A colour printed with an ink artwork carries the
+ * badge of that ink, so the card says what will actually be printed.
+ */
+export function swatchesForPlan(
+  plan: DesignColourPlan,
+  hexFor: (name: string) => string,
+): DesignSwatch[] {
+  const out: DesignSwatch[] = [];
+  for (const group of plan.groups) {
+    const ink =
+      group.ink === "black" ? ("black" as const) : group.ink === "white" ? ("white" as const) : undefined;
+    for (const name of group.colors) {
+      out.push({ name, hex: hexFor(name), ink });
+    }
+  }
+  return out;
+}
 
 /**
  * What an empty row says.
@@ -62,6 +150,14 @@ export interface DesignGalleryProps {
   designs: DesignCardData[];
   /** The colour swatches the row's colours resolve to. */
   swatches?: DesignSwatch[];
+  /**
+   * What each design prints on.
+   *
+   * When this is given it wins over the row's swatches: the rows are split
+   * by the product, so a design's colours are not the row's colours any
+   * more.
+   */
+  designColours?: (design: DesignCardData) => DesignColours | undefined;
   /** The ids ticked for the batch scope. */
   selectedIds?: string[];
   /** Show the batch-scope checkbox. */
@@ -85,6 +181,7 @@ export function DesignGallery({
   row,
   designs,
   swatches,
+  designColours,
   selectedIds,
   showCheckbox = false,
   onToggle,
@@ -109,19 +206,23 @@ export function DesignGallery({
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {designs.map((d, i) => (
-            <DesignCard
-              key={d.id}
-              design={d}
-              index={indexOffset + i}
-              paused={paused}
-              selected={selectedIds?.includes(d.id) ?? false}
-              showCheckbox={showCheckbox}
-              onToggle={onToggle ? () => onToggle(d.id) : undefined}
-              swatches={swatches}
-              onOpen={onOpen ? () => onOpen(d.id) : undefined}
-            />
-          ))}
+          {designs.map((d, i) => {
+            const own = designColours?.(d);
+            return (
+              <DesignCard
+                key={d.id}
+                design={d}
+                index={indexOffset + i}
+                paused={paused}
+                selected={selectedIds?.includes(d.id) ?? false}
+                showCheckbox={showCheckbox}
+                onToggle={onToggle ? () => onToggle(d.id) : undefined}
+                swatches={own?.swatches ?? swatches}
+                colors={own?.colors}
+                onOpen={onOpen ? () => onOpen(d.id) : undefined}
+              />
+            );
+          })}
         </div>
       )}
     </section>
@@ -309,7 +410,10 @@ export function DesignAdjustmentPanel({
                 id="studio-scale"
                 type="range"
                 min={5}
-                max={100}
+                // A design can be WIDER than the print area: the part that
+                // falls outside is cropped off, exactly as Printify crops it.
+                // The mockups tab can set that, so the slider has to show it.
+                max={200}
                 value={Math.round(editing.scale * 100)}
                 onChange={(e) => setPlacement({ scale: Number(e.target.value) / 100 })}
                 className="h-8 w-full accent-[#314d3d]"

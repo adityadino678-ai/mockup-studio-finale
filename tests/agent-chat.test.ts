@@ -778,6 +778,19 @@ describe("mockup + library tools", () => {
     expect(executed.error).toBeDefined();
   });
 
+  it("defaults the background removal to the engine that picks itself", async () => {
+    // "auto" tries the instant engines first and only downloads the AI model
+    // when they cannot help. The old default was flood-key, which removed
+    // nothing at all from a photograph.
+    await seedLibrary();
+    const proposal = await executeTool("remove_background", { design: "sunset" });
+    expect(proposal.confirmation?.payload.engine).toBe("auto");
+    // An engine the app does not know falls back to "auto" rather than to
+    // something that would fail.
+    const odd = await executeTool("remove_background", { design: "sunset", engine: "nonsense" });
+    expect(odd.confirmation?.payload.engine).toBe("auto");
+  });
+
   it("needs an attached image before saving one from chat", async () => {
     const none = await executeTool("save_chat_image", { kind: "design" });
     expect(none.error).toBeDefined();

@@ -7,21 +7,29 @@ import { db } from "@/lib/db/schema";
 import {
   createDesignFromFile,
   deleteDesign,
-  designMainAssetId,
   getAssetBlob,
   logActivity,
   storeAsset,
 } from "@/lib/db/repo";
 import { removeBackgroundAuto, type RemoveEngine } from "@/lib/printify/remove-background";
 import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
-import { DesignGallery, type DesignSwatch } from "@/views/studio/design-panel";
+import { planDesignColours } from "@/lib/printify/design-colours";
+import {
+  DesignGallery,
+  productColourGroups,
+  splitDesignsForSession,
+  swatchesForPlan,
+  type DesignColours,
+  type DesignSwatch,
+} from "@/views/studio/design-panel";
+import type { DesignCardData } from "@/components/studio/design-card";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
 import { Label } from "@/components/ui/input";
 import { hexForColourName, suggestInk } from "@/lib/printify/colors";
 import { ROWS } from "@/lib/printify/studio-session";
-import type { StudioRowId, StudioSession } from "@/types/domain";
+import type { Design, StudioRowId, StudioSession } from "@/types/domain";
 import { Loader2, Trash2, Wand2 } from "lucide-react";
 
 interface DesignRow {
@@ -143,15 +151,57 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       .sort((a, b) => a.createdAt - b.createdAt);
   }, []);
 
+  /**
+   * The gallery split into the two rows, for the ONE selected product.
+   *
+   * The split is a property of (product, design), not of the design alone:
+   * a design belongs with the ink colours only when its ink artwork is one
+   * THIS product actually needs. So a product with an empty ink group needs
+   * no ink artwork at all, and every design is a "no ink variants" design
+   * for it - even one that has an ink variant on file.
+   */
   const rows = React.useMemo(() => {
-    const plain: DesignRow[] = [];
-    const ink: DesignRow[] = [];
-    for (const d of designs ?? []) {
-      if (d.whiteInkAssetId || d.blackInkAssetId) ink.push(d);
-      else plain.push(d);
+    const split = splitDesignsForSession(designs ?? [], session);
+    return { plain: split.plain, ink: split.ink } as Record<StudioRowId, DesignRow[]>;
+  }, [designs, session]);
+
+  /**
+   * The hex of every colour of the product.
+   *
+   * The swatches come from the page, which knows the real hexes of the
+   * product; this map lets a design find the hex of a colour it prints on
+   * whichever row that colour happens to live in.
+   */
+  const hexByColour = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of ROWS) {
+      for (const swatch of swatchesForRow(row)) map.set(swatch.name, swatch.hex);
     }
-    return { plain, ink } as Record<StudioRowId, DesignRow[]>;
-  }, [designs]);
+    return map;
+  }, [swatchesForRow]);
+
+  /**
+   * What each design prints on, for its card.
+   *
+   * A design without ink artwork prints its MAIN artwork on every colour of
+   * the product; a design with ink artwork prints its main artwork on the
+   * plain colours and its ink artwork on the ink ones. The card says so,
+   * so the user can see which colours each design will be printed on.
+   */
+  const designColours = React.useCallback(
+    (design: DesignCardData): DesignColours => {
+      const plan = planDesignColours(
+        {
+          hasBlackInk: Boolean(design.blackInkAssetId),
+          hasWhiteInk: Boolean(design.whiteInkAssetId),
+        },
+        productColourGroups(session),
+      );
+      const hexFor = (name: string) => hexByColour.get(name) ?? hexForColourName(name);
+      return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
+    },
+    [session, hexByColour],
+  );
 
   const toggle = (id: string) =>
     setSelected(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -159,15 +209,74 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   const handleFiles = async (files: File[]) => {
     let ok = 0;
     const errors: string[] = [];
+    const uploaded: Design[] = [];
     setUploading(files.length);
     for (const file of files) {
       const result = await createDesignFromFile(file);
-      if (result.design) ok++;
+      if (result.design) {
+        ok++;
+        uploaded.push(result.design);
+      }
       if (result.error) errors.push(result.error);
       setUploading((n) => n - 1);
     }
     if (ok > 0) toast.success(`Uploaded ${ok} design${ok > 1 ? "s" : ""}`);
     errors.slice(0, 3).forEach((e) => toast.error(e));
+
+    // Separate the images that were just uploaded.
+    //
+    // The user's own background-removal service does this best, so when one
+    // is configured the upload is separated straight away: no button to
+    // press, and no 25 MB model to download first.
+    if (uploaded.length > 0) await separateUploaded(uploaded);
+  };
+
+  /**
+   * Removes the background of every design that was just uploaded.
+   *
+   * The user's own service is used rather than the local engines: this is the
+   * case they set a key up for. A design that cannot be separated is
+   * reported, and the ORIGINAL is always kept.
+   */
+  const separateUploaded = async (uploaded: Design[]) => {
+    let configured = false;
+    try {
+      const { hasBgRemoveKey, loadIntegrations } = await import("@/lib/client/integrations");
+      configured = hasBgRemoveKey(await loadIntegrations());
+    } catch {
+      configured = false;
+    }
+    if (!configured) return;
+
+    let separated = 0;
+    for (const design of uploaded) {
+      try {
+        const blob = await getAssetBlob(design.originalAssetId);
+        if (!blob) continue;
+        const out = await removeBackgroundAuto(blob, { engine: "api" });
+        const asset = await storeAsset(out.blob, `${design.name}-cutout.png`, "design-processed", {
+          parentId: design.originalAssetId,
+        });
+        await db.designs.update(design.id, {
+          processedAssetId: asset.id,
+          updatedAt: Date.now(),
+        });
+        await logActivity(
+          "bgremoval.run",
+          `Separated "${design.name}" after upload with the ${out.engine} engine (${Math.round(out.removed * 100)}% of pixels changed)`,
+        );
+        separated++;
+      } catch (e) {
+        toast.error(
+          `"${design.name}": ${e instanceof Error ? e.message : "could not be separated"}`,
+        );
+      }
+    }
+    if (separated > 0) {
+      toast.success(
+        `Separated ${separated} design${separated > 1 ? "s" : ""} from the background`,
+      );
+    }
   };
 
   /**
@@ -198,7 +307,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       setBusy((b) => (b ? { ...b, current: design.name } : b));
       resetStages();
       try {
-        const sourceId = designMainAssetId(design);
+        const sourceId = design.originalAssetId;
         const blob = await getAssetBlob(sourceId);
         if (!blob) throw new Error(`Could not read "${design.name}" from storage`);
         const out = await removeBackgroundAuto(blob, {
@@ -322,7 +431,9 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
                 <SelectContent>
                   <SelectItem value="auto">Auto (recommended)</SelectItem>
                   <SelectItem value="flood-key">Flood-key (solid backgrounds)</SelectItem>
+                  <SelectItem value="border-model">Border-model (faded backdrops)</SelectItem>
                   <SelectItem value="ai-segmenter">AI segmentation (photos)</SelectItem>
+                  <SelectItem value="api">API (your own key)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -366,6 +477,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           row={row}
           designs={rows[row]}
           swatches={swatchesForRow(row)}
+          designColours={designColours}
           selectedIds={selected}
           showCheckbox
           onToggle={toggle}

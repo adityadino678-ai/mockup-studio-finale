@@ -35,6 +35,17 @@ export interface DesignCardProps {
   onToggle?: () => void;
   /** The colour swatches this design's colours resolve to. */
   swatches?: Array<{ name: string; hex: string; ink?: "black" | "white" | "ambiguous" }>;
+  /**
+   * The colour names THIS design will be printed on.
+   *
+   * Optional, and only a filter: when it is given, only the swatches of
+   * those colours are drawn. The gallery passes it because the rows are
+   * split by the PRODUCT now, so a card can no longer show its row's
+   * colours - a design without ink artwork prints on the plain AND the ink
+   * colours, and a design with ink artwork prints on the plain ones with
+   * its main artwork and on the ink ones with its ink artwork.
+   */
+  colors?: string[];
   /** Called when the card BODY is clicked (opens the adjustment panel). */
   onOpen?: () => void;
   className?: string;
@@ -62,9 +73,23 @@ export function DesignCard({
   showCheckbox = false,
   onToggle,
   swatches,
+  colors,
   onOpen,
   className,
 }: DesignCardProps): React.JSX.Element {
+  /**
+   * The swatches this card draws.
+   *
+   * `colors` narrows the row's swatches down to the ones THIS design is
+   * printed on. Without it every swatch is drawn, which is what a caller
+   * that does not know the per-design colours gets.
+   */
+  const shown = swatches
+    ? colors && colors.length > 0
+      ? swatches.filter((s) => colors.includes(s.name))
+      : swatches
+    : undefined;
+
   const artwork = (
     <WaveCompare
       originalAssetId={design.originalAssetId}
@@ -128,8 +153,8 @@ export function DesignCard({
           {design.name}
         </div>
         <div className="text-[11px] text-ink-subtle">{design.dimensions}</div>
-        {swatches && swatches.length > 0 && (
-          <ColorSwatchRow swatches={swatches} className="pt-0.5" />
+        {shown && shown.length > 0 && (
+          <ColorSwatchRow swatches={shown} className="pt-0.5" />
         )}
       </div>
     </Card>

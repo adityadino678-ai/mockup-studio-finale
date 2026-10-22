@@ -195,7 +195,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "remove_background",
     description:
-      "Remove the background from a design. Uses the flood-key engine for solid backgrounds (default) or AI segmentation for photos/complex images. The original is kept. Nothing is created until the user confirms.",
+      "Remove the background from a design. Auto (default) tries the instant engines first - the flood key for one flat colour, the border model for a backdrop that fades - and only downloads the AI model when they cannot help. The original is kept. Nothing is created until the user confirms.",
     confirm: true,
     parameters: {
       type: "object",
@@ -203,11 +203,14 @@ export const AGENT_TOOLS: AgentTool[] = [
         design: { type: "string", description: "Design name. Omit to use the first design." },
         engine: {
           type: "string",
-          enum: ["flood-key", "ai-segmenter"],
+          enum: ["auto", "flood-key", "border-model", "ai-segmenter"],
           description:
-            "flood-key (instant, solid backgrounds) or ai-segmenter (photos; first run downloads ~25 MB).",
+            "auto (default) picks the engine; flood-key (one flat colour, instant); border-model (a background that fades or vignettes, instant); ai-segmenter (any photo; first run downloads ~25 MB).",
         },
-        tolerance: { type: "number", description: "Flood-key color tolerance (5–120). Defaults to the app default." },
+        tolerance: {
+          type: "number",
+          description: "Color tolerance for the flood-key and border-model engines (5–120). Defaults to the app default.",
+        },
       },
       required: [],
     },

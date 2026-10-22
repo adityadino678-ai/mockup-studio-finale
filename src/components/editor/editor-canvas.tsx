@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Stage, Layer, Image as KonvaImage, Transformer } from "react-konva";
+import { Stage, Layer, Image as KonvaImage, Transformer, Rect, Group } from "react-konva";
 import type Konva from "konva";
-import type { Transform } from "@/types/domain";
+import type { MockupPrintArea, Transform } from "@/types/domain";
+import { boxToPixels } from "@/lib/mockups/print-area";
 
 interface EditorCanvasProps {
   mockupUrl: string;
@@ -17,6 +18,11 @@ interface EditorCanvasProps {
   lockAspect: boolean;
   selected: boolean;
   zoom: number;
+  /**
+   * The mockup's print area, when it has one. The design is clipped to it and
+   * the area is drawn as a guide - the guide is never part of a render.
+   */
+  printArea?: MockupPrintArea;
   /** Live transform updates while dragging (no history). */
   onTransformChange: (t: Transform) => void;
   /** Fired when a discrete interaction ends — push history. */
@@ -59,6 +65,7 @@ export function EditorCanvas({
   lockAspect,
   selected,
   zoom,
+  printArea,
   onTransformChange,
   onCommit,
   onSelect,
@@ -167,6 +174,10 @@ export function EditorCanvas({
       opacity={transform.opacity}
       draggable
       listening
+      // Without this, Konva bounds the drag to the parent's client rect - and
+      // the parent is the clip group, whose rect is the artwork's own bounds.
+      // The artwork would be pinned in place.
+      dragBoundFunc={(pos) => pos}
       onMouseDown={() => onSelect(true)}
       onTap={() => onSelect(true)}
       onDragMove={emitFromNode}
@@ -191,6 +202,42 @@ export function EditorCanvas({
       perfectDrawEnabled={false}
     />
   );
+
+  // The print area, in mockup pixels. The design is clipped to it, so what
+  // is on the canvas is what the product gets.
+  const areaRect = printArea
+    ? boxToPixels(printArea.box, printArea, mockupW, mockupH)
+    : null;
+
+  // The clip lives on a Group around the artwork: Konva clips a group's
+  // children in the group's own coordinate space, which is the canvas space
+  // here because the group is not transformed.
+  const artwork = areaRect ? (
+    <Group
+      clipX={areaRect.x}
+      clipY={areaRect.y}
+      clipWidth={areaRect.width}
+      clipHeight={areaRect.height}
+    >
+      {designNode}
+    </Group>
+  ) : (
+    designNode
+  );
+
+  const areaGuide = areaRect ? (
+    <Rect
+      x={areaRect.x}
+      y={areaRect.y}
+      width={areaRect.width}
+      height={areaRect.height}
+      stroke="#314d3d"
+      strokeWidth={1.5 / displayScale}
+      dash={[6 / displayScale, 4 / displayScale]}
+      listening={false}
+      perfectDrawEnabled={false}
+    />
+  ) : null;
 
   return (
     <div
@@ -224,8 +271,9 @@ export function EditorCanvas({
           }}
         >
           <Layer>
-            {behindMockup ? designNode : mockupNode}
-            {behindMockup ? mockupNode : designNode}
+            {behindMockup ? artwork : mockupNode}
+            {behindMockup ? mockupNode : artwork}
+            {areaGuide}
             <Transformer
               ref={transformerRef}
               rotateEnabled

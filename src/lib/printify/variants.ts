@@ -196,30 +196,3 @@ export function enabledVariantIds(index: ColourIndex, colors: string[], sizes: s
   return resolveVariantIds(index, colors, sizes);
 }
 
-/**
- * The groups a design needs, given which colours use which ink.
- *
- * A design with no ink variants uses ONE group (the main artwork) covering
- * every selected colour. A design with ink variants uses one group per ink,
- * and every group carries its ink LABEL - the artwork is chosen by the label,
- * never by the group's position, so an empty group can never shift the
- * artwork onto the wrong colours.
- */
-export function inkGroupsForDesign(params: {
-  hasInkVariants: boolean;
-  selectedColors: string[];
-  blackInkColors: string[];
-}): Array<{ ink: InkGroup; colors: string[] }> {
-  const { hasInkVariants, selectedColors, blackInkColors } = params;
-  if (!hasInkVariants) {
-    return [{ ink: "main", colors: [...selectedColors] }];
-  }
-  const black = selectedColors.filter((c) => blackInkColors.includes(c));
-  const white = selectedColors.filter((c) => !blackInkColors.includes(c));
-  // Both groups always exist - even when empty - so the ink mapping is
-  // stable. An empty group simply claims no variants.
-  return [
-    { ink: "black", colors: black },
-    { ink: "white", colors: white },
-  ];
-}

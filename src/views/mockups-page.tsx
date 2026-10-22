@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { PrintAreasTab } from "@/views/mockups/print-areas-tab";
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,7 @@ export function MockupsPage() {
   const toggleSelect = useMockupSelection((s) => s.toggle);
   const clearSelection = useMockupSelection((s) => s.clear);
 
+  const [tab, setTab] = React.useState<"library" | "areas">("library");
   const [query, setQuery] = React.useState("");
   const [categoryFilter, setCategoryFilter] = React.useState<"all" | MockupCategory | "favorites">("all");
   const [uploading, setUploading] = React.useState(0);
@@ -110,7 +112,7 @@ export function MockupsPage() {
   }, [mockups]);
 
   return (
-    <div className="mx-auto max-w-6xl p-8">
+    <div className={cn("mx-auto p-8", tab === "areas" ? "max-w-[1600px]" : "max-w-6xl")}>
       <PageHeader
         title="Mockups"
         description="Photos of your products. Uploaded mockups stay on this device."
@@ -127,6 +129,44 @@ export function MockupsPage() {
         }
       />
 
+      {/* The upper section: the library, and the print areas of each mockup. */}
+      <div className="mb-4 flex items-center gap-1 border-b border-border-subtle">
+        <button
+          type="button"
+          onClick={() => setTab("library")}
+          className={cn(
+            "flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold transition-colors",
+            tab === "library"
+              ? "border-forest text-forest"
+              : "border-transparent text-ink-muted hover:text-ink",
+          )}
+        >
+          Mockups
+          <span className="rounded-full bg-surface-muted px-1.5 py-px text-[11px] font-medium text-ink-subtle">
+            {mockups?.length ?? 0}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("areas")}
+          className={cn(
+            "flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold transition-colors",
+            tab === "areas"
+              ? "border-forest text-forest"
+              : "border-transparent text-ink-muted hover:text-ink",
+          )}
+        >
+          Print areas
+          <span className="rounded-full bg-surface-muted px-1.5 py-px text-[11px] font-medium text-ink-subtle">
+            {mockups?.filter((m) => m.printArea).length ?? 0}
+          </span>
+        </button>
+      </div>
+
+      {tab === "areas" ? (
+        <PrintAreasTab />
+      ) : (
+        <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative w-64">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
@@ -188,8 +228,7 @@ export function MockupsPage() {
         />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {filtered.map((m) => {
-            const isSelected = selected.includes(m.id);
+          {filtered.map((m) => {            const isSelected = selected.includes(m.id);
             return (
               <Card key={m.id} className={cn("group overflow-hidden", isSelected && "ring-2 ring-forest")}>
                 <div className="relative cursor-pointer" onClick={() => toggleSelect(m.id)}>
@@ -238,6 +277,8 @@ export function MockupsPage() {
             );
           })}
         </div>
+      )}
+        </>
       )}
 
       {/* Detail dialog */}

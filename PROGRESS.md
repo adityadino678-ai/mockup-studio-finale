@@ -268,3 +268,143 @@ The global `* { border-color: ... }` rule was UNLAYERED, so it beat Tailwind's
 - One product per design, created sequentially. A batch of 50 designs is 50
   uploads plus 50 product creates against Printify's publish limit of 200 per
   30 minutes.
+
+---
+
+## Printify Studio, third pass (Oct 2026)
+
+Two complaints: "the background remover is not working", and "it's not
+separating the non ink variation designs and ink variation designs according
+to one product".
+
+Both were reproduced before anything was changed.
+
+### 1. The background remover
+
+The Designs page (`/designs` -> Actions -> Remove background) offered
+**only** the flood-key engine, which can remove one flat colour. On a real
+photograph it removed 1% and said "1% of pixels now transparent - little
+transparency detected". The Printify Studio's own Designs tab already had a
+working auto-engine, so the two entry points behaved completely differently -
+and the one a user reaches from their artwork library did nothing.
+
+**The engine that does the work.** `removeBackgroundAuto` now runs three
+engines, cheapest first:
+
+| Flood-key result | Next |
+|---|---|
+| removed >= 2% and transparency <= 98% | done - the flat artwork case |
+| removed >= 2% and transparency > 98% | **fail** - the artwork WAS the background. Not escalated: the AI engine cannot help and it would cost a 25 MB download to fail the same way. |
+| removed < 2% | try the **border model** |
+
+The border model is a genuinely different method and it is new. The flood key
+matches ONE flat colour from the border, so on a studio backdrop that fades
+it removes a ragged patch and leaves the rest. The border model estimates
+the background from the image border and takes that estimate ALONG each row
+and column, so a gradient is followed rather than matched against a single
+colour. The removal is restricted to the pixels CONNECTED to the border,
+which is what keeps a white shape inside the artwork from being erased.
+
+Measured on a studio sweep (bright at the top, darker at the bottom - a
+seamless paper lit from one side):
+
+| Engine | Background left opaque | Subject |
+|---|---|---|
+| border-model | **0%** | intact |
+| flood-key | 63% | intact |
+
+It is instant, deterministic and needs no network, so it is the engine that
+still works when the AI model cannot be downloaded. The AI segmenter
+(MODNet) is still the fallback for a photograph with a busy background, and
+its ~25 MB download is announced rather than left to look like a freeze.
+
+Both entry points now use the same engine: the Designs page dialog and the
+agent's `remove_background` tool.
+
+### 2. The separation follows the product
+
+The design split was a global property of the design:
+
+```ts
+const row = design.whiteInkAssetId || design.blackInkAssetId ? "ink" : "plain";
+```
+
+The product's colour groups were a separate, hand-made choice. The two were
+independent, and when they disagreed the product was silently wrong. I
+reproduced it by moving all four of the product's colours into the ink
+group; the studio then reported, for the design without ink artwork:
+
+> flat-design: 132 variant(s) are not in any group
+> flat-design: no variants match the selected colours and sizes
+
+That design would have printed on NOTHING, and the message says nothing
+about why.
+
+The split is now derived from the ONE selected product
+(`src/lib/printify/design-colours.ts`):
+
+- A design WITH ink artwork prints the ink artwork on the ink colours and its
+  main artwork on the plain ones.
+- A design WITHOUT ink artwork prints its main artwork on EVERY colour of
+  the product. Its artwork is not "wrong" on the ink colours - it is simply
+  not tuned for them, so that is reported, not hidden.
+- A design is in the "Has ink variants" group only when it has an ink
+  artwork **that this product's colours actually need**. For a product whose
+  ink group is empty, no design needs an ink artwork, and every design is a
+  "no ink variants" design for that product.
+
+So the separation is a property of (product, design), and the same design
+can land in different groups for different products.
+
+The message is now a plain sentence, and there is a one-click fix that moves
+the offending colours into the "one artwork" group.
+
+### 3. The user's own keys: a hosted background remover
+
+The user asked for the removal to use their **background remover API key** and
+their **Google AI Studio key**, so that images are separated after they are
+uploaded.
+
+**Settings -> API connections** now has a "Background removal" section: a
+service picker (remove.bg / PhotoRoom / Google AI Studio) and the key for it.
+The Gemini path needs no second key - it reuses the Google AI Studio key the
+app already holds as the `google` AI provider. That matters, because sending
+whichever provider happens to be active would ask the wrong account.
+
+The new endpoint `POST /api/bg-remove` forwards the image to the service. It
+follows the credential pattern the app already uses: the key lives in the
+user's own IndexedDB, travels as a request header, and is never written to
+the server. `BG_REMOVE_API_KEY` is the optional server fallback.
+
+Three providers, three different methods:
+
+| Provider | Key | What it does |
+|---|---|---|
+| remove.bg | `x-bg-remove-key` | a dedicated background-removal service |
+| PhotoRoom | `x-bg-remove-key` | the same, a different request shape |
+| Gemini | the **Google AI Studio key** (`x-ai-key`) | edits the image so the background is transparent |
+
+**The separation happens after the upload.** The studio's Designs tab runs
+the `api` engine on every design it just uploaded, when a key is configured,
+and the original is always kept. Verified in the browser: an upload fired
+`POST /api/bg-remove` on the dev server, and the failure came back as a
+toast naming the design - *"flat-design": remove.bg rejected the API key.
+Check the key in Settings.*
+
+The `auto` chain tries the local engines first - they are free, instant and
+private - and reaches the hosted service before the 25 MB model download when
+a key is configured.
+
+The endpoint was verified live against the real providers with a fake key:
+remove.bg answered **403** and PhotoRoom **404**, which proves the request
+reaches them. A rejected key now says so: *"remove.bg rejected the API key.
+Check the key in Settings."*
+
+**Two bugs found on the way:**
+
+- The removal read `designMainAssetId()`, which returns the PROCESSED cutout
+  when there is one - so re-running the removal operated on an
+  already-transparent image, which cannot work, and always said "little was
+  removed". It now always reads the original.
+- The exported Gemini request builder had no default model, so calling it
+  without one built `models/undefined:generateContent`.

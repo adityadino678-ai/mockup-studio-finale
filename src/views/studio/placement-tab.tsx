@@ -15,6 +15,10 @@ import { Switch } from "@/components/ui/primitives";
 import {
   DesignAdjustmentPanel,
   DesignGallery,
+  splitDesignsForSession,
+  productColourGroups,
+  swatchesForPlan,
+  type DesignColours,
   type DesignSwatch,
 } from "@/views/studio/design-panel";
 import {
@@ -25,12 +29,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { buildPartition, inkGroupsForDesign, resolveVariantIds } from "@/lib/printify/variants";
+import { buildPartition, resolveVariantIds } from "@/lib/printify/variants";
+import {
+  coloursToMoveToPlain,
+  inkArtworkProblems,
+  planDesignColours,
+  type InkArtworkProblem,
+} from "@/lib/printify/design-colours";
 import { assertCompletePartition } from "@/lib/printify/print-areas";
 import { clampPlacement } from "@/lib/printify/fit";
 import { inkProblems, placementFor, renderTitle, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
 import type { StudioCatalogState } from "@/views/printify-studio-page";
 import type { StudioProductResult, StudioSession, Design } from "@/types/domain";
+import type { DesignCardData } from "@/components/studio/design-card";
 import { AlertTriangle, Crosshair, Loader2, Package, Send } from "lucide-react";
 
 interface PlacementTabProps {
@@ -103,17 +114,48 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
 
   const designs = React.useMemo(() => (gallery ?? []).map((g) => g.design), [gallery]);
 
-  /** The gallery split into the two rows: with ink variants and without. */
+  /**
+   * The gallery split into the two rows, for the ONE selected product.
+   *
+   * The split follows the product, not the design: a design is in the ink
+   * row only when its ink artwork is one this product's colours need. So a
+   * product with an empty ink group puts EVERY design in the "no ink
+   * variants" row, and the Design panel agrees with the Designs tab because
+   * both call the same helper.
+   */
   const galleryRows = React.useMemo(() => {
+    const split = splitDesignsForSession(designs ?? [], session);
+    const plainIds = new Set(split.plain.map((d) => d.id));
     const plain: GalleryEntry[] = [];
     const ink: GalleryEntry[] = [];
     for (const entry of gallery ?? []) {
-      const d = entry.design;
-      if (d.whiteInkAssetId || d.blackInkAssetId) ink.push(entry);
-      else plain.push(entry);
+      if (plainIds.has(entry.design.id)) plain.push(entry);
+      else ink.push(entry);
     }
     return { plain, ink };
-  }, [gallery]);
+  }, [designs, gallery, session]);
+
+  /**
+   * What each design prints on, for its card.
+   *
+   * The card cannot show its row's colours any more: a design without ink
+   * artwork prints on the plain AND the ink colours with its main artwork,
+   * and a design with ink artwork prints on the plain ones with its main
+   * artwork and on the ink ones with its ink artwork.
+   */
+  const designColours = React.useCallback(
+    (design: DesignCardData): DesignColours => {
+      const plan = planDesignColours(
+        {
+          hasBlackInk: Boolean(design.blackInkAssetId),
+          hasWhiteInk: Boolean(design.whiteInkAssetId),
+        },
+        productColourGroups(session),
+      );
+      return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
+    },
+    [session, hexFor],
+  );
 
   /** The colour swatches of a row, so every card in it shows its colours. */
   const swatchesForRow = React.useCallback(
@@ -178,23 +220,33 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   }, [designs, session.designIds]);
 
   // --- the plan --------------------------------------------------------------
+  /**
+   * What each design will be printed with, for this product.
+   *
+   * The plan comes from the product's colour groups and the design's own ink
+   * artwork, so it always covers EVERY colour of the product: the plain ones
+   * with the main artwork, the ink ones with the ink artwork the design
+   * actually has. A design with no ink artwork prints its main artwork
+   * everywhere - that is reported as a problem, never dropped silently.
+   */
   const plan = React.useMemo(() => {
     if (!designs || !session.blueprintId || !session.printProviderId) return null;
     const colourIndex = buildIndexFromVariants(catalog.variants);
+    const groups = productColourGroups(session);
     const items: DesignPlan[] = [];
     for (const design of scope) {
-      const row: "plain" | "ink" = design.whiteInkAssetId || design.blackInkAssetId ? "ink" : "plain";
-      const state = session.rows[row];
-      const groups = inkGroupsForDesign({
-        hasInkVariants: row === "ink",
-        selectedColors: state?.colors ?? [],
-        blackInkColors: session.rows.ink?.blackInkColors ?? [],
-      });
+      const colourPlan = planDesignColours(
+        {
+          hasBlackInk: Boolean(design.blackInkAssetId),
+          hasWhiteInk: Boolean(design.whiteInkAssetId),
+        },
+        groups,
+      );
       items.push({
         designId: design.id,
         designName: design.name,
-        row,
-        groups: groups.map((g) => {
+        row: colourPlan.usesInkArtwork ? "ink" : "plain",
+        groups: colourPlan.groups.map((g) => {
           if (g.ink === "main") {
             return {
               ink: g.ink,
@@ -223,7 +275,36 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   }, [designs, scope, session, catalog.variants]);
 
   // --- the problems ----------------------------------------------------------
-  const problems = React.useMemo(() => {
+  /**
+   * The designs whose ink artwork does not cover the product's ink colours.
+   *
+   * This is the check that says WHAT is wrong. The partition check below
+   * only knows that the product cannot be built ("132 variants are not in
+   * any group"); this one knows that the design has no artwork for the ink
+   * those colours need, which is the actual cause.
+   */
+  const artworkProblems = React.useMemo(
+    () => inkArtworkProblems(scope, productColourGroups(session)),
+    [scope, session],
+  );
+
+  /** The colours the one-click fix would move into the one-artwork group. */
+  const movable = React.useMemo(() => coloursToMoveToPlain(artworkProblems), [artworkProblems]);
+
+  /** How many of the batch's designs are affected. */
+  const affectedDesigns = React.useMemo(
+    () => new Set(artworkProblems.map((p) => p.designId)).size,
+    [artworkProblems],
+  );
+
+  /**
+   * The API-level problems: the partition is incomplete, the variant cap is
+   * exceeded, or nothing matches the selection.
+   *
+   * These are the safety net. The ink artwork problems above are the ones
+   * that say WHY a design cannot serve a colour.
+   */
+  const partitionProblems = React.useMemo(() => {
     if (!plan) return [];
     const found: string[] = [];
     for (const item of plan.items) {
@@ -258,6 +339,51 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
     }
     return found;
   }, [plan, session.sizes]);
+
+  /**
+   * Everything that stops the batch from being created.
+   *
+   * The ink artwork problems come first: they name the cause, and they are
+   * the ones the one-click fix clears.
+   */
+  const problems = React.useMemo(
+    () => [
+      ...artworkProblems.map((p) => `${p.designName}: ${describeMissingInk(p)}`),
+      ...partitionProblems,
+    ],
+    [artworkProblems, partitionProblems],
+  );
+
+  /**
+   * Moves the colours no design can serve into the one-artwork group.
+   *
+   * The colours are exactly the ones the problems name, so after the move
+   * every design can print every colour of the product with its main
+   * artwork and the problem is gone. The rows are copied, never mutated:
+   * the session is React state, and a mutated object would not re-render.
+   */
+  const moveColoursToPlain = React.useCallback(() => {
+    if (movable.length === 0) return;
+    const moving = new Set(movable);
+    const rows = { ...session.rows };
+    const plainColors = [...(rows.plain?.colors ?? [])];
+    const inkColors = (rows.ink?.colors ?? []).filter((c) => !moving.has(c));
+    for (const colour of movable) {
+      if (!plainColors.includes(colour)) plainColors.push(colour);
+    }
+    rows.plain = {
+      colors: plainColors,
+      blackInkColors: (rows.plain?.blackInkColors ?? []).filter((c) => plainColors.includes(c)),
+    };
+    rows.ink = {
+      colors: inkColors,
+      blackInkColors: (rows.ink?.blackInkColors ?? []).filter((c) => inkColors.includes(c)),
+    };
+    update({ rows });
+    toast.success(
+      `Moved ${movable.length} colour${movable.length === 1 ? "" : "s"} to the one-artwork group. Every design can print every colour now.`,
+    );
+  }, [movable, session.rows, update]);
 
   /** Colours whose ink would be invisible on the garment. */
   const invisible = React.useMemo(
@@ -504,6 +630,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
             dimensions: g.dimensions,
           }))}
           swatches={swatchesForRow(row)}
+          designColours={designColours}
           indexOffset={row === "ink" ? galleryRows.plain.length : 0}
           onOpen={(id) => setEditingDesignId(id)}
         />
@@ -580,17 +707,58 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           )}
 
           <div ref={problemsRef} tabIndex={-1}>
-            {problems.length > 0 && (
+            {artworkProblems.length > 0 && (
               <div role="alert" className="space-y-1 rounded-md bg-danger-soft px-3 py-2">
-                {problems.slice(0, 5).map((p) => (
+                {artworkProblems.map((p) => (
+                  <p
+                    key={`${p.designId}-${p.ink}`}
+                    data-ink-problem=""
+                    className="text-[12px] text-danger"
+                  >
+                    {p.designName}: {describeMissingInk(p)}
+                  </p>
+                ))}
+                {movable.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={moveColoursToPlain}
+                      title="After the move every design can print every colour with the main artwork, so the problem disappears."
+                      data-move-to-plain=""
+                    >
+                      Move these colours to the one-artwork group
+                    </Button>
+                    <span className="text-[11px] text-danger">
+                      {movable.join(", ")} will print with the main artwork, so every design can
+                      print every colour.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+            {partitionProblems.length > 0 && (
+              <div
+                role="alert"
+                className={`space-y-1 rounded-md bg-danger-soft px-3 py-2${
+                  artworkProblems.length > 0 ? " mt-2" : ""
+                }`}
+              >
+                {partitionProblems.slice(0, 5).map((p) => (
                   <p key={p} className="text-[12px] text-danger">
                     {p}
                   </p>
                 ))}
-                {problems.length > 5 && (
-                  <p className="text-[12px] text-danger">…and {problems.length - 5} more.</p>
+                {partitionProblems.length > 5 && (
+                  <p className="text-[12px] text-danger">…and {partitionProblems.length - 5} more.</p>
                 )}
               </div>
+            )}
+            {affectedDesigns > 0 && (
+              <p className="mt-2 text-[12px] text-danger">
+                {affectedDesigns} of {scope.length} design{scope.length === 1 ? "" : "s"} cannot
+                print every colour of this product with the ink artwork they have.
+              </p>
             )}
             {invisible.length > 0 && (
               <div
@@ -759,6 +927,28 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
       </Dialog>
     </div>
   );
+}
+
+/**
+ * What is actually wrong with one design and one ink.
+ *
+ * The wording names the colour, the artwork that is missing and the
+ * consequence, because the partition check that used to catch this said
+ * none of that - it only said that the product could not be built.
+ */
+function describeMissingInk(problem: InkArtworkProblem): string {
+  const colours = joinNames(problem.colors);
+  if (problem.ink === "white") {
+    return `this design has no white-ink artwork, so on ${colours} it would print with the main artwork - invisible on a dark garment.`;
+  }
+  return `this design has no black-ink artwork, so on ${colours} it would print with the main artwork - it was not prepared for the black ink.`;
+}
+
+/** "Black", "Black and Navy", "Black, Navy and White". */
+function joinNames(names: string[]): string {
+  if (names.length === 0) return "the ink colours";
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 /** Builds the colour index from the catalogue variants. */

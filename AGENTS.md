@@ -177,26 +177,98 @@ Four things that are easy to get wrong, and were:
    fifty products. Created products are also written to `productDrafts`, so
    they show up in the Product Builder and the Listings page.
 
-## Background removal: two engines, and the rule that picks between them
+## Background removal: four engines, and the rule that picks between them
 
-`src/lib/printify/remove-background.ts` owns the decision. The cheap engine
-runs first and the expensive one is only used when the cheap one provably
+`src/lib/printify/remove-background.ts` owns the decision. The cheap engines
+run first and the expensive one is only used when the cheap ones provably
 cannot help:
 
 | Flood-key result | Outcome |
 |---|---|
 | removed >= 2% and transparency <= 98% | success, engine `flood-key` (flat artwork) |
 | removed >= 2% and transparency > 98% | **throw** - the artwork WAS the background. Do NOT escalate: the AI engine cannot help, and it would cost a 25 MB download to fail the same way. |
-| removed < 2% | **escalate to `ai-segmenter`** - this is a photo |
-| AI removed < 2% | throw "no background was detected" |
+| removed < 2% | try the **border model** next |
+| border model removed >= 2% and transparency <= 99.5% | success, engine `border-model` (a backdrop that fades or vignettes) |
+| border model removed < 2% | the **hosted service** next, if the user configured one, then the local model |
 
 `removed` is the fraction of pixels whose ALPHA CHANGED, never the output's
 total transparency: a soft ramp (alpha 255 -> 100) counts as a change, and an
 already-transparent artwork scores 1.0 without a pixel being touched.
 
-The AI engine downloads MODNet (~25 MB) from a CDN at runtime, so its stages
-are reported through `onProgress` - "Downloading the background model (~25 MB,
-first use only)" must be visible or the run looks like a freeze.
+The four engines are genuinely different methods:
+
+- **flood-key** matches ONE flat colour from the border. Instant, offline.
+- **border-model** (`src/lib/bg-removal/border-model.ts`) models the
+  background from the image border and takes the estimate ALONG each row and
+  column, so a gradient or a vignette is followed instead of matched against
+  one colour. The removal is restricted to the pixels CONNECTED to the
+  border, which is what keeps a white shape inside the artwork from being
+  erased. Instant, offline, no model.
+- **ai-segmenter** (MODNet in a worker) handles any photograph. It downloads
+  ~25 MB from a CDN on the first run, so its stages are reported through
+  `onProgress` - "Downloading the background model (~25 MB, first use only)"
+  must be visible or the run looks like a freeze.
+- **api** is the user's own hosted service - see below. It is the engine the
+  after-upload separation uses, and the `auto` chain reaches it before the
+  25 MB download when a key is configured.
+
+**Every entry point must use `removeBackgroundAuto`.** The Designs page
+dialog used to call the old `removeBackground()` directly, which never
+escalated - so on a photograph it removed ~1% and reported "little
+transparency detected". The agent's `remove_background` tool had the same
+bug.
+
+**The removal always reads the ORIGINAL file**, never the processed cutout.
+`designMainAssetId()` returns the cutout when there is one, so re-running the
+removal used to operate on an already-transparent image - which cannot work,
+and reported "little was removed" every time.
+
+## The hosted background remover (the user's own key)
+
+`POST /api/bg-remove` forwards to the service the user configured in
+Settings. Three providers:
+
+| Provider | Key | What it does |
+|---|---|---|
+| `remove-bg` | `x-bg-remove-key` | a dedicated background-removal service |
+| `photoroom` | `x-bg-remove-key` | the same, different request shape |
+| `gemini` | the **Google AI Studio key** (`x-ai-key`) | Gemini edits the image so the background is transparent |
+
+The credential pattern is the one the app already uses: the key lives in the
+user's own IndexedDB, travels as a request header, and is never written to
+the server. `BG_REMOVE_API_KEY` is the optional server fallback.
+
+**Gemini needs the GOOGLE key specifically, not whichever AI provider is
+active** - `bgRemoveHeaders()` sends `x-ai-provider: google` and the Google
+provider's key, so the request goes to the right account.
+
+The removal's source is the ORIGINAL file, and the after-upload separation
+in the studio's Designs tab uses the `api` engine directly - that is the
+case the user sets a key up for. The local engines stay first in the `auto`
+chain, because they are free, instant and private.
+
+## The design split follows ONE product, not the design
+
+`src/lib/printify/design-colours.ts` owns this. A product has ONE set of
+colours, split into two groups: `plain` (one artwork) and `ink` (the ink
+artwork, black on some colours and white on the rest).
+
+The designs are separated **to match that product**:
+
+- A design WITH ink artwork prints the ink artwork on the ink colours and its
+  main artwork on the plain ones.
+- A design WITHOUT ink artwork prints its main artwork on EVERY colour of
+  the product. Its artwork is not "wrong" on the ink colours - it is simply
+  not tuned for them, so that is reported, not hidden.
+- A design is in the "Has ink variants" group only when it has an ink
+  artwork **that this product's colours actually need**. For a product whose
+  ink group is empty, no design needs an ink artwork and every design is a
+  "no ink variants" design for that product.
+
+The rule that matters: **a design always covers every colour of the
+product.** The old code took the design's colour set from the group its ink
+assets happened to match, so a design whose group was empty printed on
+nothing and the only clue was "132 variant(s) are not in any group".
 
 ## Placement: drag, rotate, snap
 

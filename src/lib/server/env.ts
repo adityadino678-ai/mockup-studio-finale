@@ -18,6 +18,12 @@ export const serverEnv = {
   aiBaseUrl: () => getSecret("AI_BASE_URL"),
   aiModel: () => getSecret("AI_MODEL"),
   openaiApiKey: () => getSecret("OPENAI_API_KEY"),
+  /**
+   * Fallback key for the hosted background-removal APIs (remove.bg /
+   * PhotoRoom). It is optional: a visitor's own key, sent as the
+   * `x-bg-remove-key` header, always wins over it.
+   */
+  bgRemoveApiKey: () => getSecret("BG_REMOVE_API_KEY"),
 };
 
 /** JSON response helper shared by every endpoint (Astro endpoints return a `Response`). */

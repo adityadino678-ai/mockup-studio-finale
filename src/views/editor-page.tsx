@@ -8,8 +8,12 @@ import { db } from "@/lib/db/schema";
 import { getAssetBlob, getPlacement, savePlacement, storeAsset } from "@/lib/db/repo";
 import { sanitizeFilename, decodeImage, canvasToBlob } from "@/lib/image/image";
 import { composeToCanvas } from "@/lib/canvas/compose";
+import { clipRect } from "@/lib/mockups/print-area";
+import { transformFromPrintArea, writeBackStudioPlacement } from "@/lib/mockups/resolve";
+import { placementForTransform } from "@/lib/mockups/resolve";
+import { loadSession } from "@/lib/printify/studio-session";
 import { useEditorStore, selectDirty, selectCanUndo, selectCanRedo, type EditorSnapshot } from "@/lib/store/editor";
-import type { InkVariant, Template } from "@/types/domain";
+import type { InkVariant, Template, Transform } from "@/types/domain";
 import { DEFAULT_TRANSFORM } from "@/types/domain";
 import { EditorPicker } from "@/components/editor/editor-picker";
 // react-konva is ~360 kB of the editor bundle. Loading it on demand keeps it
@@ -133,9 +137,25 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
       if (cancelled || !d || !m) return;
       let designAssetId = d.originalAssetId;
       if (existing) designAssetId = existing.designAssetId;
-      const snapshot: EditorSnapshot = existing
-        ? { designAssetId: existing.designAssetId, transform: { ...existing.transform }, behindMockup: existing.behindMockup ?? false }
-        : { designAssetId, transform: { ...DEFAULT_TRANSFORM }, behindMockup: false };
+
+      // A mockup with a print area takes its placement from the Printify
+      // Studio: that is the placement the product was listed with, so the
+      // mockup and the product cannot disagree. It wins over a saved
+      // placement for the same reason.
+      let transform: Transform = existing ? { ...existing.transform } : { ...DEFAULT_TRANSFORM };
+      if (m.printArea) {
+        const fromStudio = await transformFromPrintArea({
+          designId,
+          mockup: m,
+        });
+        if (fromStudio) transform = fromStudio;
+      }
+
+      const snapshot: EditorSnapshot = {
+        designAssetId,
+        transform,
+        behindMockup: existing?.behindMockup ?? m.printArea?.clipMode === "behind-garment",
+      };
       const savedSnap: EditorSnapshot | null = existing
         ? { designAssetId: existing.designAssetId, transform: { ...existing.transform }, behindMockup: existing.behindMockup ?? false }
         : null;
@@ -223,15 +243,29 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
 
   const handleSave = async () => {
     if (!current) return;
-    await savePlacement({
-      designId,
-      mockupId,
-      designAssetId: current.designAssetId,
-      transform: current.transform,
-      behindMockup: current.behindMockup,
-    });
+    // With a print area, the Studio owns the placement: saving writes the
+    // new numbers back into the Studio session, for this design.
+    if (mockup.printArea) {
+      const session = await loadSession();
+      const placement = placementForTransform({
+        transform: current.transform,
+        area: mockup.printArea,
+        mockupW: mockup.width,
+        mockupH: mockup.height,
+        position: session.universalPlacement.position,
+      });
+      await writeBackStudioPlacement(designId, placement, session);
+    } else {
+      await savePlacement({
+        designId,
+        mockupId,
+        designAssetId: current.designAssetId,
+        transform: current.transform,
+        behindMockup: current.behindMockup,
+      });
+    }
     markSaved();
-    toast.success("Placement saved");
+    toast.success(mockup.printArea ? "Placement updated in the Printify Studio" : "Placement saved");
   };
 
   const handleSaveTemplate = async () => {
@@ -271,8 +305,14 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
     }
     const [mockupBmp, designBmp] = await Promise.all([decodeImage(mockupBlob), decodeImage(designBlob)]);
     const canvas = document.createElement("canvas");
+    // A mockup with a print area clips the design to it, exactly like the
+    // product does.
+    const clip = mockup.printArea
+      ? clipRect(mockup.printArea.box, mockup.printArea, mockup.width, mockup.height)
+      : undefined;
     const result = composeToCanvas(canvas, mockupBmp, designBmp, current.transform, {
-      drawDesignFirst: current.behindMockup,
+      drawDesignFirst: current.behindMockup || mockup.printArea?.clipMode === "behind-garment",
+      clip,
     });
     mockupBmp.close();
     designBmp.close();
@@ -490,6 +530,7 @@ function EditorWorkspace({ designId, mockupId }: { designId: string; mockupId: s
               lockAspect={lockAspect}
               selected={selected}
               zoom={zoom}
+              printArea={mockup.printArea}
               onTransformChange={(t) => setTransform(t, false)}
               onCommit={() => commit()}
               onSelect={setSelected}

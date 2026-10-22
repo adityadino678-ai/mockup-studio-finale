@@ -29,7 +29,7 @@ import {
 } from "@/lib/db/repo";
 import { createInkVariantBlob } from "@/lib/canvas/compose";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
-import { removeBackground, type BgRemovalEngineId } from "@/lib/bg-removal/engine";
+import { removeBackgroundAuto, type RemoveEngine } from "@/lib/printify/remove-background";
 import {
   DEFAULT_TRANSFORM,
   type ImagePartData,
@@ -148,7 +148,7 @@ const HOWTO: Array<{ match: RegExp; answer: string }> = [
   {
     match: /background|remove bg|cutout|transparen/i,
     answer:
-      "Background removal runs locally: MODNet is tuned for photos, while the flood-key engine is better for flat artwork on a solid background. Pick the engine on the design's actions menu.",
+      "Background removal runs locally and picks its own engine: flat backgrounds are removed instantly, and photos use MODNet (the first run downloads ~25 MB, then it is cached). You can also force an engine on the design's actions menu.",
   },
   {
     match: /ink|variant|white|black/i,
@@ -605,18 +605,46 @@ export async function confirmInkVariant(payload: Record<string, unknown>): Promi
 // Background removal (proposal + real write)
 // ---------------------------------------------------------------------------
 
+/**
+ * The engines the background-removal tool accepts.
+ *
+ * "auto" is the default: it runs the instant engines first and only
+ * downloads the AI model when they cannot do the job. A hard-coded flood
+ * key could only ever remove one flat colour, so a photograph came back
+ * with nothing changed and the agent reported a removal that never
+ * happened.
+ */
+const REMOVE_ENGINES: RemoveEngine[] = ["auto", "flood-key", "border-model", "ai-segmenter"];
+
+function parseRemoveEngine(value: unknown): RemoveEngine {
+  return REMOVE_ENGINES.includes(value as RemoveEngine) ? (value as RemoveEngine) : "auto";
+}
+
+/** What each engine does, in the words the confirm card shows. */
+const ENGINE_BLURB: Record<RemoveEngine, string> = {
+  auto:
+    "The engine picks itself: a flat background is handled instantly, a backdrop that fades is handled by the border model, and a photo uses AI segmentation (the first run downloads ~25 MB).",
+  "flood-key": "The flood-key engine removes one flat background colour, instantly.",
+  "border-model":
+    "The border-model engine follows a background that fades or vignettes, instantly.",
+  "ai-segmenter":
+    "AI segmentation handles any photo, but the first run downloads ~25 MB of model.",
+  api:
+    "Your own background-removal service (remove.bg, PhotoRoom or Google AI Studio) removes the background.",
+};
+
 async function proposeRemoveBackground(args: Record<string, unknown>): Promise<ToolExecResult> {
   const designs = await db.designs.toArray();
   if (!designs.length) return { summary: "No designs to process", error: "Upload a design first." };
   const design = pickByName(designs, String(args.design ?? "")) ?? designs[0];
-  const engine: BgRemovalEngineId = args.engine === "ai-segmenter" ? "ai-segmenter" : "flood-key";
+  // The engine the model asked for, or "auto" - which tries the instant
+  // engines first and only downloads the AI model when they cannot help.
+  const engine = parseRemoveEngine(args.engine);
   const tolerance = Number(args.tolerance);
   return {
-    summary: `Ready to remove the background from “${design.name}” (${engine})`,
+    summary: `Ready to remove the background from “${design.name}”`,
     confirmation: {
-      detail: `Remove the background from “${design.name}” using ${
-        engine === "ai-segmenter" ? "AI segmentation (the first run downloads ~25 MB)" : "the flood-key engine"
-      }. The original file is kept.`,
+      detail: `Remove the background from “${design.name}”. ${ENGINE_BLURB[engine]} The original file is kept.`,
       payload: {
         designId: design.id,
         designName: design.name,
@@ -632,34 +660,42 @@ export async function confirmRemoveBackground(payload: Record<string, unknown>):
   const designId = String(payload.designId ?? "");
   const design = designId ? await db.designs.get(designId) : undefined;
   if (!design) return { summary: "Design not found", error: "That design is no longer in this browser." };
-  const engine: BgRemovalEngineId = payload.engine === "ai-segmenter" ? "ai-segmenter" : "flood-key";
+  const engine = parseRemoveEngine(payload.engine);
   const tolerance = typeof payload.tolerance === "number" ? payload.tolerance : undefined;
   try {
-    const blob = await getAssetBlob(designMainAssetId(design));
+    const blob = await getAssetBlob(design.originalAssetId);
     if (!blob) return { summary: "Artwork missing", error: "The design's artwork is missing from storage." };
-    const out = await removeBackground(engine, blob, tolerance);
-    if (out.transparency < 0.005) {
+    const out = await removeBackgroundAuto(blob, { engine, tolerance });
+    // `removed` is the fraction of pixels whose ALPHA CHANGED. The output's
+    // total transparency cannot answer this: an artwork that was already
+    // transparent scores 1.0 without a pixel being touched, and a solid
+    // artwork scores 1.0 because the ARTWORK was the thing erased.
+    if (out.removed < 0.005) {
       return {
         summary: "No background detected",
-        error: `No background was detected in “${design.name}”. Try the AI engine or a different image.`,
+        error: `No background was detected in “${design.name}”. Try a different image.`,
       };
     }
+    const pct = Math.round(out.removed * 100);
     const asset = await storeAsset(out.blob, `${design.name}-cutout.png`, "design-processed", {
       parentId: design.originalAssetId,
     });
     await db.designs.update(design.id, { processedAssetId: asset.id, updatedAt: Date.now() });
     await logActivity(
       "bgremoval.run",
-      `Agent removed the background from “${design.name}” (${Math.round(out.transparency * 100)}% transparent)`,
+      `Agent removed the background from “${design.name}” with the ${out.engine} engine (${pct}% of pixels changed)`,
     );
     return {
-      summary: `Removed the background from “${design.name}” (${Math.round(out.transparency * 100)}% transparent)`,
-      result: { designId: design.id, assetId: asset.id, transparency: out.transparency },
+      summary: `Removed the background from “${design.name}” with the ${out.engine} engine (${pct}% of pixels changed)`,
+      result: { designId: design.id, assetId: asset.id, engine: out.engine, removed: out.removed },
     };
   } catch (error) {
+    // The engine's own message is safe to show; the design's name is put in
+    // front of it so the card says WHICH image could not be processed.
+    const message = error instanceof Error ? error.message : "Background removal failed.";
     return {
       summary: "Background removal failed",
-      error: error instanceof Error ? error.message : "Background removal failed.",
+      error: message.startsWith(`“${design.name}”`) ? message : `“${design.name}”: ${message}`,
     };
   }
 }

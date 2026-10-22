@@ -1,7 +1,16 @@
 import { db } from "@/lib/db/schema";
-import { designAssetIdFor, getAssetBlob, storeAsset, uid, logActivity, getPlacement } from "@/lib/db/repo";
+import {
+  designAssetIdFor,
+  getAssetBlob,
+  storeAsset,
+  uid,
+  logActivity,
+  getPlacement,
+} from "@/lib/db/repo";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
 import { composeToCanvas } from "@/lib/canvas/compose";
+import { clipRect } from "@/lib/mockups/print-area";
+import { transformFromPrintArea } from "@/lib/mockups/resolve";
 import {
   DEFAULT_TRANSFORM,
   type BatchItem,
@@ -53,8 +62,15 @@ export async function renderComposition(params: {
   const [mockupBmp, designBmp] = await Promise.all([decodeImage(mockupBlob), decodeImage(designBlob)]);
   try {
     const canvas = document.createElement("canvas");
+    // A mockup with a print area clips the design to it: whatever falls
+    // outside the printable area is not on the product either.
+    const area = mockup.printArea;
+    const clip = area
+      ? clipRect(area.box, area, mockup.width, mockup.height)
+      : undefined;
     const composed = composeToCanvas(canvas, mockupBmp, designBmp, params.transform, {
-      drawDesignFirst: params.behindMockup ?? false,
+      drawDesignFirst: params.behindMockup ?? area?.clipMode === "behind-garment",
+      clip,
     });
     if (!composed) throw new Error("Compositing failed");
     const blob = await canvasToBlob(canvas, "image/png");
@@ -94,6 +110,15 @@ async function resolveTransform(
   mockupId: string,
   placementTemplateId: string | undefined,
 ): Promise<{ transform: Transform }> {
+  // A mockup with a print area takes its placement from the Printify Studio:
+  // that is the placement the product was (or will be) listed with, so the
+  // mockup and the product cannot disagree. It wins over a saved placement
+  // for the same reason.
+  const mockup = await db.mockups.get(mockupId);
+  if (mockup?.printArea) {
+    const fromStudio = await transformFromPrintArea({ designId, mockup });
+    if (fromStudio) return { transform: fromStudio };
+  }
   const saved = await getPlacement(designId, mockupId);
   if (saved) return { transform: { ...saved.transform } };
   if (placementTemplateId) {

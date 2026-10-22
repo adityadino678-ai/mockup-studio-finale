@@ -36,6 +36,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/primitives";
 import { formatDateTime } from "@/lib/utils";
+import { describePrintAreaTemplate } from "@/lib/mockups/print-area";
 import { Boxes, Copy, MoreHorizontal, Pencil, Play, Plus, Search, Trash2 } from "lucide-react";
 
 const CATEGORY_LABELS: Record<TemplateCategory, string> = {
@@ -46,6 +47,7 @@ const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   listing: "Listing",
   workflow: "Workflow",
   seo: "SEO",
+  "print-area": "Print area",
 };
 
 function describeTemplate(t: Template): string {
@@ -59,6 +61,7 @@ function describeTemplate(t: Template): string {
     return `${t.payload.tags.length} tags${t.payload.priceCents ? ` · $${(t.payload.priceCents / 100).toFixed(2)}` : ""}`;
   if (t.payload.type === "workflow") return `${t.payload.steps.length} steps`;
   if (t.payload.type === "seo") return `${t.payload.keywords.length} keywords`;
+  if (t.payload.type === "print-area") return describePrintAreaTemplate(t.payload);
   return "";
 }
 
@@ -127,6 +130,8 @@ export function TemplatesPage() {
       toast.success(`Applied "${applying.name}" to ${applyTargets.length} design(s)`);
     } else if (applying.payload.type === "mockup-collection") {
       toast.info("Mockup collections are used inside Batch Studio");
+    } else if (applying.payload.type === "print-area") {
+      toast.info("Print-area templates are applied from Mockups → Print areas");
     } else {
       toast.info(`Template type "${applying.payload.type}" is informational — no artwork is changed`);
     }
@@ -162,6 +167,7 @@ export function TemplatesPage() {
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="placement">Placement</TabsTrigger>
             <TabsTrigger value="mockup-collection">Mockups</TabsTrigger>
+            <TabsTrigger value="print-area">Print area</TabsTrigger>
             <TabsTrigger value="seo">SEO</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -258,7 +264,9 @@ export function TemplatesPage() {
               <DialogDescription>
                 {applying.payload.type === "placement"
                   ? `This sets ${describeTemplate(applying)} on the placements of the designs you select. Designs without a saved placement are skipped — open them in the editor first.`
-                  : "This template does not change artwork. Continue to see its details."}
+                  : applying.payload.type === "print-area"
+                    ? `This sets ${describeTemplate(applying)} on the mockups you select. Apply it from Mockups → Print areas, where you can tick the mockups to write it to.`
+                    : "This template does not change artwork. Continue to see its details."}
               </DialogDescription>
             </DialogHeader>
             <div className="scroll-thin max-h-[300px] space-y-1 overflow-y-auto pr-1">
