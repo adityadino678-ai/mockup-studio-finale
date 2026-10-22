@@ -25,7 +25,7 @@ import {
 // Batch job engine.
 //
 // Renders sequentially on the main thread using the SAME compositing function
-// as the editor (composeToCanvas), yielding to the event loop between items so
+// as Save render (composeToCanvas), yielding to the event loop between items so
 // the UI stays responsive and status updates stream in live. Item status lives
 // in IndexedDB and is read by the UI through dexie live queries, so progress is
 // always real counts — never an estimate.

@@ -14,7 +14,7 @@ const TYPE_LABELS: Record<string, { label: string; variant: "default" | "muted" 
   "design.update": { label: "Update", variant: "muted" },
   "mockup.upload": { label: "Upload", variant: "default" },
   "mockup.delete": { label: "Delete", variant: "danger" },
-  "placement.save": { label: "Editor", variant: "muted" },
+  "placement.save": { label: "Placement", variant: "muted" },
   "batch.start": { label: "Batch", variant: "default" },
   "batch.item": { label: "Batch", variant: "muted" },
   "bgremoval.run": { label: "Bg removal", variant: "default" },

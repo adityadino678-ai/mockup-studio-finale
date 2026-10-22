@@ -1,8 +1,30 @@
 ---
-import AppLayout from "@/layouts/AppLayout.astro";
-import { DashboardRoute } from "@/routes/DashboardRoute";
+// The root is a redirect, not a page.
+//
+// The app used to open on an Overview dashboard. That page is gone, and the
+// Printify Studio is the canonical home, so "/" sends everyone there instead
+// of keeping a second address for the same screen.
+//
+// A static page (rather than a server route) keeps every page prerendered:
+// the meta refresh works without JavaScript, the inline redirect is instant
+// for everyone else, and the link is there for a browser that does neither.
+const target = "/printify-studio";
 ---
 
-<AppLayout>
-  <DashboardRoute client:only="react" />
-</AppLayout>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <link rel="canonical" href={target} />
+    <meta http-equiv="refresh" content={`0;url=${target}`} />
+    <title>Mockup Studio</title>
+    <script is:inline define:vars={{ target }}>
+      window.location.replace(target);
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to the <a href={target}>Printify Studio</a>…</p>
+  </body>
+</html>

@@ -468,7 +468,7 @@ describe("tool executors", () => {
   it("answers a known how-to question", async () => {
     const result = await executeTool("explain_howto", { topic: "how do I upload a design" });
     expect(result.error).toBeUndefined();
-    expect(String((result.result as { answer: string }).answer)).toContain("Designs page");
+    expect(String((result.result as { answer: string }).answer)).toContain("Printify Studio");
   });
 
   it("counts the workspace from IndexedDB", async () => {

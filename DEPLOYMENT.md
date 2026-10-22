@@ -44,13 +44,15 @@ installs dependencies on first run, opens the browser and starts the server.
 
 ```
 npm run build
-  └─ astro build          12 pages -> static HTML in dist/
+  └─ astro build          7 pages -> static HTML in dist/
   └─ postbuild.mjs        writes dist/.assetsignore containing "_worker.js"
 ```
 
 Because no page depends on request state (all data is in the visitor's
-IndexedDB), every page is prerendered and served from Cloudflare's CDN. Only the
-five `/api/**` endpoints render on demand; each sets
+IndexedDB), every page is prerendered and served from Cloudflare's CDN. There are
+7 of them: `/` (a static redirect to `/printify-studio`), `/printify-studio`,
+`/mockups`, `/export`, `/agent`, `/activity`, `/settings`. Only the nine
+`/api/**` endpoints render on demand; each sets
 `export const prerender = false`. The generated `dist/_routes.json` excludes the
 pages and `/_astro/*` from the Worker.
 
@@ -101,8 +103,8 @@ to `main` will then rebuild and redeploy.
 ```powershell
 npm run lint
 npm run typecheck
-npm run test          # 27 unit
-npm run test:e2e      # 15 acceptance, local dev server
+npm run test          # 321 unit
+npm run test:e2e      # 23 acceptance, local dev server
 ```
 
 Against production:
@@ -124,8 +126,8 @@ Every route should return 200, and the status endpoint should report
 
 ## Integrations and secrets
 
-No API keys are deployed. That is deliberate: the core workflow — upload, edit,
-batch, background removal, ink variants, templates, ZIP export — needs no keys,
+No API keys are deployed. That is deliberate: the core workflow — upload, place,
+print areas, render, background removal, ink variants, ZIP export — needs no keys,
 and with none present every integration endpoint returns 503 before doing any
 work, so the public attack surface is effectively nil.
 
@@ -141,10 +143,11 @@ Supported names: `PRINTIFY_API_KEY`, `ETSY_API_KEY`, `ETSY_ACCESS_TOKEN`,
 
 Locally, copy `.dev.vars.example` to `.dev.vars`.
 
-**Before enabling Printify:** the product-creation endpoint accepts a 25 MB
-base64 artwork payload, which exceeds the Workers 128 MB memory limit. Lower
-`MAX_UPLOAD_BYTES` in `src/pages/api/printify/products.ts` and stream or resize
-the artwork first.
+**Before enabling Printify:** the product-creation endpoint accepts an 8 MB
+base64 artwork payload (`MAX_UPLOAD_BYTES` in
+`src/pages/api/printify/products.ts`). That cap exists because the decoded buffer
+plus the body can approach the Workers 128 MB memory limit; raising it means
+streaming or resizing the artwork instead of buffering it.
 
 ## Backups
 

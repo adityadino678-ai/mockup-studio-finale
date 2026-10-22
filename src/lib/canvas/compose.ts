@@ -12,9 +12,9 @@ export interface ClipRect {
 
 // ---------------------------------------------------------------------------
 // Transform math. This module is the single source of truth for how a
-// placement is rendered. The Konva editor, the batch worker, and the export
+// placement is rendered. The batch engine, Save render and the export
 // compositor all call drawPlacement / computeDrawRect, which guarantees that
-// exported output matches the on-screen editor exactly.
+// a render saved from the Mockups tab matches the exported output exactly.
 // ---------------------------------------------------------------------------
 
 export interface PlacementGeometry {

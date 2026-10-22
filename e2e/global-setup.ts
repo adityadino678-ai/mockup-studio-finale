@@ -16,21 +16,19 @@ import { chromium } from "@playwright/test";
  * already up by the time this runs.
  */
 
-/** Every route the suite visits. */
+/**
+ * Every route the suite visits.
+ *
+ * "/" is included: it is a static redirect to the Printify Studio, and the
+ * warm-up follows it, which is exactly what a visitor's browser does.
+ */
 const ROUTES = [
   "/",
   "/agent",
-  "/designs",
   "/mockups",
-  "/editor",
-  "/batch",
-  "/templates",
-  "/seo",
+  "/export",
   "/activity",
   "/settings",
-  "/products",
-  "/listings",
-  "/export",
   "/printify-studio",
 ];
 
@@ -46,9 +44,10 @@ export default async function globalSetup() {
           timeout: 120_000,
         });
         // The app shell is a React island: it only proves the route works
-        // once the shell has hydrated.
+        // once the shell has hydrated. "Printify Studio" is in the sidebar on
+        // every page.
         await page
-          .getByRole("link", { name: /Batch Studio/ })
+          .getByRole("link", { name: "Printify Studio" })
           .waitFor({ state: "attached", timeout: 60_000 });
       } catch {
         // A route that will not warm is a route the suite will report on

@@ -139,7 +139,7 @@ export interface CreatePrintifyProductInput {
   printAreaGroups?: PrintifyPrintAreaGroup[];
   /**
    * Legacy single-artwork form: position → uploaded image id. Kept for the
-   * Product Builder and the agent tool. `print_areas` is REQUIRED by
+   * agent tool. `print_areas` is REQUIRED by
    * Printify, so one of the two forms must always be present.
    */
   printAreas?: Record<string, string>;

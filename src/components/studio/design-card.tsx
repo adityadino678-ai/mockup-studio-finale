@@ -3,9 +3,18 @@
 import * as React from "react";
 import { AssetThumb } from "@/components/asset-thumb";
 import { ColorSwatchRow } from "@/components/studio/color-swatch";
+import { Button } from "@/components/ui/button";
 import { Badge, Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/primitives";
+import {
+  Checkbox,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
+import { Copy, Download, MoreHorizontal, Palette, Pencil, Trash2, Wand2 } from "lucide-react";
 
 /**
  * Everything a card needs to draw one design.
@@ -65,6 +74,19 @@ export interface DesignCardProps {
   onUnpair?: () => void;
   /** Called when the card BODY is clicked (opens the adjustment panel). */
   onOpen?: () => void;
+  /**
+   * The per-design actions, drawn as a "…" menu in the card's footer.
+   *
+   * Every one is optional and the menu is only drawn when at least one is
+   * given, so the Design panel (which edits placement, not the design) does
+   * not grow a second set of actions.
+   */
+  onEdit?: () => void;
+  onInkVariants?: () => void;
+  onRemoveBackground?: () => void;
+  onDownload?: () => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
   className?: string;
 }
 
@@ -95,6 +117,12 @@ export function DesignCard({
   onSetInkRole,
   onUnpair,
   onOpen,
+  onEdit,
+  onInkVariants,
+  onRemoveBackground,
+  onDownload,
+  onDuplicate,
+  onDelete,
   className,
 }: DesignCardProps): React.JSX.Element {
   /**
@@ -112,6 +140,11 @@ export function DesignCard({
 
   /** A paired design with no ink artwork at all cannot print its ink colours. */
   const missingInk = inkPair && !design.whiteInkAssetId && !design.blackInkAssetId;
+
+  /** Nothing to put in a menu means no menu - see the prop's comment. */
+  const hasActions = Boolean(
+    onEdit || onInkVariants || onRemoveBackground || onDownload || onDuplicate || onDelete,
+  );
 
   // The cutout when there is one, the original otherwise. No animation: a grid
   // of fifty cards moving is noise, not information.
@@ -175,10 +208,66 @@ export function DesignCard({
       </div>
 
       <div className="min-w-0 space-y-1.5 border-t border-border-subtle px-3 py-2">
-        <div className="truncate text-[13px] font-medium text-ink" title={design.name}>
-          {design.name}
+        <div className="flex items-start justify-between gap-1">
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-medium text-ink" title={design.name}>
+              {design.name}
+            </div>
+            <div className="truncate text-[11px] text-ink-subtle">{design.dimensions}</div>
+          </div>
+          {hasActions && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Actions for ${design.name}`}
+                  className="shrink-0"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {onEdit && (
+                  <DropdownMenuItem onClick={onEdit}>
+                    <Pencil /> Rename / tag
+                  </DropdownMenuItem>
+                )}
+                {onInkVariants && (
+                  <DropdownMenuItem onClick={onInkVariants}>
+                    <Palette /> Ink variants
+                  </DropdownMenuItem>
+                )}
+                {onRemoveBackground && (
+                  <DropdownMenuItem onClick={onRemoveBackground}>
+                    <Wand2 /> Remove background
+                  </DropdownMenuItem>
+                )}
+                {onDownload && (
+                  <DropdownMenuItem onClick={onDownload}>
+                    <Download /> Download
+                  </DropdownMenuItem>
+                )}
+                {onDuplicate && (
+                  <DropdownMenuItem onClick={onDuplicate}>
+                    <Copy /> Duplicate
+                  </DropdownMenuItem>
+                )}
+                {onDelete && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-danger focus:bg-danger-soft"
+                      onClick={onDelete}
+                    >
+                      <Trash2 /> Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
-        <div className="truncate text-[11px] text-ink-subtle">{design.dimensions}</div>
         {shown && shown.length > 0 && (
           <ColorSwatchRow swatches={shown} className="pt-0.5" />
         )}

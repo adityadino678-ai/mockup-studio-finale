@@ -364,7 +364,7 @@ export async function deleteMockup(mockupId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Placements (editor saves)
+// Placements (Studio saves)
 // ---------------------------------------------------------------------------
 
 export async function savePlacement(params: {

@@ -666,8 +666,8 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           continue;
         }
 
-        // Record the product in the app's own draft table, so it shows up in
-        // the Product Builder, the Listings page and the artifact rail.
+        // Record the product in the app's own draft table, so the artifact
+        // rail and the export can see it even after Printify drops the page.
         const mainAsset = item.groups[0]?.assetId ?? "";
         await db.productDrafts.put({
           id: uid(),

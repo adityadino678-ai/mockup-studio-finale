@@ -1,12 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "@/lib/client/nav";
 import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import { createMockupFromFile, deleteMockup, updateMockup } from "@/lib/db/repo";
-import { useMockupSelection } from "@/lib/store/selection";
 import type { Mockup, MockupCategory } from "@/types/domain";
 import { PageHeader } from "@/components/layout/page-header";
 import { AssetThumb } from "@/components/asset-thumb";
@@ -39,8 +37,8 @@ import {
 } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import {
+  Crop,
   Heart,
-  Layers,
   MoreHorizontal,
   Search,
   Shapes,
@@ -50,12 +48,9 @@ import {
 
 
 export function MockupsPage() {
-  const router = useRouter();
-  const selected = useMockupSelection((s) => s.selectedMockupIds);
-  const toggleSelect = useMockupSelection((s) => s.toggle);
-  const clearSelection = useMockupSelection((s) => s.clear);
-
   const [tab, setTab] = React.useState<"library" | "areas">("library");
+  /** The mockup the Print areas tab should open on, when the library sent it. */
+  const [areaMockupId, setAreaMockupId] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
   const [categoryFilter, setCategoryFilter] = React.useState<"all" | MockupCategory | "favorites">("all");
   const [uploading, setUploading] = React.useState(0);
@@ -64,6 +59,18 @@ export function MockupsPage() {
   const [detail, setDetail] = React.useState<Mockup | null>(null);
 
   const mockups = useLiveQuery(() => db.mockups.orderBy("createdAt").reverse().toArray(), []);
+
+  /**
+   * Opens the Print areas tab on one mockup.
+   *
+   * This is what the old "Open in editor" action became: the design's
+   * placement lives in the Printify Studio now, and the mockups tab is where
+   * a mockup gets the frame that carries that design.
+   */
+  const openPrintArea = (id: string) => {
+    setAreaMockupId(id);
+    setTab("areas");
+  };
 
   const filtered = React.useMemo(() => {
     if (!mockups) return undefined;
@@ -108,17 +115,6 @@ export function MockupsPage() {
       <PageHeader
         title="Mockups"
         description="Photos of your products. Uploaded mockups stay on this device."
-        actions={
-          selected.length > 0 ? (
-            <>
-              <span className="mr-1 text-[13px] text-ink-muted">{selected.length} selected</span>
-              <Button size="sm" onClick={() => router.push("/batch")}>
-                <Layers className="h-3.5 w-3.5" /> Use in Batch
-              </Button>
-              <Button size="sm" variant="ghost" onClick={clearSelection}>Clear</Button>
-            </>
-          ) : undefined
-        }
       />
 
       {/* The upper section: the library, and the print areas of each mockup. */}
@@ -156,7 +152,7 @@ export function MockupsPage() {
       </div>
 
       {tab === "areas" ? (
-        <PrintAreasTab />
+        <PrintAreasTab initialMockupId={areaMockupId} />
       ) : (
         <>
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -215,15 +211,15 @@ export function MockupsPage() {
           description={
             mockups && mockups.length > 0
               ? "Try a different category, search, or clear the filter."
-              : "Upload photos of blank products â€” t-shirts, hoodies, mugs â€” and place your designs on them in the editor."
+              : "Upload photos of blank products — t-shirts, hoodies, mugs — and place your designs on them in the Printify Studio."
           }
         />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {filtered.map((m) => {            const isSelected = selected.includes(m.id);
+          {filtered.map((m) => {
             return (
-              <Card key={m.id} className={cn("group overflow-hidden", isSelected && "ring-2 ring-forest")}>
-                <div className="relative cursor-pointer" onClick={() => toggleSelect(m.id)}>
+              <Card key={m.id} className="group overflow-hidden">
+                <div className="relative cursor-pointer" onClick={() => setDetail(m)}>
                   <AssetThumb assetId={m.assetId} className="aspect-[4/3] w-full bg-surface-muted" />
                   {m.favorite && (
                     <Star className="absolute right-2 top-2 h-3.5 w-3.5 fill-warning text-warning" />
@@ -255,8 +251,8 @@ export function MockupsPage() {
                       >
                         <Heart /> {m.favorite ? "Remove favorite" : "Add favorite"}
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => router.push(`/editor?mockup=${m.id}`)}>
-                        <Shapes /> Open in editor
+                      <DropdownMenuItem onClick={() => openPrintArea(m.id)}>
+                        <Crop /> Set the print area
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem className="text-danger focus:bg-danger-soft" onClick={() => setConfirmDelete(m)}>
@@ -284,8 +280,8 @@ export function MockupsPage() {
           </DialogHeader>
           {detail && <AssetThumb assetId={detail.assetId} className="max-h-[380px] w-full rounded-md bg-surface-muted" />}
           <DialogFooter>
-            <Button size="sm" onClick={() => { if (detail) router.push(`/editor?mockup=${detail.id}`); setDetail(null); }}>
-              Open in editor
+            <Button size="sm" onClick={() => { if (detail) openPrintArea(detail.id); setDetail(null); }}>
+              Set the print area
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -127,7 +127,7 @@ export function swatchesForPlan(
 export const DESIGN_ROW_EMPTY: Record<StudioRowId, { title: string; hint: string }> = {
   plain: {
     title: "No designs without ink variants yet",
-    hint: "Upload a design on the Designs page and it will appear here.",
+    hint: "Upload a design above and it will appear here.",
   },
   ink: {
     title: "No designs with ink variants yet",
@@ -176,6 +176,13 @@ export interface DesignGalleryProps {
   onPairInk?: (blackInkDesignId: string, whiteInkDesignId: string) => void;
   /** Called when a card's body is clicked. */
   onOpen?: (id: string) => void;
+  /** The per-design actions in the card's "…" menu. */
+  onEditDesign?: (id: string) => void;
+  onInkVariants?: (id: string) => void;
+  onRemoveBackground?: (id: string) => void;
+  onDownload?: (id: string) => void;
+  onDuplicate?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 /**
@@ -199,6 +206,12 @@ export function DesignGallery({
   onUnpair,
   onPairInk,
   onOpen,
+  onEditDesign,
+  onInkVariants,
+  onRemoveBackground,
+  onDownload,
+  onDuplicate,
+  onDelete,
 }: DesignGalleryProps) {
   // The designs the user could pair RIGHT NOW: ink-ticked and not already in
   // a pair. Two of them is the whole gesture - no batch selection needed.
@@ -273,6 +286,14 @@ export function DesignGallery({
                 onSetInkRole={onSetInkRole ? (role) => onSetInkRole(d.id, role) : undefined}
                 onUnpair={onUnpair ? () => onUnpair(d.id) : undefined}
                 onOpen={onOpen ? () => onOpen(d.id) : undefined}
+                onEdit={onEditDesign ? () => onEditDesign(d.id) : undefined}
+                onInkVariants={onInkVariants ? () => onInkVariants(d.id) : undefined}
+                onRemoveBackground={
+                  onRemoveBackground ? () => onRemoveBackground(d.id) : undefined
+                }
+                onDownload={onDownload ? () => onDownload(d.id) : undefined}
+                onDuplicate={onDuplicate ? () => onDuplicate(d.id) : undefined}
+                onDelete={onDelete ? () => onDelete(d.id) : undefined}
               />
             );
           })}

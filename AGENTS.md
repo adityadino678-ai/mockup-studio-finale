@@ -5,9 +5,15 @@ not obvious from the code.
 
 ## What this is
 
-A local-first print-on-demand workspace for sellers: upload artwork, composite it
-onto mockup photos in a real editor, batch-generate combinations, create ink
-variants, remove backgrounds, reuse templates, and export verified ZIP archives.
+A local-first print-on-demand workspace for sellers: upload artwork, place it on a
+real Printify print area, map that area onto mockup photos, generate renders,
+create ink variants, remove backgrounds, and export verified ZIP archives.
+
+There are **seven pages** — `/` (a static redirect to the Studio), Printify
+Studio, Mockups, Export Center, Agent, Activity, Settings. The Designs, editor,
+Batch Studio, Templates, Product Builder, Listings and AI SEO screens were folded
+into those pages or removed; their engines (batch runner, compositor, Printify
+core, agent tools) are still here and still what the UI and the agent call.
 
 **The defining constraint: all user data lives in the visitor's own IndexedDB.**
 Nothing is synced, there is no account, and the server holds no user data. This
@@ -44,8 +50,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 327 unit tests
-npm run test:e2e      # 29 acceptance tests (local dev server)
+npm run test          # 321 unit tests
+npm run test:e2e      # 23 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -62,10 +68,11 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **13 static pages + 9 on-demand endpoints.** No page depends on request state,
+- **7 static pages + 9 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
-  only API calls reach the Worker.
+  only API calls reach the Worker. `/` is a static redirect (meta refresh plus
+  `location.replace`, with an `<a>` fallback) to `/printify-studio`, not a view.
 - **App shell and page view share one React tree** (`src/routes/*.tsx`).
   Astro islands cannot nest, and the views need Radix context from
   `TooltipProvider`. Putting the shell in `.astro` broke hydration — `Tooltip`
@@ -155,6 +162,15 @@ place the artwork, create one Printify product per design.
   `tests/studio-printify.test.ts` - the ONLY safety net, because CI has no
   Printify key.
 - `src/views/studio/` - the three tabs: Designs, Colors, Design panel.
+- **The Designs tab absorbed the old Designs page.** Each card's "…" menu
+  (`design-card.tsx`, labelled `Actions for <name>`) renames and tags
+  (`edit-design-dialog.tsx`), creates ink variants (`ink-variants-dialog.tsx`,
+  moved here from `components/designs/`), removes the background inline,
+  downloads the artwork, duplicates and deletes. The tab also has a search box
+  and tag chips, and one bulk "Remove background" for the ticked designs. The
+  card menu's remove-background calls the SAME `removeBackgrounds(ids)` the bulk
+  button does, with an explicit id - there is no separate dialog, because a
+  second remover was how the two paths drifted apart before.
 - The session is one blob in the `settings` table (`printifyStudio:session`).
   It survives a reload without a schema migration.
 
@@ -175,8 +191,8 @@ Four things that are easy to get wrong, and were:
    everything was removed.
 4. **Only the ticked designs are created.** An empty selection means NO
    batch, not "every design" - otherwise one click turns one design into
-   fifty products. Created products are also written to `productDrafts`, so
-   they show up in the Product Builder and the Listings page.
+   fifty products. Created products are also written to `productDrafts`, so the
+   Agent's artifact rail and the Export Center can see them.
 
 ## Background removal: two engines, both local, no key and no limit
 
@@ -211,11 +227,12 @@ and no upload. Do not re-add an AI model or a `BG_REMOVE_API_KEY` path. A busy
 photographic background is out of scope, and the error message says so
 instead of quietly escalating to something that costs money.
 
-**Every entry point must use `removeBackgroundAuto`.** The Designs page
-dialog used to call the old `removeBackground()` directly, which never
-escalated - so on a photograph it removed ~1% and reported "little
-transparency detected". The agent's `remove_background` tool had the same
-bug.
+**Every entry point must use `removeBackgroundAuto`.** The Designs page's dialog
+(removed with the page) used to call the old `removeBackground()` directly, which
+never escalated - so on a photograph it removed ~1% and reported "little
+transparency detected". The agent's `remove_background` tool had the same bug.
+The Studio now has exactly two entry points - the card menu and the bulk button -
+and both call `removeBackgrounds`, which uses `removeBackgroundAuto`.
 
 **The removal always reads the ORIGINAL file**, never the processed cutout.
 `designMainAssetId()` returns the cutout when there is one, so re-running the
@@ -340,18 +357,17 @@ That is the whole design, and it is deliberate:
   degrees), so it survives a resize and travels as a template.
 - The frame's rotation composes with the Studio's angle: the drawn rotation
   is `frame.rotation + placement.angle`. `studioPlacementFromTransform` takes
-  the frame back off when the editor writes to the Studio session.
-- **The design is clipped to the frame** - in the preview, the editor, every
-  batch render and the export. Cut is `clipFor(...)` -> a centre + size +
-  rotation, consumed by `compose.ts` (`translate -> rotate -> rect -> clip`)
-  and by the editor's Konva `clipFunc`.
+  the frame back off when a transform has to become a Studio placement.
+- **The design is clipped to the frame** - in the preview, every batch render
+  and the export. Cut is `clipFor(...)` -> a centre + size + rotation, consumed
+  by `compose.ts` (`translate -> rotate -> rect -> clip`).
 - **A mockup can show only PART of the area: the crop.** A shirt photographed
   folded hides the bottom of the print area, so `MockupPrintArea.crop` is the
   window (`x`, `y`, `width`, `height` as fractions of the area) the design is
   allowed to paint on. The area itself is unchanged and `print-file.ts` still
   renders the whole 4500 x 5400 - that is what Printify prints. `clipFor`
-  returns the WINDOW's centre + size + rotation, so the preview, the editor,
-  every batch render and the export all cut at the fold with no extra code;
+  returns the WINDOW's centre + size + rotation, so the preview, every batch
+  render and the export all cut at the fold with no extra code;
   `cropLocalRect` feeds the Konva group's clip, and `areaPointInMockup` /
   `areaPointFromMockup` convert between mockup pixels and area fractions so
   the window's handles stay right at any angle. Absent = whole area, and
@@ -375,7 +391,12 @@ position pickers here:
   garment plus a real width in inches gives the photo a scale, and the app
   reports the area's and the design's printed size in inches.
 - **Compositing**: clip to area, or draw under a transparent mockup PNG.
-- **Reuse**: print-area templates and the print-file export.
+- **Reuse**: print-area templates, the print-file export, and **Save render** -
+  which composes the design onto the mockup through the batch engine's
+  `renderComposition` and stores it as a `mockup-render` asset for the Export
+  Center. It is the same call the agent's `create_mockup_render` makes, so a
+  saved render and an agent render are pixel-identical, and it clips to the
+  print area and its window.
 - `Set as the placeholder for all designs` drops the per-design Studio
   overrides, so every design lands at the Studio's universal placement.
 
@@ -434,9 +455,9 @@ position pickers here:
   all set IMPERATIVELY; only committed values (the frame's size) come from
   props. A prop on a dragged node snaps it back.
 - **A Konva clip on a `Group` clips in the group's local space,** which is
-  what makes the frame's clip turn with the frame. The editor needs a
-  rotated, centre-based clip too, so it uses `clipFunc` on an untransformed
-  group - the artwork keeps its composed transform and the Store stays right.
+  what makes the frame's clip turn with the frame. `clipFunc` on an
+  untransformed group was used by the editor for a rotated, centre-based clip;
+  the editor is gone, but `compose.ts` still cuts at the same rectangle.
 - The design's pixel size is NOT needed for the mapping: Printify scales
   artwork uniformly, and the renderer preserves the artwork's own aspect.
   Only the area's size and the frame matter.
@@ -465,7 +486,7 @@ position pickers here:
 3. **PowerShell `Set-Content -Encoding UTF8` writes a BOM.** It silently corrupted
    `package.json` and introduced BOMs into 49 source files. Use the editor tools,
    or `[System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($false)))`.
-4. **Cloudflare redirects `/designs` → `/designs/`.** `astro dev` does not. Any
+4. **Cloudflare redirects `/mockups` → `/mockups/`.** `astro dev` does not. Any
    URL assertion must tolerate an optional trailing slash.
 5. **Commit messages with `"` break PowerShell argument parsing.** Use
    `git commit -F <file>`.
@@ -492,6 +513,17 @@ position pickers here:
 ## Known gaps
 
 - **Workers Builds auto-deploy is not connected** (needs the dashboard click above).
+- **Eight screens were removed on purpose**, and what they did is now either in
+  a surviving page or gone: Designs → the Studio's Designs tab; the editor's
+  free canvas → the Studio's placement panel; Batch Studio → the agent's
+  `create_batch_job` plus **Save render** in Mockups → Print areas; Templates →
+  print-area templates; Product Builder → the Studio's Design panel; Listings
+  and AI SEO → the agent's `draft_listing`. Their engines
+  (`lib/batch/runner.ts`, `lib/canvas/compose.ts`, `lib/printify/*`,
+  `lib/client/tools.ts`, all nine `/api/*` endpoints) are untouched, because the
+  UI and the agent still call them. Accepted losses: there is no batch-job list
+  screen (the renders land in the Export Center, and a batch row in the artifact
+  rail is inert) and no free-form canvas editor.
 - **API keys are optional and user-supplied.** A visitor can paste their own
   Printify / AI keys in **Settings → API connections**; they are stored in that
   browser's IndexedDB (`settings` table, key `integrations`) and sent per-request
@@ -545,7 +577,7 @@ position pickers here:
   `confirmSaveChatImage`). `create_printify_product` auto-resolves the blueprint
   from a product type (catalog keyword search), then a print provider and up to
   100 variants, but never invents ids — with no product type it asks. `create_ink_variant`
-  and `remove_background` reuse the editor's own canvas code
+  and `remove_background` reuse the Studio's own canvas code
   (`createInkVariantBlob`, `removeBackgroundAuto`); `create_mockup_render` reuses the
   batch engine's `renderComposition`, so a single render and a batch render are
   pixel-identical. `save_chat_image` reads images the user attached in the
@@ -631,13 +663,13 @@ position pickers here:
   artwork is uploaded first (`POST /v1/uploads/images.json`) and its id (a
   **string**) is attached to the print area. The client sends all of these
   (`src/lib/server/printify.ts`, `src/pages/api/printify/products.ts`), the
-  Product Builder collects a price and print provider, and artwork is downscaled
+  Studio's Design panel collects a price and print provider, and artwork is downscaled
   to fit an **8 MB** upload cap (base64 inflates ~33%). A live run created
   product `6ad322422a5e991891032a2b` (blueprint 6, provider 30, 100 variants,
   visible, 666 auto-generated mockups), so the path is proven end to end.
 - **Printify caps a product at 100 enabled variants.** Sending more fails with
   code `8251` / "Too many variants enabled. Maximum allowed: 100". The client
-  default-selects the first 100 (`MAX_VARIANTS` in `src/views/products-page.tsx`),
+  default-selects the first 100 (`MAX_VARIANTS` in `src/views/studio/colors-tab.tsx`),
   the `All` button stops at the cap, the Create button disables past it, the
   `create_printify_product` tool sends at most 100, and
   `src/pages/api/printify/products.ts` rejects a larger payload with 400 before
@@ -663,8 +695,9 @@ position pickers here:
   `workers.dev`. Export a ZIP from the local app first if the data matters.
 - **Cloudflare calls `workers.dev` "not business-critical"** — a custom domain is
   the next step if this ever matters commercially.
-- **Etsy listing *submission* is deliberately not implemented** (drafts +
-  validation only) because v3 OAuth needs app registration.
+- **Etsy listing *submission* is deliberately not implemented** (the agent
+  drafts copy to paste; the old validation module went with the Listings page)
+  because v3 OAuth needs app registration.
 - **Background removal is local and deliberately limited.** It handles a
   solid or faded backdrop; a busy photographic background has to be cut out
   before upload. There is no AI model and no hosted service, so there is
@@ -672,8 +705,11 @@ position pickers here:
 
 ## Git
 
-History is intact — 11 commits from `c7cc6bc feat: foundation` through
-`0304329 fix(deploy): make wrangler deploy work and verify against production`.
+History is intact. The eight removed screens were folded into the surviving six in
+`9788f62 feat: consolidate the app around the Printify Studio`. Everything before
+it — the foundation, the Astro migration, live Printify product creation, agent
+M1–M4, and the mockup print areas — is still in the log, which is where the
+reasoning behind the domain layer lives.
 
 Do **not** touch `adityadino678-ai/mockup-studio`. It is a *different* project (a
 Vite SPA using `@imgly/background-removal` and `onnxruntime-web`, with branches

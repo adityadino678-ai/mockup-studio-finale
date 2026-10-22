@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Image helpers: decode, thumbnails, validation, compositing.
-// Shared by editor preview, batch worker, and export — the same transform
+// Shared by Save render, the batch engine, and export — the same transform
 // math always produces the rendered output.
 // ---------------------------------------------------------------------------
 

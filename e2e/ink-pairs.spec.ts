@@ -13,13 +13,19 @@ import path from "node:path";
 const fixture = (name: string) => path.join(process.cwd(), "e2e", "fixtures", name);
 
 async function resetWorkspace(page: Page) {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    const databases = await indexedDB.databases();
-    for (const database of databases) {
-      if (database.name) indexedDB.deleteDatabase(database.name);
-    }
-  });
+  // Land on the app first: the CDP call needs the page's origin, and "/" is a
+  // redirect to the Studio now. Clearing through CDP also avoids the blocked
+  // `deleteDatabase` request the page's own open Dexie connection would hold.
+  await page.goto("/printify-studio");
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Storage.clearDataForOrigin", {
+      origin: new URL(page.url()).origin,
+      storageTypes: "indexeddb",
+    });
+  } finally {
+    await cdp.detach();
+  }
   await page.reload();
 }
 
@@ -31,7 +37,7 @@ test("two designs can be paired as one listing, with a black-ink and a white-ink
   page,
 }) => {
   await page.goto("/printify-studio");
-  await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({ timeout: 30_000 });
 
   await page.setInputFiles("input[type=file]", [fixture("design-a.png"), fixture("design-b.png")]);
   await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
@@ -100,7 +106,7 @@ test("two designs can be paired as one listing, with a black-ink and a white-ink
 
 test("the adjustment preview clips the artwork to the print area", async ({ page }) => {
   await page.goto("/printify-studio");
-  await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({ timeout: 30_000 });
   await page.setInputFiles("input[type=file]", [fixture("design-a.png")]);
   await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
 

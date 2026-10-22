@@ -42,7 +42,7 @@ export interface Design {
   processedAssetId?: string;
   whiteInkAssetId?: string;
   blackInkAssetId?: string;
-  /** Which variant is used by default in editor/batch outputs. */
+  /** Which variant is used by default in batch/render outputs. */
   activeVariant: InkVariant;
   createdAt: number;
   updatedAt: number;

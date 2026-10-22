@@ -191,7 +191,7 @@ export function InkVariantsDialog({
         <Separator />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[13px] text-ink-muted">Default variant used by editor and batches:</div>
+          <div className="text-[13px] text-ink-muted">Default variant used by batches:</div>
           <div className="flex gap-1.5">
             {(["main", "white", "black"] as InkVariant[]).map((v) => (
               <Button

@@ -133,17 +133,17 @@ const HOWTO: Array<{ match: RegExp; answer: string }> = [
   {
     match: /upload|import|add (a )?(design|artwork|file)/i,
     answer:
-      "Upload designs from the Designs page: click Upload, pick PNG/JPG files, and they are stored in this browser's IndexedDB. Mockups upload the same way on the Mockups page. Nothing is sent to a server.",
+      "Upload designs in the Printify Studio's Designs tab: click Upload, pick PNG/JPG files, and they are stored in this browser's IndexedDB. Mockups upload the same way on the Mockups page. Nothing is sent to a server.",
   },
   {
     match: /edit|composite|place|position|scale|rotate|canvas/i,
     answer:
-      "Open a design, choose a mockup, and the editor loads with the Konva canvas. Drag to move, use the handles to scale/rotate, and Save to store the transform. Saving writes a placement that can be reused.",
+      "Place artwork in the Printify Studio: the Design panel tab adjusts one design's placement (drag, snap to the centre, rotate in 15° steps). Then give a mockup its print area on the Mockups page - the frame carries the design, and the mockup and the product use the same placement.",
   },
   {
     match: /batch|generate (all|every)|combinations|render all/i,
     answer:
-      "Batch Studio generates every design × mockup combination. Pick the designs and mockups, choose an ink variant rule, set concurrency, then Run. Existing renders can be skipped so re-runs are cheap.",
+      "Ask me to generate renders for a design × mockup combination: I create a batch job and run it after you confirm on the tool card. Existing renders are reused, so a re-run is cheap, and the results land in the Export Center.",
   },
   {
     match: /background|remove bg|cutout|transparen/i,
@@ -153,27 +153,27 @@ const HOWTO: Array<{ match: RegExp; answer: string }> = [
   {
     match: /ink|variant|white|black/i,
     answer:
-      "Ink variants create white or black versions of a design without touching the original asset. Set a variant rule on a batch job, or convert a single design from its actions menu.",
+      "Ink variants create white or black versions of a design without touching the original asset. Open a design card's actions menu (…) and choose Ink variants.",
   },
   {
     match: /template|placement|reuse/i,
     answer:
-      "Saving a placement in the editor stores a template. Templates can be applied to other designs or selected as the rule for a batch job.",
+      "Mockups → Print areas saves a print area and its frame on the photo as a template, which can be applied to other mockups. The design's placement inside the area belongs to the Printify Studio.",
   },
   {
     match: /export|zip|download/i,
     answer:
-      "Export builds a ZIP with a manifest and the rendered images. Choose the batch job (or the whole library) and the archive is assembled in the browser.",
+      "The Export Center builds a ZIP with a manifest and the images. Choose the designs and what to include, and the archive is assembled in this browser.",
   },
   {
     match: /listing|etsy|title|tag|seo|keyword/i,
     answer:
-      "Listing tools validate Etsy constraints (title ≤140 chars, ≤13 tags of ≤20 chars) and can draft copy with AI. Submission to Etsy is intentionally not implemented — you get validated drafts to paste.",
+      "Ask me to draft listing copy (title, description, tags) from a design; the text is yours to edit and paste. Etsy submission is intentionally not implemented.",
   },
   {
     match: /printify|product|publish/i,
     answer:
-      "Create a Printify product from the Products page: pick a design, choose a blueprint and print provider, set a price, then click Create on Printify. The agent can do it too — ask it to list a design, tell it the product type, and confirm on the tool card. Pricing is required (integer cents) and the artwork is uploaded to Printify.",
+      "Create a Printify product in the Printify Studio: choose the product and its colours, place each design, then open the Design panel tab and press Create on Printify. The agent can do it too — ask it to list a design, tell it the product type, and confirm on the tool card. Pricing is required (integer cents) and the artwork is uploaded to Printify.",
   },
   {
     match: /key|settings|provider|api/i,
@@ -187,7 +187,7 @@ function explainHowto(args: Record<string, unknown>): ToolExecResult {
   const hit = HOWTO.find((entry) => entry.match.test(topic));
   if (hit) return { summary: `Explained: ${topic || "workflow"}`, result: { topic, answer: hit.answer } };
   const overview =
-    "Mockup Studio is local-first: designs, mockups, renders, templates, and exports all live in this browser's IndexedDB. Core flows are Designs (upload) → Mockups → Editor (compose + save placement) → Batch Studio (design × mockup) → Export (ZIP). AI SEO and listing drafts are optional and need a key.";
+    "Mockup Studio is local-first: designs, mockups, renders, templates, and exports all live in this browser's IndexedDB. The pages are Printify Studio (upload designs, pick the product and colours, place the artwork, create products), Mockups (photos and their print areas), Export Center (ZIP), Agent, Activity and Settings.";
   return { summary: `Explained: ${topic || "Mockup Studio"}`, result: { topic, answer: overview } };
 }
 
@@ -885,7 +885,7 @@ async function proposePrintifyProduct(
       return {
         summary: "Product type or blueprint needed",
         error:
-          "Tell me the product type (for example “t-shirt”, “hoodie”, or “mug”), or pick a blueprint in Product Builder and give me its id.",
+          "Tell me the product type (for example “t-shirt”, “hoodie”, or “mug”), or pick a blueprint in the Printify Studio and give me its id.",
       };
     }
     try {
@@ -893,7 +893,7 @@ async function proposePrintifyProduct(
       if (!candidates.length) {
         return {
           summary: "No matching product type",
-          error: `I couldn’t find a Printify product type matching “${productType}”. Try another word, or browse in Product Builder.`,
+          error: `I couldn’t find a Printify product type matching “${productType}”. Try another word, or browse the catalogue in the Printify Studio.`,
         };
       }
       const [best] = rankBlueprints(candidates, productType);

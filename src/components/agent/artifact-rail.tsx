@@ -27,22 +27,30 @@ function Row({
   meta,
   tone,
 }: {
-  href: string;
+  /** Where the row goes. Omitted when the artifact has no page any more. */
+  href?: string;
   icon: React.ReactNode;
   title: string;
   meta: string;
   tone?: string;
 }) {
-  return (
-    <a
-      href={href}
-      className="flex items-start gap-2 rounded-md px-2 py-1.5 text-[12px] text-ink-muted hover:bg-surface-muted hover:text-ink"
-    >
+  const className =
+    "flex items-start gap-2 rounded-md px-2 py-1.5 text-[12px] text-ink-muted hover:bg-surface-muted hover:text-ink";
+  const content = (
+    <>
       <span className="mt-0.5 shrink-0 text-ink-subtle">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate">{title}</span>
         <span className={`block text-[10px] ${tone ?? "text-ink-subtle"}`}>{meta}</span>
       </span>
+    </>
+  );
+  if (!href) {
+    return <div className={className}>{content}</div>;
+  }
+  return (
+    <a href={href} className={className}>
+      {content}
     </a>
   );
 }
@@ -87,7 +95,6 @@ export function ArtifactRail({ onClose }: ArtifactRailProps) {
             {jobs.map((job) => (
               <Row
                 key={job.id}
-                href="/batch"
                 icon={<Layers className="h-3.5 w-3.5" />}
                 title={job.name}
                 meta={job.status}
@@ -119,7 +126,6 @@ export function ArtifactRail({ onClose }: ArtifactRailProps) {
             {drafts.map((draft) => (
               <Row
                 key={draft.id}
-                href="/listings"
                 icon={<FileText className="h-3.5 w-3.5" />}
                 title={draft.title || "Untitled draft"}
                 meta={`${draft.tags.length} tags · ${draft.status}`}
@@ -132,10 +138,10 @@ export function ArtifactRail({ onClose }: ArtifactRailProps) {
         <section className="mb-3">
           <h3 className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">Renders</h3>
           <Row
-            href="/batch"
+            href="/export"
             icon={<ImageIcon className="h-3.5 w-3.5" />}
             title={`${renders} mockup render${renders === 1 ? "" : "s"}`}
-            meta="stored in this browser"
+            meta="stored in this browser · export as a ZIP"
           />
         </section>
       </div>

@@ -7,9 +7,12 @@ import { db } from "@/lib/db/schema";
 import {
   createDesignFromFile,
   deleteDesign,
+  designAssetIdFor,
+  duplicateDesign,
   getAssetBlob,
   logActivity,
   storeAsset,
+  updateDesign,
 } from "@/lib/db/repo";
 import { removeBackgroundAuto } from "@/lib/printify/remove-background";
 import {
@@ -29,16 +32,21 @@ import {
   type DesignSwatch,
 } from "@/views/studio/design-panel";
 import type { DesignCardData } from "@/components/studio/design-card";
+import { EditDesignDialog } from "@/components/studio/edit-design-dialog";
+import { InkVariantsDialog } from "@/components/studio/ink-variants-dialog";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { hexForColourName, suggestInk } from "@/lib/printify/colors";
 import { ROWS } from "@/lib/printify/studio-session";
-import type { StudioRowId, StudioSession } from "@/types/domain";
-import { Loader2, Link2, Trash2, Wand2 } from "lucide-react";
+import type { Design, StudioRowId, StudioSession } from "@/types/domain";
+import { Loader2, Link2, Search, Trash2, Wand2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface DesignRow {
   id: string;
   name: string;
+  tags: string[];
   originalAssetId: string;
   processedAssetId?: string;
   whiteInkAssetId?: string;
@@ -72,6 +80,12 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
     total: number;
     current: string;
   } | null>(null);
+  /** The search box and the tag chips, ported from the old Designs page. */
+  const [query, setQuery] = React.useState("");
+  const [tagFilter, setTagFilter] = React.useState<string | null>(null);
+  const [editing, setEditing] = React.useState<DesignRow | null>(null);
+  const [inkDialogId, setInkDialogId] = React.useState<string | null>(null);
+  const [inkRecord, setInkRecord] = React.useState<Design | null>(null);
   /** The stage of the work, as the engine reports it. */
   const [stage, setStage] = React.useState("");
   const stageQueue = React.useRef<string[]>([]);
@@ -217,6 +231,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
         return {
           id: d.id,
           name: d.name,
+          tags: d.tags,
           originalAssetId: d.originalAssetId,
           processedAssetId: d.processedAssetId,
           whiteInkAssetId: d.whiteInkAssetId,
@@ -227,6 +242,40 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       })
       .sort((a, b) => a.createdAt - b.createdAt);
   }, []);
+
+  /** The design whose ink artwork the dialog edits, read fresh from the DB. */
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!inkDialogId) {
+      setInkRecord(null);
+      return;
+    }
+    (async () => {
+      const record = await db.designs.get(inkDialogId);
+      if (!cancelled) setInkRecord(record ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [inkDialogId]);
+
+  /** Every tag in the library, for the filter chips. */
+  const allTags = React.useMemo(() => {
+    const set = new Set<string>();
+    designs?.forEach((d) => d.tags.forEach((t) => set.add(t)));
+    return Array.from(set).sort();
+  }, [designs]);
+
+  /** The designs the search and the tag filter leave visible. */
+  const visible = React.useMemo(() => {
+    if (!designs) return undefined;
+    const q = query.trim().toLowerCase();
+    return designs.filter((d) => {
+      if (tagFilter && !d.tags.includes(tagFilter)) return false;
+      if (q && !d.name.toLowerCase().includes(q) && !d.tags.some((t) => t.includes(q))) return false;
+      return true;
+    });
+  }, [designs, query, tagFilter]);
 
   /** The partner's name and this design's role, for the card. */
   const pairInfo = React.useCallback(
@@ -248,9 +297,9 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
    * nothing about the ink artwork on file, moves a design between the rows.
    */
   const rows = React.useMemo(() => {
-    const split = splitDesignsForSession(designs ?? [], session);
+    const split = splitDesignsForSession(visible ?? [], session);
     return { plain: split.plain, ink: split.ink } as Record<StudioRowId, DesignRow[]>;
-  }, [designs, session]);
+  }, [visible, session]);
 
   /**
    * The hex of every colour of the product.
@@ -323,9 +372,8 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
    * limit, and the engine throws a message the user can act on when the image
    * is outside what they can do.
    */
-  const removeBackgrounds = async () => {
-    if (selected.length === 0) return;
-    const ids = [...selected];
+  const removeBackgrounds = async (ids: string[] = selected) => {
+    if (ids.length === 0) return;
     setBusy({ done: 0, total: ids.length, current: "" });
     resetStages();
     let done = 0;
@@ -377,7 +425,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
     resetStages();
     if (failed === 0) {
       toast.success(`Removed the background from ${done} design${done > 1 ? "s" : ""}`);
-      setSelected([]);
+      setSelected(selected.filter((id) => !ids.includes(id)));
     } else {
       toast.error(`${failed} of ${done} failed`);
     }
@@ -388,6 +436,68 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
     for (const id of selected) await deleteDesign(id);
     toast.success(`Deleted ${selected.length} design${selected.length > 1 ? "s" : ""}`);
     setSelected([]);
+  };
+
+  /** Deletes ONE design, from that card's menu. */
+  const removeOne = async (id: string) => {
+    const row = (designs ?? []).find((d) => d.id === id);
+    await deleteDesign(id);
+    setSelected(selected.filter((x) => x !== id));
+    toast.success(row ? `Deleted "${row.name}"` : "Design deleted");
+  };
+
+  /**
+   * Saves the artwork of the design's ACTIVE variant.
+   *
+   * `designAssetIdFor` is the same choice the batch renderer makes, so
+   * what is downloaded is what would be printed.
+   */
+  const downloadDesign = async (id: string) => {
+    const design = await db.designs.get(id);
+    if (!design) return;
+    const blob = await getAssetBlob(designAssetIdFor(design, design.activeVariant));
+    if (!blob) {
+      toast.error("Could not read that design from storage");
+      return;
+    }
+    const ext =
+      blob.type === "image/jpeg" ? "jpg" : blob.type.startsWith("image/") ? blob.type.split("/")[1] : "png";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${design.name}.${ext || "png"}`;
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.success(`Downloaded "${design.name}"`);
+  };
+
+  const duplicateOne = async (id: string) => {
+    const copy = await duplicateDesign(id);
+    if (copy) toast.success(`Duplicated "${copy.name}"`);
+    else toast.error("Could not duplicate that design");
+  };
+
+  const saveEdit = async (name: string, tags: string[]) => {
+    if (!editing) return;
+    await updateDesign(editing.id, { name, tags });
+    setEditing(null);
+    toast.success("Design updated");
+  };
+
+  /**
+   * Pairs of handlers for a gallery row, so the two rows cannot wire the
+   * actions up differently.
+   *
+   * The ink dialog is per-design, so it resolves the record itself; the other
+   * actions already take an id.
+   */
+  const cardActions = {
+    onEditDesign: (id: string) => setEditing((designs ?? []).find((d) => d.id === id) ?? null),
+    onInkVariants: (id: string) => setInkDialogId(id),
+    onRemoveBackground: (id: string) => removeBackgrounds([id]),
+    onDownload: (id: string) => downloadDesign(id),
+    onDuplicate: (id: string) => duplicateOne(id),
+    onDelete: (id: string) => removeOne(id),
   };
 
   /**
@@ -448,7 +558,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
             {selected.length} design{selected.length > 1 ? "s" : ""} selected
           </span>
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={removeBackgrounds} disabled={!!busy}>
+            <Button size="sm" onClick={() => removeBackgrounds()} disabled={!!busy}>
               <Wand2 className="h-3.5 w-3.5" /> Remove background
             </Button>
             <Button
@@ -474,25 +584,83 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
         </div>
       )}
 
-      {/* Both rows are always shown, even when one of them is empty. */}
-      {ROWS.map((row) => (
-        <DesignGallery
-          key={row}
-          row={row}
-          designs={rows[row]}
-          swatches={swatchesForRow(row)}
-          designColours={designColours}
-          selectedIds={selected}
-          showCheckbox
-          onToggle={toggle}
-          inkPairIds={inkPairIds}
-          onToggleInkPair={toggleInkPair}
-          pairInfo={pairInfo}
-          onSetInkRole={setRole}
-          onUnpair={unpair}
-          onPairInk={pairTwo}
-        />
-      ))}
+      {(designs ?? []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-2" data-design-search="">
+          <div className="relative w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search designs and tags…"
+              aria-label="Search designs and tags"
+              className="pl-8"
+            />
+          </div>
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+              className={cn(
+                "cursor-pointer rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
+                tagFilter === tag
+                  ? "border-forest bg-forest text-white"
+                  : "border-border-strong text-ink-muted hover:bg-surface-muted",
+              )}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {visible && visible.length === 0 && (designs ?? []).length > 0 ? (
+        // A filter that matches nothing says so. The two rows would both read
+        // "no designs yet", which is not what happened.
+        <div className="rounded-lg border border-dashed border-border-subtle bg-surface-muted/40 px-4 py-3">
+          <p className="text-[12px] font-medium text-ink">No designs match</p>
+          <p className="mt-0.5 text-[11px] text-ink-muted">
+            Try a different search or clear the tag filter.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            onClick={() => {
+              setQuery("");
+              setTagFilter(null);
+            }}
+          >
+            Clear search
+          </Button>
+        </div>
+      ) : (
+        ROWS.map((row) => (
+          <DesignGallery
+            key={row}
+            row={row}
+            designs={rows[row]}
+            swatches={swatchesForRow(row)}
+            designColours={designColours}
+            selectedIds={selected}
+            showCheckbox
+            onToggle={toggle}
+            inkPairIds={inkPairIds}
+            onToggleInkPair={toggleInkPair}
+            pairInfo={pairInfo}
+            onSetInkRole={setRole}
+            onUnpair={unpair}
+            onPairInk={pairTwo}
+            {...cardActions}
+          />
+        ))
+      )}
+
+      <EditDesignDialog design={editing} onClose={() => setEditing(null)} onSave={saveEdit} />
+
+      {inkRecord && (
+        <InkVariantsDialog design={inkRecord} onClose={() => setInkDialogId(null)} />
+      )}
     </div>
   );
 }

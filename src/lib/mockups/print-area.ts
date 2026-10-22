@@ -18,7 +18,7 @@
 // The area itself, and the print file rendered from it, never change.
 //
 // This module is the pure core: no DOM, no React, no IndexedDB. The preview,
-// the batch render, the editor and the print file all call the same
+// the batch render and the print file all call the same
 // functions, so they agree by construction rather than by discipline.
 // ---------------------------------------------------------------------------
 

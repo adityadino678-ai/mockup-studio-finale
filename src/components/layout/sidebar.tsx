@@ -7,19 +7,11 @@ import { cn } from "@/lib/utils";
 import {
   Aperture,
   Bot,
-  Boxes,
-  ClipboardList,
   FileArchive,
   History,
-  Images,
-  LayoutDashboard,
-  Layers,
-  PenTool,
-  Search,
   Settings as SettingsIcon,
   Shapes,
   Shirt,
-  Store,
 } from "lucide-react";
 
 interface NavItem {
@@ -33,40 +25,28 @@ interface NavGroup {
   items: NavItem[];
 }
 
+/**
+ * The app's pages.
+ *
+ * Small on purpose: the eight tools that used to sit beside these (the
+ * Designs library, the mockup editor, the batch runner, templates, the
+ * Product Builder, listings, the SEO studio and the overview) were folded
+ * into the Printify Studio, the Mockups page or the agent. A new page here
+ * should replace one of these, not extend the list.
+ */
 const NAV: NavGroup[] = [
-  {
-    label: "Agent",
-    items: [{ href: "/agent", label: "Agent", icon: <Bot className="h-4 w-4" /> }],
-  },
-  {
-    label: "Workspace",
-    items: [
-      { href: "/", label: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
-      { href: "/designs", label: "Designs", icon: <Images className="h-4 w-4" /> },
-      { href: "/mockups", label: "Mockups", icon: <Shapes className="h-4 w-4" /> },
-    ],
-  },
   {
     label: "Create",
     items: [
-      { href: "/editor", label: "Mockup Editor", icon: <PenTool className="h-4 w-4" /> },
-      { href: "/batch", label: "Batch Studio", icon: <Layers className="h-4 w-4" /> },
+      { href: "/mockups", label: "Mockups", icon: <Shapes className="h-4 w-4" /> },
       { href: "/printify-studio", label: "Printify Studio", icon: <Shirt className="h-4 w-4" /> },
-      { href: "/templates", label: "Templates", icon: <Boxes className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Sell",
-    items: [
-      { href: "/products", label: "Product Builder", icon: <Store className="h-4 w-4" /> },
-      { href: "/listings", label: "Listings", icon: <ClipboardList className="h-4 w-4" /> },
-      { href: "/export", label: "Export Center", icon: <FileArchive className="h-4 w-4" /> },
     ],
   },
   {
     label: "More",
     items: [
-      { href: "/seo", label: "AI SEO Studio", icon: <Search className="h-4 w-4" /> },
+      { href: "/agent", label: "Agent", icon: <Bot className="h-4 w-4" /> },
+      { href: "/export", label: "Export Center", icon: <FileArchive className="h-4 w-4" /> },
       { href: "/activity", label: "Activity", icon: <History className="h-4 w-4" /> },
       { href: "/settings", label: "Settings", icon: <SettingsIcon className="h-4 w-4" /> },
     ],
@@ -78,7 +58,7 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-[212px] shrink-0 flex-col border-r border-border-subtle bg-surface">
-      <Link href="/" className="flex items-center gap-2.5 px-4 py-4">
+      <Link href="/printify-studio" className="flex items-center gap-2.5 px-4 py-4">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-forest text-white">
           <Aperture className="h-4 w-4" />
         </div>
@@ -94,8 +74,7 @@ export function Sidebar() {
               {group.label}
             </div>
             {group.items.map((item) => {
-              const active =
-                item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const active = pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}
@@ -116,7 +95,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="border-t border-border-subtle px-4 py-2.5 text-[11px] text-ink-subtle">
-        Local workspace Â· v0.1
+        Local workspace · v0.1
       </div>
     </aside>
   );

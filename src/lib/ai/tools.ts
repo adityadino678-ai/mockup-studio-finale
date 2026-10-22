@@ -29,7 +29,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "explain_howto",
     description:
-      "Explain how to do something inside Mockup Studio (uploading, the editor, batches, background removal, templates, exports, products, listings, SEO). Read-only.",
+      "Explain how to do something inside Mockup Studio (uploading, placing artwork, print areas, mockup renders, batches, background removal, ink variants, exports, Printify products, listing copy). Read-only.",
     parameters: {
       type: "object",
       properties: {

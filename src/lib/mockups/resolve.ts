@@ -75,7 +75,7 @@ export async function writeBackStudioPlacement(
 }
 
 /**
- * The Studio placement for a transform the user dragged in the editor.
+ * The Studio placement for a composed `Transform`.
  *
  * The inverse of `mapStudioPlacement`, so the numbers that go back into the
  * Studio are exactly the ones the preview was drawn from - the frame's own

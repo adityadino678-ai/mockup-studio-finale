@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // The print area canvas.
 //
-// Konva, like the editor's canvas - and for the same reason: Konva moves the
+// Konva, for the same reason the old editor used it: Konva moves the
 // nodes IMPERATIVELY while the pointer is down, and React is only told at the
 // end. A DOM overlay has to re-render on every pointer move, and the whole
 // panel re-renders with it, which is what makes it feel sticky.
