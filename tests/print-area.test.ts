@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   areaAspect,
+  areaCrop,
   areaInches,
+  areaPointFromMockup,
+  areaPointInMockup,
   clipFor,
+  cropLocalRect,
   defaultFrame,
   derivePrintAreas,
+  describeCrop,
+  describePrintAreaTemplate,
   designInches,
   frameToPixels,
+  FULL_CROP,
+  isFullCrop,
+  MIN_CROP,
   mapStudioPlacement,
   normalisePrintArea,
   pixelsPerInch,
@@ -158,6 +167,84 @@ describe("the clip", () => {
   });
 });
 
+describe("the visible window (the crop)", () => {
+  const topHalf = { x: 0, y: 0, width: 1, height: 0.5 };
+
+  it("is the whole area until it is set", () => {
+    expect(areaCrop(area())).toEqual(FULL_CROP);
+    expect(isFullCrop(areaCrop(area()))).toBe(true);
+    expect(describeCrop(areaCrop(area()))).toBe("Whole area");
+  });
+
+  it("clamps a window inside the area, and refuses a sliver", () => {
+    const clamped = areaCrop({ crop: { x: 0.9, y: -0.4, width: 0.8, height: 0 } });
+    expect(clamped.x).toBeCloseTo(0.9);
+    expect(clamped.y).toBe(0);
+    expect(clamped.width).toBeCloseTo(0.1);
+    expect(clamped.height).toBeCloseTo(MIN_CROP);
+    expect(clamped.x + clamped.width).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it("treats a NaN from an old record as no crop at all", () => {
+    expect(areaCrop({ crop: { x: Number.NaN, y: 0, width: 1, height: 1 } })).toEqual(FULL_CROP);
+  });
+
+  it("cuts the clip at the window, not at the frame", () => {
+    const px = frameToPixels(FRAME, AREA, 3000, 4000);
+    const clip = clipFor(area({ crop: topHalf }), FRAME, 3000, 4000);
+    // Half the height, the full width, and the window's own centre.
+    expect(clip.width).toBeCloseTo(px.width);
+    expect(clip.height).toBeCloseTo(px.height / 2);
+    expect(clip.x).toBeCloseTo(px.cx);
+    expect(clip.y).toBeCloseTo(px.cy - px.height / 4);
+    expect(clip.rotation).toBe(0);
+  });
+
+  it("turns the window with the frame", () => {
+    const frame = { ...FRAME, rotation: 90 };
+    const px = frameToPixels(frame, AREA, 3000, 4000);
+    const clip = clipFor(area({ crop: topHalf }), frame, 3000, 4000);
+    expect(clip.rotation).toBe(90);
+    // A clockwise 90 degree turn puts the window's centre to the RIGHT of
+    // the frame's centre: the spot that was above is now to the right.
+    expect(clip.x).toBeCloseTo(px.cx + px.height / 4);
+    expect(clip.y).toBeCloseTo(px.cy);
+  });
+
+  it("clips the Konva group in the frame's local space", () => {
+    const px = frameToPixels(FRAME, AREA, 3000, 4000);
+    const local = cropLocalRect(area({ crop: topHalf }), px);
+    expect(local.width).toBeCloseTo(px.width);
+    expect(local.height).toBeCloseTo(px.height / 2);
+    // Local space starts at the frame's centre, so the top half starts above it.
+    expect(local.x).toBeCloseTo(-px.width / 2);
+    expect(local.y).toBeCloseTo(-px.height / 2);
+  });
+
+  it("reads a point on the photo back into the area, at any angle", () => {
+    const frame = { ...FRAME, rotation: 37 };
+    const px = frameToPixels(frame, AREA, 3000, 4000);
+    for (const [u, v] of [
+      [0, 0],
+      [0.5, 0.5],
+      [1, 1],
+      [0.2, 0.8],
+    ]) {
+      const point = areaPointInMockup(px, u, v);
+      const back = areaPointFromMockup(px, point.x, point.y);
+      expect(back.u).toBeCloseTo(u);
+      expect(back.v).toBeCloseTo(v);
+    }
+  });
+
+  it("names the window in the panel", () => {
+    expect(describeCrop(topHalf)).toBe("Top 50% of the area");
+    expect(describeCrop({ ...topHalf, height: 0.6 })).toBe("Top 60% of the area");
+    expect(describeCrop({ x: 0, y: 0.4, width: 1, height: 0.6 })).toBe("Bottom 60% of the area");
+    expect(describeCrop({ x: 0.1, y: 0.1, width: 0.5, height: 0.5 })).toBe("50% × 50% of the area");
+  });
+});
+
 describe("print areas out of the catalogue", () => {
   const variant = (id: number, placeholders: CatalogVariant["placeholders"]): CatalogVariant => ({
     id,
@@ -240,6 +327,20 @@ describe("print-area templates", () => {
     expect(restored.reference).toEqual(original.reference);
     expect(restored.clipMode).toBe("behind-garment");
   });
+
+  it("carries the visible window, and leaves a whole-area one out", () => {
+    const cropped = area({ crop: { x: 0, y: 0, width: 1, height: 0.6 } });
+    expect(printAreaFromTemplate(printAreaTemplateFrom(cropped)).crop).toEqual({
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 0.6,
+    });
+    expect(printAreaTemplateFrom(area()).crop).toBeUndefined();
+
+    const described = describePrintAreaTemplate(printAreaTemplateFrom(cropped));
+    expect(described).toContain("Top 60% of the area");
+  });
 });
 
 describe("reading a stored area", () => {
@@ -273,6 +374,25 @@ describe("reading a stored area", () => {
     expect(normalisePrintArea(undefined)).toBeUndefined();
     expect(normalisePrintArea({})).toBeUndefined();
     expect(normalisePrintArea({ areaWidth: 4500 })).toBeUndefined();
+  });
+
+  it("keeps a stored crop, and drops a window that covers everything", () => {
+    const cropped = normalisePrintArea(area({ crop: { x: 0, y: 0, width: 1, height: 0.5 } }));
+    expect(cropped?.crop).toEqual({ x: 0, y: 0, width: 1, height: 0.5 });
+    // A window that is the whole area is not a crop; storing one would make
+    // every area look edited.
+    const full = normalisePrintArea(area({ crop: { x: 0, y: 0, width: 1, height: 1 } }));
+    expect(full?.crop).toBeUndefined();
+  });
+
+  it("clamps a stored crop that hangs off the area", () => {
+    const restored = normalisePrintArea(
+      area({ crop: { x: 0.8, y: 0.8, width: 0.9, height: 0.9 } }),
+    );
+    expect(restored?.crop?.x).toBeCloseTo(0.8);
+    expect(restored?.crop?.y).toBeCloseTo(0.8);
+    expect(restored!.crop!.width).toBeCloseTo(0.2);
+    expect(restored!.crop!.height).toBeCloseTo(0.2);
   });
 });
 

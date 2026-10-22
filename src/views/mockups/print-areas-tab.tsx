@@ -15,6 +15,10 @@
 // with it, and the design is clipped to the frame - the part that falls
 // outside the printable area is not on the product either.
 //
+// A mockup of a folded garment shows only part of that area, so the area also
+// carries a CROP: a window (as fractions of the area) the design may paint
+// on. The area and the print file stay whole; the mockup cuts at the fold.
+//
 // The area's SIZE comes from the product selected in the Printify Studio
 // (the exact catalogue placeholder). The mockup's category picks the
 // fallback: the typical sizes for a T-shirt, a hoodie, a mug...
@@ -39,13 +43,17 @@ import { CATEGORY_SINGULAR } from "@/lib/mockups/categories";
 import { computeFit } from "@/lib/printify/fit";
 import {
   areaAspect,
+  areaCrop,
   areaInches,
   defaultFrame,
   derivePrintAreas,
   designInches,
+  describeCrop,
+  isFullCrop,
   printAreaFromTemplate,
   printAreaOf,
   printAreaTemplateFrom,
+  type AreaCrop,
   type PrintAreaOption,
 } from "@/lib/mockups/print-area";
 import { writeBackStudioPlacement } from "@/lib/mockups/resolve";
@@ -55,7 +63,13 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
 import type { Mockup, MockupPrintArea, StudioPlacement, StudioSession, Template } from "@/types/domain";
-import { AlertTriangle, Download, Ruler, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Crop, Download, Ruler, Save, Trash2 } from "lucide-react";
+
+/** The crop windows offered as one-click presets. */
+const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
+  { id: "top-half", label: "Top half", crop: { x: 0, y: 0, width: 1, height: 0.5 } },
+  { id: "top-60", label: "Top 60%", crop: { x: 0, y: 0, width: 1, height: 0.6 } },
+];
 
 // react-konva is ~360 kB. It is loaded on demand, when the print area canvas
 // actually opens, so the mockups page does not pay for it.
@@ -76,6 +90,8 @@ export function PrintAreasTab() {
   const [designMeta, setDesignMeta] = React.useState({ assetId: "", w: 0, h: 0 });
   const [dirty, setDirty] = React.useState(false);
   const [measuring, setMeasuring] = React.useState(false);
+  /** True while the canvas crops the visible window instead of staging. */
+  const [cropMode, setCropMode] = React.useState(false);
   const [measuredPixels, setMeasuredPixels] = React.useState<number | null>(null);
   const [referenceInches, setReferenceInches] = React.useState("");
   const [referenceOpen, setReferenceOpen] = React.useState(false);
@@ -130,6 +146,7 @@ export function PrintAreasTab() {
     setMeasuredPixels(null);
     setReferenceInches("");
     setReferenceOpen(false);
+    setCropMode(false);
   }, [mockup]);
 
   // The Studio placement for the picked design.
@@ -204,8 +221,25 @@ export function PrintAreasTab() {
       label: next.label,
       source: next.source,
       frame,
+      crop: area?.crop,
       reference: area?.reference,
       clipMode: area?.clipMode ?? "area",
+      updatedAt: Date.now(),
+    });
+    setDirty(true);
+  };
+
+  /**
+   * Sets the visible window into the area.
+   *
+   * `undefined` is the whole area, and a window that covers everything is
+   * stored as `undefined` too, so an untouched area never carries a crop.
+   */
+  const applyCrop = (crop: AreaCrop | undefined) => {
+    if (!area) return;
+    setArea({
+      ...area,
+      crop: crop && !isFullCrop(crop) ? crop : undefined,
       updatedAt: Date.now(),
     });
     setDirty(true);
@@ -434,6 +468,9 @@ export function PrintAreasTab() {
     return "Custom";
   })();
 
+  /** The window into the area: the whole area unless it has been cropped. */
+  const crop = areaCrop(area ?? {});
+
   return (
     <div className="grid grid-cols-[280px_minmax(0,1fr)] items-start gap-4">
       {/* --- the mockup rail --- */}
@@ -532,10 +569,12 @@ export function PrintAreasTab() {
                 placement={placement}
                 designMeta={designMeta}
                 measuring={measuring}
+                cropMode={cropMode}
                 onAreaChange={(next) => {
                   setArea(next);
                   setDirty(true);
                 }}
+                onCropChange={applyCrop}
                 onMeasure={(pixels) => {
                   setMeasuredPixels(pixels);
                   setMeasuring(false);
@@ -572,6 +611,59 @@ export function PrintAreasTab() {
                     <span className="text-ink-muted">From</span>
                     <span className="font-medium">{sourceLabel}</span>
                   </div>
+                </div>
+              ) : null}
+
+              {/* The visible window: a folded shirt shows only part of the
+                  area, so the design is cut at the fold. */}
+              {area ? (
+                <div className="mb-3 rounded-md border border-border-subtle p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1 text-[11.5px] font-medium">
+                      <Crop className="h-3 w-3" /> Visible window
+                    </span>
+                    <span className="text-[11px] text-ink-subtle">{describeCrop(crop)}</span>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                    <Button
+                      size="sm"
+                      variant={cropMode ? "default" : "outline"}
+                      className="h-7 px-2 text-[11.5px]"
+                      onClick={() => setCropMode((on) => !on)}
+                      title="Drag the window and its handles on the mockup"
+                    >
+                      {cropMode ? "Done" : "Crop"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[11.5px]"
+                      onClick={() => applyCrop(undefined)}
+                      disabled={isFullCrop(crop)}
+                    >
+                      Whole area
+                    </Button>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                    {CROP_PRESETS.map((preset) => (
+                      <Button
+                        key={preset.id}
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-[11.5px]"
+                        onClick={() => {
+                          applyCrop(preset.crop);
+                          setCropMode(true);
+                        }}
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10.5px] leading-snug text-ink-subtle">
+                    A window into the area for folded garments: the design is cut at the fold. The
+                    area and the print file are not changed.
+                  </p>
                 </div>
               ) : null}
 
@@ -859,7 +951,9 @@ function MockupStage({
   placement,
   designMeta,
   measuring,
+  cropMode,
   onAreaChange,
+  onCropChange,
   onMeasure,
 }: {
   mockup: Mockup;
@@ -867,7 +961,9 @@ function MockupStage({
   placement: StudioPlacement | null;
   designMeta: { assetId: string; w: number; h: number };
   measuring: boolean;
+  cropMode: boolean;
   onAreaChange: (area: MockupPrintArea) => void;
+  onCropChange: (crop: AreaCrop | undefined) => void;
   onMeasure: (pixels: number) => void;
 }) {
   const [mockupUrl, setMockupUrl] = React.useState<string | null>(null);
@@ -933,7 +1029,9 @@ function MockupStage({
         area={area}
         placement={placement}
         measuring={measuring}
+        cropMode={cropMode}
         onAreaChange={onAreaChange}
+        onCropChange={onCropChange}
         onMeasure={onMeasure}
       />
     </React.Suspense>

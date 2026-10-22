@@ -44,8 +44,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 303 unit tests
-npm run test:e2e      # 24 acceptance tests (local dev server)
+npm run test          # 327 unit tests
+npm run test:e2e      # 29 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -345,6 +345,17 @@ That is the whole design, and it is deliberate:
   batch render and the export. Cut is `clipFor(...)` -> a centre + size +
   rotation, consumed by `compose.ts` (`translate -> rotate -> rect -> clip`)
   and by the editor's Konva `clipFunc`.
+- **A mockup can show only PART of the area: the crop.** A shirt photographed
+  folded hides the bottom of the print area, so `MockupPrintArea.crop` is the
+  window (`x`, `y`, `width`, `height` as fractions of the area) the design is
+  allowed to paint on. The area itself is unchanged and `print-file.ts` still
+  renders the whole 4500 x 5400 - that is what Printify prints. `clipFor`
+  returns the WINDOW's centre + size + rotation, so the preview, the editor,
+  every batch render and the export all cut at the fold with no extra code;
+  `cropLocalRect` feeds the Konva group's clip, and `areaPointInMockup` /
+  `areaPointFromMockup` convert between mockup pixels and area fractions so
+  the window's handles stay right at any angle. Absent = whole area, and
+  `normalisePrintArea` drops a window that covers everything.
 
 **The right-hand panel is deliberately small.** The mockup's TYPE is already
 known from the Mockups tab, so there are no blueprint / print provider /
@@ -356,6 +367,10 @@ position pickers here:
   Studio, and a `Typical size for a T-shirt / hoodie / mug ...` dropdown
   driven by the mockup's category (`src/lib/mockups/categories.ts`,
   `presetsForCategory`). Exact size wins over typical size.
+- **Visible window** (the crop): `Whole area` / `Top half` / `Top 60%` and a
+  `Crop` mode where the window is moved and resized on the photo with eight
+  handles (four corners, four edges). The design is cut at the window's edge;
+  the readout names it ("Top 60% of the area").
 - **Garment reference**: collapsed until asked for. A line drawn across the
   garment plus a real width in inches gives the photo a scale, and the app
   reports the area's and the design's printed size in inches.
@@ -376,13 +391,40 @@ position pickers here:
   STAGE level: a click whose target is the stage hides the chrome, anything
   else shows it. A click handler on the artwork never fires.
 - **The rotate handle is ours, not the Transformer's.** `rotateEnabled` is
-  off; a `Circle` above the frame's edge (26 screen px, i.e. `26 /
-  displayScale` stage units) turns the group around its centre. Konva's own
-  rotate anchor is a wedge that is fiddly to hit in a test and in the hand.
+  off; a `Circle` above the frame's edge (30 screen px, i.e.
+  `30 / displayScale` stage units) turns the group around its centre. Konva's
+  own rotate anchor is a wedge that is fiddly to hit in a test and in the
+  hand. The knob is 16 screen px across and carries `hitStrokeWidth`
+  (30 screen px), so the grabbable area is much bigger than the painted dot -
+  at radius 6 px it was technically present and practically impossible to
+  catch. Its drag maths only reads the POINTER's angle around the group's
+  centre, so widening the hit area changes nothing about the rotation.
+- **The rotate handle lives in its OWN layer, painted last.** Inside the
+  frame's layer the artwork sat over it, and the Transformer's
+  `shouldOverdrawWholeArea` overlay (a transparent rect) sat over it too and
+  ate the clicks. The knob's layer comes after the Transformer's, and it is
+  moved by hand (`syncRotateHandle`, called from `syncFrame`, the frame's
+  `onDragMove`, `onTransform` and its own drag) because react-konva will not
+  follow the frame's imperative transform for it.
+- **The stage is FOUR canvases**: photo, frame (the clipped design), the
+  Transformer's chrome, then the knob + crop window. The e2e reads the
+  Transformer's layer as `layers[2]` (the chrome-ink test) and the knob's as
+  `layers[3]`; keep that order.
 - **The handle must stay on the photo.** Above the frame's top edge is the
-  default, but when that lands off the canvas (a short mockup, a frame near
-  the top) it flips below the bottom edge. It was drawn off-canvas once and
-  was invisible and unclickable.
+  default; it flips below when that would land off the top of the photo, and
+  its final position is clamped onto the photo (`rotateRadius + 8` screen px
+  from each edge). A large frame otherwise puts the knob off-canvas, where it
+  is invisible and unclickable.
+- **The crop is a CLIP, not a re-placement of the design.** A window that
+  excludes the design's centre shows the design cut, not re-centred: the
+  Studio's placement is the single source of truth for where artwork sits.
+- **The crop's clip goes on an INNER group.** On the frame's own group it
+  would also clip the frame's dashed outline and the handles at its edge, so
+  the user would lose sight of the area the print file really uses.
+- **In Crop mode the Transformer is detached** (`transformer.nodes([])`), or
+  its overdraw overlay swallows the window drags. The frame is not draggable
+  in that mode either, and a stage click must NOT toggle the chrome there -
+  the crop's handles are the tool.
 - **`compose.ts`'s clip rectangle is CENTRE-based,** like `clipFor`. When it
   was briefly treated as a top-left, the design was cut to a quarter of the
   area. The path restores the canvas transform after `clip()`, or the design

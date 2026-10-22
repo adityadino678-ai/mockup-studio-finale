@@ -1007,19 +1007,28 @@ test.describe("core workflow", () => {
     const frame = state.printArea!.frame;
     const cx = geometry.left + frame.x * state.width * stageScale;
 
-    // The rotate handle is the only white thing on the frame's layer: find it
-    // rather than compute where it should be.
+    // The rotate handle is the only white thing on the knob's own layer: find
+    // it rather than compute where it should be. It is painted last, in its
+    // own layer, so nothing can sit over it.
     const handle = await page.evaluate(() => {
       const layers = document.querySelectorAll("canvas");
-      const el = layers[1] as HTMLCanvasElement;
+      const el = layers[3] as HTMLCanvasElement;
       const ctx = el.getContext("2d")!;
       const d = ctx.getImageData(0, 0, el.width, el.height).data;
       let n = 0;
       let sx = 0;
       let sy = 0;
+      let minX = Infinity;
+      let maxX = -Infinity;
       for (let y = 0; y < el.height; y++) {
         for (let x = 0; x < el.width; x++) {
           const i = (y * el.width + x) * 4;
+          // The knob's painted extent: its white fill AND its stroke. The
+          // stem is a thin vertical line above it, so it cannot widen this.
+          if (d[i + 3] > 8) {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+          }
           if (d[i] > 250 && d[i + 1] > 250 && d[i + 2] > 250 && d[i + 3] > 250) {
             n++;
             sx += x;
@@ -1029,14 +1038,25 @@ test.describe("core workflow", () => {
       }
       if (!n) return null;
       const rect = el.getBoundingClientRect();
-      return { x: rect.left + sx / n, y: rect.top + sy / n };
+      return {
+        x: rect.left + sx / n,
+        y: rect.top + sy / n,
+        // The painted dot, in SCREEN pixels.
+        painted: (maxX - minX + 1) * (rect.width / el.width),
+      };
     });
     expect(handle).toBeTruthy();
     const handleX = handle!.x;
     const handleY = handle!.y;
     expect(Math.abs(handleX - cx)).toBeLessThan(30);
+    // A 6 px radius dot was 12 px across - too small to hit. The knob is 8 px
+    // and its hit region is wider still.
+    expect(handle!.painted).toBeGreaterThan(14);
 
-    await page.mouse.move(handleX, handleY);
+    // Grab it 10 px off its centre: outside the painted dot, INSIDE its hit
+    // area. Before the knob got a hit width this drag missed the handle and
+    // moved the frame instead, so the rotation assertion below is the test.
+    await page.mouse.move(handleX + 10, handleY);
     await page.mouse.down();
     for (let i = 1; i <= 10; i++) {
       const a = (i / 10) * (Math.PI / 4);
@@ -1119,6 +1139,117 @@ test.describe("core workflow", () => {
     await page.mouse.click(design!.x, design!.y);
     await page.waitForTimeout(500);
     expect(await chromeInk()).toBeGreaterThan(0);
+  });
+
+  test("28. the visible window cuts the design at the fold, and survives a reload", async ({
+    page,
+  }) => {
+    await seedLibrary(page);
+
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1200);
+
+    const designInk = () =>
+      page.evaluate(() => {
+        const el = document.querySelectorAll("canvas")[1] as HTMLCanvasElement;
+        const d = el.getContext("2d")!.getImageData(0, 0, el.width, el.height).data;
+        let reds = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] > 150 && d[i + 1] < 90 && d[i + 2] < 90) reds++;
+        }
+        return reds;
+      });
+
+    const whole = await designInk();
+    expect(whole).toBeGreaterThan(1000);
+
+    // A folded shirt: the area is the same, but only its top half is on the
+    // garment - so the design is cut at the fold instead of floating over it.
+    await page.getByRole("button", { name: "Top half" }).click();
+    await page.waitForTimeout(800);
+    await expect(page.getByText("Top 50% of the area", { exact: true })).toBeVisible();
+    const cropped = await designInk();
+    // The design sits in the middle of the area: half of it is now hidden.
+    expect(cropped).toBeLessThan(whole * 0.75);
+    expect(cropped).toBeGreaterThan(whole * 0.2);
+
+    // The window is part of the area, not a render-time trick.
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    const stored = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const mockups: Array<{
+        printArea?: { crop?: { x: number; y: number; width: number; height: number } };
+      }> = await new Promise((res) => {
+        const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      return mockups.find((m) => m.printArea)?.printArea?.crop;
+    });
+    expect(stored).toEqual({ x: 0, y: 0, width: 1, height: 0.5 });
+
+    // And it comes back after a reload.
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await expect(page.getByText("Top 50% of the area", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.waitForTimeout(1200);
+    const reloaded = await designInk();
+    expect(reloaded).toBeLessThan(whole * 0.75);
+    expect(reloaded).toBeGreaterThan(whole * 0.2);
+
+    // The window's handles crop it by hand. The bottom-centre handle of a
+    // top-half window sits at the area's centre; drag it down and the window
+    // grows, so more of the design is revealed.
+    const geometry = await page.evaluate(() => {
+      const el = document.querySelector("canvas") as HTMLCanvasElement;
+      const wrapper = el.parentElement!.parentElement!;
+      const r = wrapper.getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width };
+    });
+    const state = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const mockups: Array<{
+        width: number;
+        height: number;
+        printArea?: { frame: { x: number; y: number } };
+      }> = await new Promise((res) => {
+        const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      return mockups.find((m) => m.printArea)!;
+    });
+    const stageScale = geometry.width / state.width;
+    const areaCx = geometry.left + state.printArea!.frame.x * state.width * stageScale;
+    const areaCy = geometry.top + state.printArea!.frame.y * state.height * stageScale;
+
+    await page.getByRole("button", { name: "Crop" }).click();
+    await page.waitForTimeout(400);
+    await page.mouse.move(areaCx, areaCy);
+    await page.mouse.down();
+    await page.mouse.move(areaCx, areaCy + 40, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+
+    await expect(page.getByText(/^Top \d+% of the area$/)).not.toHaveText(
+      "Top 50% of the area",
+      { timeout: 10_000 },
+    );
+    const widened = await designInk();
+    expect(widened).toBeGreaterThan(reloaded * 1.05);
   });
 
   test("22. the studio's ink rows follow what the user ticks, not the product", async ({ page }) => {

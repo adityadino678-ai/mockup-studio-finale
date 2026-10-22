@@ -13,6 +13,10 @@
 // The two compose: the design is drawn inside the frame, so moving, scaling
 // or rotating the frame moves, scales or rotates the design with it.
 //
+// A mockup can also show only PART of the area - a shirt photographed folded
+// hides the bottom of it - so `crop` is the window the design may paint on.
+// The area itself, and the print file rendered from it, never change.
+//
 // This module is the pure core: no DOM, no React, no IndexedDB. The preview,
 // the batch render, the editor and the print file all call the same
 // functions, so they agree by construction rather than by discipline.
@@ -52,6 +56,133 @@ export interface RotatedRect {
 /** The frame on the photo. */
 export type AreaFrame = MockupPrintArea["frame"];
 
+/**
+ * The visible window into the print area, as fractions of the area.
+ *
+ * A folded-shirt mockup shows only part of the printable area, so the design
+ * is cut at the fold instead of floating over it. The AREA does not change:
+ * the print file still renders the whole thing, because that is what Printify
+ * prints.
+ */
+export interface AreaCrop {
+  /** The window's top-left, as fractions of the area. */
+  x: number;
+  y: number;
+  /** The window's size, as fractions of the area. */
+  width: number;
+  height: number;
+}
+
+/** No crop: the whole print area is visible. */
+export const FULL_CROP: AreaCrop = { x: 0, y: 0, width: 1, height: 1 };
+
+/** Nothing smaller than this is a window; it is a sliver. */
+export const MIN_CROP = 0.05;
+
+function clamp01(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * The area's crop, normalised.
+ *
+ * A missing crop is the whole area, and a stored one is clamped inside it -
+ * an out-of-range value from a hand-edited record must not produce a clip
+ * rectangle that is nowhere on the photo.
+ */
+export function areaCrop(area: { crop?: AreaCrop }): AreaCrop {
+  const raw = area.crop;
+  if (!raw) return { ...FULL_CROP };
+  const { x, y, width, height } = raw;
+  if (![x, y, width, height].every((v) => Number.isFinite(v))) return { ...FULL_CROP };
+  const left = clamp01(x, 0, 1 - MIN_CROP);
+  const top = clamp01(y, 0, 1 - MIN_CROP);
+  return {
+    x: left,
+    y: top,
+    width: clamp01(width, MIN_CROP, 1 - left),
+    height: clamp01(height, MIN_CROP, 1 - top),
+  };
+}
+
+/** True when the crop is the whole area, within a rounding error. */
+export function isFullCrop(crop: AreaCrop): boolean {
+  return crop.x <= 0.0001 && crop.y <= 0.0001 && crop.width >= 0.9999 && crop.height >= 0.9999;
+}
+
+/** A one-line description of the window, for the panel and the templates. */
+export function describeCrop(crop: AreaCrop): string {
+  if (isFullCrop(crop)) return "Whole area";
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  if (crop.x <= 0.0001 && crop.width >= 0.9999) {
+    if (crop.y <= 0.0001) return `Top ${pct(crop.height)} of the area`;
+    if (crop.y + crop.height >= 0.9999) return `Bottom ${pct(crop.height)} of the area`;
+    return `Middle ${pct(crop.height)} of the area`;
+  }
+  return `${pct(crop.width)} × ${pct(crop.height)} of the area`;
+}
+
+/**
+ * A point of the AREA in mockup pixels.
+ *
+ * `u`/`v` are fractions of the area, turned with the frame. Used to place the
+ * crop's outline and its handles on the photo.
+ */
+export function areaPointInMockup(
+  framePx: FramePixels,
+  u: number,
+  v: number,
+): { x: number; y: number } {
+  const rad = ((framePx.rotation || 0) * Math.PI) / 180;
+  const localX = (u - 0.5) * framePx.width;
+  const localY = (v - 0.5) * framePx.height;
+  return {
+    x: framePx.cx + localX * Math.cos(rad) - localY * Math.sin(rad),
+    y: framePx.cy + localX * Math.sin(rad) + localY * Math.cos(rad),
+  };
+}
+
+/**
+ * The inverse: a point on the photo as fractions of the area.
+ *
+ * A crop gesture reads the pointer in mockup pixels and needs to know which
+ * part of the area it is over - whatever angle the frame is at.
+ */
+export function areaPointFromMockup(
+  framePx: FramePixels,
+  x: number,
+  y: number,
+): { u: number; v: number } {
+  const rad = (-(framePx.rotation || 0) * Math.PI) / 180;
+  const dx = x - framePx.cx;
+  const dy = y - framePx.cy;
+  const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+  const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+  return {
+    u: framePx.width > 0 ? localX / framePx.width + 0.5 : 0.5,
+    v: framePx.height > 0 ? localY / framePx.height + 0.5 : 0.5,
+  };
+}
+
+/**
+ * The crop window in the FRAME's local space.
+ *
+ * A Konva `Group` clips in its own coordinate space, whose origin is the
+ * frame's centre - so the window is the crop, measured from there.
+ */
+export function cropLocalRect(
+  area: { crop?: AreaCrop },
+  framePx: FramePixels,
+): { x: number; y: number; width: number; height: number } {
+  const crop = areaCrop(area);
+  return {
+    x: -framePx.width / 2 + crop.x * framePx.width,
+    y: -framePx.height / 2 + crop.y * framePx.height,
+    width: crop.width * framePx.width,
+    height: crop.height * framePx.height,
+  };
+}
+
 /** The area's height / width. */
 export function areaAspect(area: { areaWidth: number; areaHeight: number }): number {
   if (!area.areaWidth || !area.areaHeight) return 1;
@@ -84,23 +215,35 @@ export function frameToPixels(
 }
 
 /**
- * The clip region for the design: the frame's rectangle, rotated.
+ * The clip region for the design: the crop window, turned with the frame.
  *
- * Everything outside the print area is cut off: on the real product it would
- * not be printable either.
+ * Everything outside the print area is cut off - on the real product it would
+ * not be printable either. When the mockup crops the area (a folded shirt),
+ * the cut is the crop window instead, so the design stops at the fold.
  */
 export function clipFor(
-  area: { areaWidth: number; areaHeight: number },
+  area: { areaWidth: number; areaHeight: number; crop?: AreaCrop },
   frame: AreaFrame,
   mockupW: number,
   mockupH: number,
 ): RotatedRect {
   const px = frameToPixels(frame, area, mockupW, mockupH);
+  const crop = areaCrop(area);
+  if (isFullCrop(crop)) {
+    return {
+      x: px.cx,
+      y: px.cy,
+      width: px.width,
+      height: px.height,
+      rotation: px.rotation,
+    };
+  }
+  const centre = areaPointInMockup(px, crop.x + crop.width / 2, crop.y + crop.height / 2);
   return {
-    x: px.cx,
-    y: px.cy,
-    width: px.width,
-    height: px.height,
+    x: centre.x,
+    y: centre.y,
+    width: crop.width * px.width,
+    height: crop.height * px.height,
     rotation: px.rotation,
   };
 }
@@ -305,6 +448,7 @@ export function designInches(
 
 /** Builds the template payload for a mockup's print area. */
 export function printAreaTemplateFrom(area: MockupPrintArea): PrintAreaTemplatePayload {
+  const crop = areaCrop(area);
   return {
     type: "print-area",
     areaWidth: area.areaWidth,
@@ -312,6 +456,7 @@ export function printAreaTemplateFrom(area: MockupPrintArea): PrintAreaTemplateP
     source: area.source,
     label: area.label,
     frame: { ...area.frame },
+    crop: isFullCrop(crop) ? undefined : { ...crop },
     reference: area.reference ? { ...area.reference } : undefined,
     clipMode: area.clipMode,
   };
@@ -330,6 +475,7 @@ export function printAreaFromTemplate(payload: PrintAreaTemplatePayload): Mockup
     source: payload.source,
     label: payload.label,
     frame: { ...payload.frame },
+    crop: payload.crop ? { ...payload.crop } : undefined,
     reference: payload.reference ? { ...payload.reference } : undefined,
     clipMode: payload.clipMode,
     updatedAt: Date.now(),
@@ -344,7 +490,8 @@ export function describePrintAreaTemplate(payload: PrintAreaTemplatePayload): st
       : payload.source.kind === "preset"
         ? "Preset"
         : "Manual";
-  return `${source} · ${payload.areaWidth}×${payload.areaHeight}`;
+  const crop = payload.crop ? ` · ${describeCrop(areaCrop(payload))}` : "";
+  return `${source} · ${payload.areaWidth}×${payload.areaHeight}${crop}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,12 +557,15 @@ export function normalisePrintArea(value: unknown): MockupPrintArea | undefined 
     };
   }
 
+  const crop = raw.crop ? areaCrop({ crop: raw.crop }) : undefined;
+
   return {
     areaWidth: raw.areaWidth,
     areaHeight: raw.areaHeight,
     source,
     label: raw.label ?? "Print area",
     frame,
+    crop: crop && !isFullCrop(crop) ? crop : undefined,
     reference: raw.reference ? { ...raw.reference } : undefined,
     clipMode: raw.clipMode ?? "area",
     updatedAt: raw.updatedAt ?? Date.now(),

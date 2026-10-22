@@ -126,6 +126,18 @@ export interface MockupPrintArea {
    */
   frame: { x: number; y: number; scale: number; rotation: number };
   /**
+   * The visible window into the print area, as fractions of the area.
+   *
+   * `x`/`y` are the window's top-left, `width`/`height` its size. Missing
+   * means the whole area. It exists for mockups where only part of the
+   * printable area sits on the garment - a shirt photographed folded, for
+   * example - so the design is cut at the fold instead of floating over it.
+   *
+   * The area itself does not change: the print file still renders the whole
+   * 4500 x 5400 area, because that is what Printify prints.
+   */
+  crop?: { x: number; y: number; width: number; height: number };
+  /**
    * The garment reference: a real-world measurement of the photo, so the
    * app can report the design's printed size in inches. Optional.
    */
@@ -325,6 +337,7 @@ export interface PrintAreaTemplatePayload {
   source: PrintAreaSource;
   label: string;
   frame: MockupPrintArea["frame"];
+  crop?: MockupPrintArea["crop"];
   reference?: MockupPrintArea["reference"];
   clipMode: "area" | "behind-garment";
 }

@@ -27,8 +27,68 @@ import * as React from "react";
 import { Stage, Layer, Image as KonvaImage, Rect, Group, Transformer, Line, Circle } from "react-konva";
 import type Konva from "konva";
 import type { MockupPrintArea, StudioPlacement } from "@/types/domain";
-import { frameToPixels } from "@/lib/mockups/print-area";
+import {
+  areaCrop,
+  areaPointFromMockup,
+  areaPointInMockup,
+  clipFor,
+  cropLocalRect,
+  describeCrop,
+  frameToPixels,
+  isFullCrop,
+  MIN_CROP,
+  type AreaCrop,
+} from "@/lib/mockups/print-area";
 import { cn } from "@/lib/utils";
+
+/** Which edge or corner of the crop window a handle drags. */
+type CropAnchor = "nw" | "n" | "ne" | "w" | "e" | "sw" | "s" | "se";
+
+const CROP_ANCHORS: Array<{ id: CropAnchor; u: number; v: number }> = [
+  { id: "nw", u: 0, v: 0 },
+  { id: "n", u: 0.5, v: 0 },
+  { id: "ne", u: 1, v: 0 },
+  { id: "w", u: 0, v: 0.5 },
+  { id: "e", u: 1, v: 0.5 },
+  { id: "sw", u: 0, v: 1 },
+  { id: "s", u: 0.5, v: 1 },
+  { id: "se", u: 1, v: 1 },
+];
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * The crop after a drag.
+ *
+ * `du`/`dv` are the pointer's movement in the AREA's own fractions, so the
+ * gesture follows the frame's rotation. A body drag moves the window; a
+ * handle drag moves only the edges it names, and the opposite edge stays put.
+ */
+function applyCropDrag(
+  start: AreaCrop,
+  handle: CropAnchor | null,
+  du: number,
+  dv: number,
+): AreaCrop {
+  if (!handle) {
+    return {
+      ...start,
+      x: clamp(start.x + du, 0, 1 - start.width),
+      y: clamp(start.y + dv, 0, 1 - start.height),
+    };
+  }
+  let left = start.x;
+  let top = start.y;
+  let right = start.x + start.width;
+  let bottom = start.y + start.height;
+  if (handle.includes("w")) left = clamp(start.x + du, 0, right - MIN_CROP);
+  if (handle.includes("e")) right = clamp(right + du, left + MIN_CROP, 1);
+  if (handle.includes("n")) top = clamp(start.y + dv, 0, bottom - MIN_CROP);
+  if (handle.includes("s")) bottom = clamp(bottom + dv, top + MIN_CROP, 1);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 
 interface PrintAreaCanvasProps {
   mockupUrl: string;
@@ -43,8 +103,15 @@ interface PrintAreaCanvasProps {
   placement: StudioPlacement | null;
   /** When true, a drag across the photo measures a reference line. */
   measuring?: boolean;
+  /** When true, the handles crop the visible window instead of staging. */
+  cropMode?: boolean;
   /** Live edit of the area (the frame on the photo). */
   onAreaChange: (area: MockupPrintArea) => void;
+  /**
+   * Live edit of the crop window. `undefined` means the whole area, which is
+   * what a "Whole area" reset passes.
+   */
+  onCropChange?: (crop: AreaCrop | undefined) => void;
   /** Fired when a gesture ends. */
   onCommit?: () => void;
   /** Reports a measured reference line, in photo pixels. */
@@ -84,7 +151,9 @@ export function PrintAreaCanvas({
   area,
   placement,
   measuring = false,
+  cropMode = false,
   onAreaChange,
+  onCropChange,
   onCommit,
   onMeasure,
 }: PrintAreaCanvasProps) {
@@ -97,6 +166,12 @@ export function PrintAreaCanvas({
   const measureRef = React.useRef<Konva.Line | null>(null);
   /** True while a gesture is in flight: the props must not fight the pointer. */
   const busyRef = React.useRef(false);
+  /** The crop at the start of a drag, and the pointer that started it. */
+  const cropDragRef = React.useRef<{
+    crop: AreaCrop;
+    pointer: { x: number; y: number };
+    handle: CropAnchor | null;
+  } | null>(null);
   const [containerSize, setContainerSize] = React.useState({ w: 0, h: 0 });
   /** The frame's chrome: the dashed outline and the handles. */
   const [chromeVisible, setChromeVisible] = React.useState(true);
@@ -112,9 +187,9 @@ export function PrintAreaCanvas({
   const designImg = useHtmlImage(designUrl);
 
   // The latest callbacks, so the Konva handlers stay stable.
-  const handlers = React.useRef({ onAreaChange, onCommit, onMeasure });
+  const handlers = React.useRef({ onAreaChange, onCropChange, onCommit, onMeasure });
   React.useEffect(() => {
-    handlers.current = { onAreaChange, onCommit, onMeasure };
+    handlers.current = { onAreaChange, onCropChange, onCommit, onMeasure };
   });
 
   React.useEffect(() => {
@@ -146,15 +221,51 @@ export function PrintAreaCanvas({
    */
   const anchorSize = 9 / displayScale;
   /** How far the rotate handle sits above the frame's edge, in screen pixels. */
-  const rotateOffset = 26 / displayScale;
+  const rotateOffset = 30 / displayScale;
   /** The rotate handle's radius, in screen pixels. */
-  const rotateRadius = 6 / displayScale;
+  const rotateRadius = 8 / displayScale;
+  /**
+   * The rotate handle's GRABBABLE size, in screen pixels.
+   *
+   * The knob is 16 px across, which is a small target on a trackpad. Konva
+   * widens a shape's hit region by `hitStrokeWidth` without changing what is
+   * painted, so the knob looks the same and is three times as easy to catch.
+   */
+  const rotateHitWidth = 30 / displayScale;
 
   // The frame, in mockup pixels.
   const framePx = React.useMemo(
     () => (area ? frameToPixels(area.frame, area, mockupW, mockupH) : null),
     [area, mockupW, mockupH],
   );
+
+  /** The visible window into the area; the whole area when there is none. */
+  const crop = React.useMemo(() => areaCrop(area ?? {}), [area]);
+
+  /** The crop window on the photo, so its outline and handles can be drawn. */
+  const cropRectPx = React.useMemo(
+    () => (area ? clipFor(area, area.frame, mockupW, mockupH) : null),
+    [area, mockupW, mockupH],
+  );
+
+  /** The same window in the frame's local space, for the group's clip. */
+  const cropRectLocal = React.useMemo(
+    () => (framePx ? cropLocalRect({ crop }, framePx) : null),
+    [crop, framePx],
+  );
+
+  /** The crop's eight handles, in mockup pixels. */
+  const cropHandles = React.useMemo(() => {
+    if (!framePx) return [];
+    return CROP_ANCHORS.map((anchor) => {
+      const point = areaPointInMockup(
+        framePx,
+        crop.x + anchor.u * crop.width,
+        crop.y + anchor.v * crop.height,
+      );
+      return { id: anchor.id, ...point };
+    });
+  }, [framePx, crop]);
 
   /**
    * The pointer, in the MOCKUP's pixels.
@@ -186,7 +297,15 @@ export function PrintAreaCanvas({
     return off ? below : above;
   }, [framePx, rotateOffset]);
 
-  /** The rotate handle, above the frame's top edge, turned with the frame. */
+  /**
+   * The rotate handle, above the frame's top edge, turned with the frame.
+   *
+   * Two things keep it grabbable. It lives in the TOP layer (see the scene),
+   * so neither the artwork nor the Transformer's invisible overdraw rect can
+   * sit over it. And it is clamped onto the photo: a large frame - or one
+   * near the top - can put the natural position off the canvas, where the
+   * handle is invisible and unclickable.
+   */
   const syncRotateHandle = React.useCallback(() => {
     const handle = rotateRef.current;
     const stem = rotateStemRef.current;
@@ -195,8 +314,9 @@ export function PrintAreaCanvas({
     const rad = (group.rotation() * Math.PI) / 180;
     const localY = rotateLocalY();
     const edgeY = localY < 0 ? -framePx.height / 2 : framePx.height / 2;
-    const x = group.x() - localY * Math.sin(rad);
-    const y = group.y() + localY * Math.cos(rad);
+    const margin = rotateRadius + 8 / displayScale;
+    const x = clamp(group.x() - localY * Math.sin(rad), margin, mockupW - margin);
+    const y = clamp(group.y() + localY * Math.cos(rad), margin, mockupH - margin);
     handle.position({ x, y });
     stem.points([
       group.x() - edgeY * Math.sin(rad),
@@ -204,7 +324,9 @@ export function PrintAreaCanvas({
       x,
       y,
     ]);
-  }, [framePx, rotateLocalY]);
+    // The handle has its own layer, so the frame's layer draw does not cover it.
+    handle.getLayer()?.batchDraw();
+  }, [framePx, rotateLocalY, rotateRadius, displayScale, mockupW, mockupH]);
 
   /**
    * Puts the frame's own transform on the group.
@@ -261,9 +383,17 @@ export function PrintAreaCanvas({
     const transformer = transformerRef.current;
     const group = groupRef.current;
     if (!transformer) return;
-    transformer.nodes(chromeVisible && group ? [group] : []);
+    // In crop mode the Transformer comes off entirely: its overdraw overlay
+    // would swallow the drags meant for the crop window.
+    transformer.nodes(chromeVisible && !cropMode && group ? [group] : []);
     transformer.getLayer()?.batchDraw();
-  }, [area, chromeVisible, framePx, mockupImg]);
+  }, [area, chromeVisible, cropMode, framePx, mockupImg]);
+
+  // Turning the crop on while the chrome is hidden would leave the tool with
+  // nothing to grab, so cropping always brings the chrome back.
+  React.useEffect(() => {
+    if (cropMode) setChromeVisible(true);
+  }, [cropMode]);
 
   /** The frame's transform as it is right now, from the group. */
   const frameFromGroup = React.useCallback(() => {
@@ -299,6 +429,9 @@ export function PrintAreaCanvas({
 
   const onFrameTransform = () => {
     reportLive();
+    // The knob lives in its own layer, so it has to be moved by hand while
+    // the frame is being resized.
+    syncRotateHandle();
   };
 
   /**
@@ -347,10 +480,46 @@ export function PrintAreaCanvas({
     handlers.current.onCommit?.();
   };
 
+  // --- the crop window's gestures -------------------------------------------
+
+  /**
+   * A crop drag, in the AREA's own fractions.
+   *
+   * The pointer is converted through the frame's rotation, so cropping works
+   * at any angle. The crop is committed live: the design's clip has to follow
+   * the window while it is dragged, or the user is cropping blind.
+   */
+  const cropGestureStart = (handle: CropAnchor | null) => {
+    const pointer = pointerInMockup();
+    if (!pointer || !area) return;
+    cropDragRef.current = { crop: areaCrop(area), pointer, handle };
+    busyRef.current = true;
+  };
+
+  const cropGestureMove = () => {
+    const drag = cropDragRef.current;
+    const pointer = pointerInMockup();
+    if (!drag || !pointer || !framePx) return;
+    const from = areaPointFromMockup(framePx, drag.pointer.x, drag.pointer.y);
+    const to = areaPointFromMockup(framePx, pointer.x, pointer.y);
+    handlers.current.onCropChange?.(
+      applyCropDrag(drag.crop, drag.handle, to.u - from.u, to.v - from.v),
+    );
+  };
+
+  const cropGestureEnd = () => {
+    cropDragRef.current = null;
+    busyRef.current = false;
+    handlers.current.onCommit?.();
+  };
+
   // --- the reference line ----------------------------------------------------
 
   const onStagePointerDown = (event: Konva.KonvaEventObject<Event>) => {
     if (!measuring) {
+      // In crop mode the chrome must stay: the crop's handles ARE the tool,
+      // and a click on the photo next to the window would hide them.
+      if (cropMode) return;
       // A click on the empty photo hides the frame's chrome: the artwork
       // stays, because it is the result, and the frame is only the tool.
       // A click on anything else brings the chrome back. The check is here
@@ -465,8 +634,8 @@ export function PrintAreaCanvas({
               />
             </Layer>
 
-            {/* The frame. The artwork inside it is clipped to it, and the
-                frame's transform carries the artwork with it. */}
+            {/* The frame. The artwork inside it is clipped to the crop
+                window, and the frame's transform carries the artwork with it. */}
             <Layer>
               {framePx ? (
                 <Group
@@ -474,17 +643,16 @@ export function PrintAreaCanvas({
                   x={framePx.cx}
                   y={framePx.cy}
                   rotation={framePx.rotation}
-                  // The clip is the frame's rectangle, in the group's local
-                  // space, so it turns with the frame.
-                  clipX={-framePx.width / 2}
-                  clipY={-framePx.height / 2}
-                  clipWidth={framePx.width}
-                  clipHeight={framePx.height}
-                  draggable={!measuring}
+                  draggable={!measuring && !cropMode}
                   onDragStart={() => {
                     busyRef.current = true;
                   }}
-                  onDragMove={reportLive}
+                  onDragMove={() => {
+                    reportLive();
+                    // The knob has its own layer, so a frame drag has to move
+                    // it by hand or the knob is left behind.
+                    syncRotateHandle();
+                  }}
                   onDragEnd={onFrameDragEnd}
                   onTransformStart={() => {
                     busyRef.current = true;
@@ -492,7 +660,20 @@ export function PrintAreaCanvas({
                   onTransform={onFrameTransform}
                   onTransformEnd={onFrameTransformEnd}
                 >
-                  {artNode}
+                  {/* The design is clipped to the CROP window, in the frame's
+                      local space, so it stops at the fold instead of
+                      floating over it. The clip lives on an inner group: on
+                      the frame's own group it would also cut the dashed
+                      outline, and the user would lose sight of the area the
+                      print file really uses. */}
+                  <Group
+                    clipX={cropRectLocal?.x ?? 0}
+                    clipY={cropRectLocal?.y ?? 0}
+                    clipWidth={cropRectLocal?.width}
+                    clipHeight={cropRectLocal?.height}
+                  >
+                    {artNode}
+                  </Group>
                   <Rect
                     x={-framePx.width / 2}
                     y={-framePx.height / 2}
@@ -508,29 +689,6 @@ export function PrintAreaCanvas({
                   />
                 </Group>
               ) : null}
-
-              <Line
-                ref={rotateStemRef}
-                points={[0, 0, 0, 0]}
-                stroke="#314d3d"
-                strokeWidth={1.5 / displayScale}
-                visible={chromeVisible}
-                listening={false}
-              />
-              <Circle
-                ref={rotateRef}
-                radius={rotateRadius}
-                fill="#ffffff"
-                stroke="#314d3d"
-                strokeWidth={2 / displayScale}
-                visible={chromeVisible}
-                draggable={!measuring}
-                onDragStart={() => {
-                  busyRef.current = true;
-                }}
-                onDragMove={onRotateDrag}
-                onDragEnd={onRotateDragEnd}
-              />
 
               <Line
                 ref={measureRef}
@@ -567,6 +725,83 @@ export function PrintAreaCanvas({
                 }}
               />
             </Layer>
+
+            {/* The crop window and the rotate handle, in their own TOP layer.
+                Both were unreachable before: a crop handle at the frame's edge
+                sat under the Transformer's corner anchor, and the knob sat
+                under the Transformer's invisible overdraw overlay, which
+                swallowed every click meant for it. */}
+            <Layer>
+              {cropRectPx ? (
+                <Rect
+                  x={cropRectPx.x}
+                  y={cropRectPx.y}
+                  width={cropRectPx.width}
+                  height={cropRectPx.height}
+                  offsetX={cropRectPx.width / 2}
+                  offsetY={cropRectPx.height / 2}
+                  rotation={cropRectPx.rotation}
+                  fill={cropMode ? "rgba(49,77,61,0.05)" : "transparent"}
+                  stroke="#314d3d"
+                  strokeWidth={(cropMode ? 1.5 : 1) / displayScale}
+                  dash={cropMode ? undefined : [3 / displayScale, 3 / displayScale]}
+                  visible={cropMode || (chromeVisible && !isFullCrop(crop))}
+                  listening={cropMode}
+                  draggable={cropMode}
+                  onDragStart={() => cropGestureStart(null)}
+                  onDragMove={cropGestureMove}
+                  onDragEnd={cropGestureEnd}
+                />
+              ) : null}
+
+              {cropMode && framePx
+                ? cropHandles.map((handle) => (
+                    <Rect
+                      key={handle.id}
+                      x={handle.x}
+                      y={handle.y}
+                      width={anchorSize}
+                      height={anchorSize}
+                      offsetX={anchorSize / 2}
+                      offsetY={anchorSize / 2}
+                      fill="#ffffff"
+                      stroke="#314d3d"
+                      strokeWidth={1.5 / displayScale}
+                      cornerRadius={2 / displayScale}
+                      draggable
+                      onDragStart={() => cropGestureStart(handle.id)}
+                      onDragMove={cropGestureMove}
+                      onDragEnd={cropGestureEnd}
+                    />
+                  ))
+                : null}
+
+              <Line
+                ref={rotateStemRef}
+                points={[0, 0, 0, 0]}
+                stroke="#314d3d"
+                strokeWidth={1.5 / displayScale}
+                visible={chromeVisible && !cropMode}
+                listening={false}
+              />
+              <Circle
+                ref={rotateRef}
+                radius={rotateRadius}
+                fill="#ffffff"
+                stroke="#314d3d"
+                strokeWidth={2 / displayScale}
+                // A wider hit area than the painted dot: 16 px is a small
+                // target, and Konva widens the hit region without changing it.
+                hitStrokeWidth={rotateHitWidth}
+                visible={chromeVisible && !cropMode}
+                draggable={!measuring}
+                onDragStart={() => {
+                  busyRef.current = true;
+                }}
+                onDragMove={onRotateDrag}
+                onDragEnd={onRotateDragEnd}
+              />
+            </Layer>
           </Stage>
         </div>
       </div>
@@ -588,7 +823,13 @@ export function PrintAreaCanvas({
               Placement x {placement.x.toFixed(2)} · y {placement.y.toFixed(2)} ·{" "}
               {Math.round(placement.angle)}°
             </span>
-            <span>Drag the frame to move it, its corner to resize, the round handle to rotate.</span>
+            <span>
+              {cropMode
+                ? "Drag the window to move it, its handles to crop. The design is cut at the window."
+                : isFullCrop(crop)
+                  ? "Drag the frame to move it, its corner to resize, the round handle to rotate."
+                  : `Window: ${describeCrop(crop)}. Turn on Crop to change it.`}
+            </span>
           </>
         ) : (
           <span>Pick a design and set a print area to place it.</span>
