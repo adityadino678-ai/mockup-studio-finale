@@ -10,6 +10,22 @@ import {
 
 function fail(error: unknown) {
   if (error instanceof PrintifyError) {
+    // A 401/403 from Printify means the key that was sent is not usable - the
+    // visitor's pasted key or the server's PRINTIFY_API_KEY. That is a
+    // configuration problem they can fix, not a gateway fault, so report it as
+    // an unavailable integration (503 + configured:false) with a message that
+    // names the cause. It used to be a bare 502 "Unauthenticated", which made a
+    // rejected key look identical to Printify being down.
+    if (error.status === 401 || error.status === 403) {
+      return json(
+        {
+          configured: false,
+          error: `Printify rejected the API key (HTTP ${error.status}: ${error.message}). Update it in Settings, or set a valid PRINTIFY_API_KEY on the server.`,
+          status: error.status,
+        },
+        { status: 503 },
+      );
+    }
     return json(
       { error: error.message, status: error.status },
       { status: error.status === 501 ? 503 : 502 },

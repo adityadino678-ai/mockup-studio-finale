@@ -455,15 +455,26 @@ test.describe("core workflow", () => {
     await seedLibrary(page);
 
     // Integrations report an HONEST state for whatever configuration exists.
-    // In CI no key is present, so the state is "not configured"; a developer
-    // running locally with a key in .dev.vars gets the connected state. Both
-    // are correct, and neither may break anything else.
+    // With no key at all, or with a key Printify rejects, the endpoint answers
+    // 503 + `configured:false` and says what to fix; with a working key it
+    // answers 200 + `configured:true` and the catalogue. Both are correct, and
+    // neither may break anything else. A 5xx gateway status is never correct
+    // here - that is what the production run caught when a stale key was
+    // deployed and the endpoint answered 502 "Unauthenticated".
     const state = await page.evaluate(async () => {
       const res = await fetch("/api/printify/catalog?limit=1");
-      return { status: res.status, body: (await res.json()) as { configured?: boolean } };
+      return {
+        status: res.status,
+        body: (await res.json()) as { configured?: boolean; error?: string },
+      };
     });
-    expect(state.status).toBeLessThan(500);
-    expect(typeof state.body.configured).toBe("boolean");
+    if (state.status === 200) {
+      expect(state.body.configured).toBe(true);
+    } else {
+      expect(state.status).toBe(503);
+      expect(state.body.configured).toBe(false);
+      expect(state.body.error).toMatch(/Printify/i);
+    }
 
     // The core workflow does not depend on it.
     await gotoApp(page, "/printify-studio");

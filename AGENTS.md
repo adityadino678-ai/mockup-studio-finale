@@ -532,7 +532,22 @@ position pickers here:
   falls back to a server secret, so nothing breaks when neither is set. The
   server never stores a user's key. Preview deployments can also set secrets with
   `npx wrangler secret put PRINTIFY_API_KEY` (and/or `AI_API_KEY`). With no keys
-  anywhere, every integration endpoint returns 503 before doing work.
+  anywhere, every integration endpoint returns 503 before doing work, and a key
+  Printify REJECTS is reported the same way: `/api/printify/catalog` maps an
+  upstream 401/403 to **503** with `configured:false` and a message naming the
+  rejected key. It used to be a bare 502 `"Unauthenticated"`, which made a stale
+  key indistinguishable from Printify being down (a production e2e run caught
+  exactly that). Note the catalogue itself is cached per URL at the edge without
+  the key, so a cache hit can still answer 200 while the key is rejected — the
+  data is public and identical for everyone, so that is not a lie about the key.
+- **The live Worker's `PRINTIFY_API_KEY` is currently REJECTED by Printify**
+  (401 `Unauthenticated`, verified Oct 2026 with a cache-busting catalogue
+  request). `/api/integrations/status` still reports `configured: true` because
+  that only means a secret is present. The catalogue can still answer 200 from
+  the edge cache, so the Studio looks healthy, but every real Printify call
+  (print providers, variants, product creation) fails until the secret is
+  rotated with `npx wrangler secret put PRINTIFY_API_KEY`. A visitor can also
+  paste their own key in **Settings → API connections**.
 - **AI is provider-aware.** `src/lib/ai/providers.ts` is the isomorphic registry
   of 14 providers (NVIDIA NIM, OpenRouter, Groq, Cerebras,
   Together, Google Gemini, Mistral, DeepSeek, Fireworks, xAI, OpenAI, Anthropic,
@@ -706,7 +721,7 @@ position pickers here:
 ## Git
 
 History is intact. The eight removed screens were folded into the surviving six in
-`9788f62 feat: consolidate the app around the Printify Studio`. Everything before
+`b962c92 feat: consolidate the app around the Printify Studio`. Everything before
 it — the foundation, the Astro migration, live Printify product creation, agent
 M1–M4, and the mockup print areas — is still in the log, which is where the
 reasoning behind the domain layer lives.

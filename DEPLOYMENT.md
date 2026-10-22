@@ -121,15 +121,22 @@ Invoke-WebRequest https://mockup-studio.adityadino678.workers.dev -UseBasicParsi
 (Invoke-WebRequest https://mockup-studio.adityadino678.workers.dev/api/integrations/status -UseBasicParsing).Content
 ```
 
-Every route should return 200, and the status endpoint should report
-`configured: false` for `printify`, `etsy` and `ai`.
+Every route should return 200. On a fresh deployment with no secrets the
+status endpoint reports `configured: false` for `printify`, `etsy` and `ai`; a
+deployment that has a `PRINTIFY_API_KEY` set reports `configured: true` for
+`printify` (this is about the secret being *present*, not accepted - see below).
 
 ## Integrations and secrets
 
-No API keys are deployed. That is deliberate: the core workflow — upload, place,
+No API keys are required. That is deliberate: the core workflow — upload, place,
 print areas, render, background removal, ink variants, ZIP export — needs no keys,
 and with none present every integration endpoint returns 503 before doing any
 work, so the public attack surface is effectively nil.
+
+A key that is present but rejected by the provider is reported the same way by
+`/api/printify/catalog`: upstream 401/403 becomes **503** with
+`configured: false` and a message naming the rejected key, never a bare 502. A
+stale secret therefore reads as "fix the key", not "Printify is down".
 
 To enable in production:
 
