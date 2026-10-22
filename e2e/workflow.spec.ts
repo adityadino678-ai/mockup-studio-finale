@@ -770,7 +770,7 @@ test.describe("core workflow", () => {
     await expect(page.getByText("4500×5400")).toBeVisible({ timeout: 30_000 });
   });
 
-  test("23. the editor follows the Studio and clips to the print area", async ({ page }) => {
+  test("25. the editor follows the Studio and clips to the print area", async ({ page }) => {
     const { designId, mockupId } = await seedLibrary(page);
 
     // A print area on the mockup.
@@ -836,7 +836,7 @@ test.describe("core workflow", () => {
     // The painted area is the print area's shape (4500/5400 = 0.833).
     expect(painted.width / painted.height).toBeCloseTo(4500 / 5400, 1);
   });
-  test("21. the print area clips the design in a rendered output", async ({ page }) => {
+  test("26. the print area clips the design in a rendered output", async ({ page }) => {
     await seedLibrary(page);
 
     // A print area on the mockup.
@@ -965,8 +965,6 @@ test.describe("core workflow", () => {
         ink: { colors: [], blackInkColors: [] },
       },
     });
-    await page.reload();
-    await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
 
     // The separation follows the ONE product: with its ink group empty, both
     // designs are "no ink variants" designs for this product.
@@ -1046,8 +1044,16 @@ test.describe("core workflow", () => {
  * The studio keeps its state in one row of the `settings` table, so the
  * product and its colour groups can be chosen without driving the whole
  * catalogue picker - and without needing a Printify key in the test.
+ *
+ * The page is left and re-entered on purpose. The studio holds the session
+ * in memory and saves it a moment after any change, so writing to the store
+ * while that page is open is overwritten by its own pending save - which is
+ * a race that only shows up sometimes, and only on a fast machine.
  */
 async function setStudioSession(page: Page, patch: Record<string, unknown>) {
+  // A page that does not use the studio session, so nothing can save over it.
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
   await page.evaluate(async (changes) => {
     const db: IDBDatabase = await new Promise((res) => {
       const r = indexedDB.open("mockup-studio");
@@ -1066,6 +1072,9 @@ async function setStudioSession(page: Page, patch: Record<string, unknown>) {
       tx.oncomplete = () => res();
     });
   }, patch);
+
+  await page.goto("/printify-studio");
+  await expect(page.getByRole("link", { name: /Batch Studio/ })).toBeVisible({ timeout: 30_000 });
 }
 
 /** Uploads fixture assets into the library (waits for each upload to land)

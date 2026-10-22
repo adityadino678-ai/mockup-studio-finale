@@ -285,6 +285,67 @@ the React surface.
   `translate(cx, cy)` double-counts the offset and throws the artwork out of
   the print area - a bug the prototype caught before it could ship.
 
+## Print areas (the Mockups tab)
+
+The Mockups page has two tabs in its upper section: `Mockups` (the library)
+and `Print areas`. A **print area** maps a REAL Printify print area onto a
+mockup photo, so the mockup shows what the product actually gets.
+
+- `src/lib/mockups/print-area.ts` is the pure core: the box maths, the
+  mapping between Printify's placement and the mockup's `Transform`, the
+  area list derived from the catalogue, the physical sizes, and the template
+  payload. No DOM, no React, no IndexedDB - so it is unit-tested on its own.
+- `src/components/mockups/print-area-editor.tsx` draws the box on the photo
+  and the artwork inside it. `src/views/mockups/print-areas-tab.tsx` is the
+  screen; the editor canvas clips with a Konva `Group` and the batch/export
+  compositor clips with `ctx.rect(...)` + `ctx.clip()`.
+
+**The Printify Studio owns the design's placement. The mockup owns the area.**
+That is the whole design, and it is deliberate:
+
+- The area is a real Printify print area: the catalogue (blueprint → print
+  provider → position) gives its exact pixel size, with named presets and a
+  manual W x H as the fallback when there is no Printify key. Printify's
+  placeholder size is per variant, so the **smallest** placeholder for a
+  position is used - a design sized against it never exceeds the real area.
+- The box's aspect is ALWAYS the area's aspect. It is stored as fractions of
+  the photo (`x`, `y` = centre, `width`), so it survives a resize and travels
+  to another mockup as a template.
+- The artwork inside the box is placed by the Studio's own numbers (`scale` =
+  artwork width / area width, `x`/`y` = the artwork's CENTRE in the area).
+  **The mockups tab does not invent a placement.** Dragging the artwork there
+  writes a per-design override back into the Studio session, so the mockup
+  the buyer sees and the product Printify prints cannot disagree.
+- For a mockup WITH an area, the Studio placement wins over a saved
+  placement, in the editor and in the batch. Without an area, nothing about
+  the old behaviour changed.
+- **The design is clipped to the area** - in the editor preview, in every
+  batch render and in the export. The part of the artwork that falls outside
+  the printable area is not on the product either. Two acceptance tests prove
+  it at the pixel level (`e2e/workflow.spec.ts`).
+- A print-area **template** carries the area spec, the garment reference and
+  the box position as a fraction of the photo - not the design placement,
+  which belongs to the Studio. Apply it from `Mockups → Print areas` by
+  ticking the target mockups.
+- The optional **garment reference** (a line drawn across the garment, typed
+  in inches) turns the photo into a scale, and the app can then report the
+  design's printed size in inches.
+
+**Traps in this feature:**
+
+- The clip in Konva must live on a `Group` around the artwork. A clip on the
+  artwork itself rotates with it. And a `Group` parent makes Konva bound the
+  drag to the group's client rect - the artwork's own bounds - so the
+  artwork would be pinned in place. The node needs an explicit
+  `dragBoundFunc={(pos) => pos}`.
+- The design's pixel size is NOT needed for the mapping: Printify scales
+  artwork uniformly, and the renderer preserves the artwork's own aspect.
+  Only the area's size and the box matter.
+- `StudioPlacement.scale` may exceed 1 (the artwork is wider than the area
+  and gets cropped). The Studio's width slider used to stop at 100% and had
+  to be raised to 200%, or the mockups tab could set something the Studio
+  could not show.
+
 ## Traps that will bite you again
 
 1. **`main` in `wrangler.jsonc` must be a real file path.** The value in Astro's
