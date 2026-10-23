@@ -652,8 +652,16 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
         // response carries the whole product, so this costs no extra calls.
         const product = data.product ?? {};
         const shopId = typeof data.shopId === "number" ? data.shopId : undefined;
-        const uploaded = new Map<string, string>();
-        for (const a of data.artworks ?? []) uploaded.set(a.variantIds.join(","), a.imageId);
+        // Printify's product carries the image id it stored for each print
+        // area, not our local asset id. Compare like with like: the server
+        // echoes the uploaded image ids back in `artworks`.
+        const uploadedImageByVariant = new Map<number, string>();
+        for (const a of data.artworks ?? []) {
+          const ids = Array.isArray(a.variantIds) ? a.variantIds : [];
+          for (const variantId of ids) {
+            uploadedImageByVariant.set(Number(variantId), String(a.imageId));
+          }
+        }
         const imageByVariant = new Map<number, string>();
         for (const areaEntry of product.print_areas ?? []) {
           for (const ph of areaEntry.placeholders ?? []) {
@@ -664,12 +672,8 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
             }
           }
         }
-        const expectedImageFor = (variantId: number): string | undefined => {
-          for (let i = 0; i < partition.groups.length; i++) {
-            if (partition.groups[i].variantIds.includes(variantId)) return item.groups[i]?.assetId;
-          }
-          return undefined;
-        };
+        const expectedImageFor = (variantId: number): string | undefined =>
+          uploadedImageByVariant.get(variantId);
         const wrongArtwork: string[] = [];
         for (const v of product.variants ?? []) {
           if (!v.is_enabled) continue;
