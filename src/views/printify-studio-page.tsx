@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { DesignsTab } from "@/views/studio/designs-tab";
 import { ColorsTab } from "@/views/studio/colors-tab";
 import { PlacementTab } from "@/views/studio/placement-tab";
+import { ListingImagesTab } from "@/views/studio/listing-images-tab";
+import { ListingDetailsTab } from "@/views/studio/listing-details-tab";
 import {
   fetchBlueprints,
   fetchColourSource,
@@ -19,9 +21,9 @@ import { emptySession, loadSession, saveSession, ROWS } from "@/lib/printify/stu
 import { hexForColourName, primaryHex, suggestInk } from "@/lib/printify/colors";
 import type { CatalogBlueprint, CatalogProvider, CatalogVariant } from "@/lib/printify/types";
 import type { StudioRowId, StudioSession } from "@/types/domain";
-import { Cloud, Layers, Palette, Wand2 } from "lucide-react";
+import { Cloud, FileText, Images, Layers, Palette, Wand2 } from "lucide-react";
 
-type StudioTab = "designs" | "colors" | "panel";
+type StudioTab = "designs" | "colors" | "panel" | "images" | "details";
 
 export interface StudioCatalogState {
   configured: boolean;
@@ -270,7 +272,7 @@ export function PrintifyStudioPage() {
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as StudioTab)}>
-        <TabsList className="mb-4">
+        <TabsList className="mb-4 flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="designs">
             <Wand2 className="h-3.5 w-3.5" /> Designs
           </TabsTrigger>
@@ -279,6 +281,12 @@ export function PrintifyStudioPage() {
           </TabsTrigger>
           <TabsTrigger value="panel">
             <Layers className="h-3.5 w-3.5" /> Design panel
+          </TabsTrigger>
+          <TabsTrigger value="images">
+            <Images className="h-3.5 w-3.5" /> Listing images
+          </TabsTrigger>
+          <TabsTrigger value="details">
+            <FileText className="h-3.5 w-3.5" /> Listing details
           </TabsTrigger>
         </TabsList>
 
@@ -305,6 +313,29 @@ export function PrintifyStudioPage() {
             catalog={catalog}
             hexFor={hexFor}
             onGoToColors={() => setTab("colors")}
+          />
+        </TabsContent>
+
+        <TabsContent value="images" forceMount>
+          <ListingImagesTab
+            session={session}
+            update={update}
+            catalog={catalog}
+            onGoToDesigns={() => setTab("designs")}
+            onGoToPanel={() => setTab("panel")}
+            onGoToDetails={() => setTab("details")}
+          />
+        </TabsContent>
+
+        <TabsContent value="details" forceMount>
+          <ListingDetailsTab
+            session={session}
+            update={update}
+            catalog={catalog}
+            loaded={loaded}
+            onGoToDesigns={() => setTab("designs")}
+            onGoToImages={() => setTab("images")}
+            onGoToPanel={() => setTab("panel")}
           />
         </TabsContent>
       </Tabs>

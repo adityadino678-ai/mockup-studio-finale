@@ -389,6 +389,8 @@ export interface ProductDraft {
   status: ProductDraftStatus;
   /** Populated after remote creation. */
   remoteProductId?: string;
+  /** The Printify shop that owns `remoteProductId`. */
+  remoteShopId?: number;
   remotePermalink?: string;
   error?: string;
   createdAt: number;
@@ -414,8 +416,15 @@ export interface ListingDraft {
   quantity?: number;
   productDraftId?: string;
   designId?: string;
-  /** Asset ids for the images attached to this listing. */
+  /** Asset ids for the images attached to this listing, in display order. */
   imageAssetIds: string[];
+  /**
+   * True when the Studio chose `imageAssetIds` explicitly.
+   *
+   * The Export Center then uses exactly those images, in order, instead of
+   * falling back to every render that happens to exist for the design.
+   */
+  imageSelectionLocked?: boolean;
   status: ListingDraftStatus;
   error?: string;
   /** Set when the draft exists on Etsy. */
@@ -480,6 +489,16 @@ export interface StudioInkPair {
   whiteInkDesignId: string;
 }
 
+/** One cached listing render, keyed by `<listingId>:<mockupId>` in the session. */
+export interface StudioListingRender {
+  assetId: string;
+  /** Everything the render depended on; a mismatch means it must be redone. */
+  fingerprint: string;
+  designId: string;
+  mockupId: string;
+  renderedAt: number;
+}
+
 export interface StudioSession {
   blueprintId?: number;
   printProviderId?: number;
@@ -487,9 +506,10 @@ export interface StudioSession {
   sizes: string[];
   rows: Record<StudioRowId, StudioRowState>;
   /**
-   * The designs this batch covers - the ids ticked in the Designs tab. Empty
-   * means "every design in the library", which the Design panel always says
-   * out loud so a batch is never bigger than the user expects.
+   * The designs this batch covers - the ids ticked in the Designs tab.
+   *
+   * Empty means NO batch, not "every design". One click must never turn the
+   * whole library into products.
    */
   designIds: string[];
   /**
@@ -520,6 +540,35 @@ export interface StudioSession {
   priceCents?: number;
   /** `{design}` and `{product}` are replaced when a product is created. */
   titleTemplate?: string;
+  /** The body copy for every listing. Same placeholders as the title. */
+  descriptionTemplate?: string;
+  /** Tags applied to every listing. */
+  tags?: string[];
+  /** One fixed price, or a custom price per listing. */
+  priceMode?: "fixed" | "custom";
+  /** Custom prices in cents, keyed by the listing's owner design id. */
+  listingPrices?: Record<string, number>;
+  /** Optional category carried into every local listing draft. */
+  category?: string;
+  /** Optional quantity carried into every local listing draft. */
+  quantity?: number;
+  /** Selected mockup ids per listing, in click order (first = main image). */
+  listingImages?: Record<string, string[]>;
+  /**
+   * Listings the user explicitly cleared with "Clear".
+   *
+   * An empty `listingImages` entry alone is ambiguous: it can mean "never
+   * configured" or "deliberately emptied". Only the latter may lock an empty
+   * image selection, or a global save would wipe every untouched listing.
+   */
+  listingImageCleared?: Record<string, true>;
+  /**
+   * The last successful render for a listing/mockup pair.
+   *
+   * The fingerprint makes "reuse unchanged images" honest: a changed design
+   * file, mockup, print area or placement invalidates only that one render.
+   */
+  listingRenders?: Record<string, StudioListingRender>;
   updatedAt: number;
 }
 
@@ -532,6 +581,8 @@ export interface StudioProductResult {
   designName: string;
   /** The Printify product id, once created. */
   remoteProductId?: string;
+  /** The Printify shop that owns `remoteProductId`, for the mockup bridge. */
+  shopId?: number;
   status: "created" | "failed" | "skipped";
   error?: string;
   /** The Printify image ids uploaded for this product's artwork groups. */

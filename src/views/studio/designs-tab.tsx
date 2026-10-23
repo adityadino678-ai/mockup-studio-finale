@@ -23,6 +23,7 @@ import {
   withInkPair,
   withoutInkPair,
 } from "@/lib/printify/design-colours";
+import { remapListingDraftOwner } from "@/lib/printify/listing-drafts";
 import {
   DesignGallery,
   productColourGroups,
@@ -38,7 +39,7 @@ import { UploadDropzone } from "@/components/upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { hexForColourName, suggestInk } from "@/lib/printify/colors";
-import { ROWS } from "@/lib/printify/studio-session";
+import { remapListingState, ROWS } from "@/lib/printify/studio-session";
 import type { Design, StudioRowId, StudioSession } from "@/types/domain";
 import { Loader2, Link2, Search, Trash2, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -206,7 +207,22 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
 
   /** Moves a paired design to the other half of its pair. */
   const setRole = (id: string, role: "black" | "white") => {
-    update({ inkPairs: setInkPairRole(inkPairs, id, role) });
+    const before = pairForDesign(inkPairs, id);
+    const nextPairs = setInkPairRole(inkPairs, id, role);
+    const after = pairForDesign(nextPairs, id);
+    const fromId = before?.pair.blackInkDesignId;
+    const toId = after?.pair.blackInkDesignId;
+    if (fromId && toId && fromId !== toId) {
+      update({
+        inkPairs: nextPairs,
+        ...remapListingState(session, fromId, toId),
+      });
+      void remapListingDraftOwner(fromId, toId).catch(() => {
+        // The session remap already happened; the next save rewrites the draft.
+      });
+    } else {
+      update({ inkPairs: nextPairs });
+    }
   };
 
   /** Breaks the pair a design belongs to. */

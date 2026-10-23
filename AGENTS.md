@@ -9,11 +9,12 @@ A local-first print-on-demand workspace for sellers: upload artwork, place it on
 real Printify print area, map that area onto mockup photos, generate renders,
 create ink variants, remove backgrounds, and export verified ZIP archives.
 
-There are **seven pages** — `/` (a static redirect to the Studio), Printify
-Studio, Mockups, Export Center, Agent, Activity, Settings. The Designs, editor,
-Batch Studio, Templates, Product Builder, Listings and AI SEO screens were folded
-into those pages or removed; their engines (batch runner, compositor, Printify
-core, agent tools) are still here and still what the UI and the agent call.
+There are **eight pages** — `/` (a static redirect to the Studio), Printify
+Studio, Mockups, Export Center, Agent, Activity, Settings, and the Printify
+bookmarklet install page. The Designs, editor, Batch Studio, Templates, Product
+Builder, Listings and AI SEO screens were folded into those pages or removed;
+their engines (batch runner, compositor, Printify core, agent tools) are still
+here and still what the UI and the agent call.
 
 **The defining constraint: all user data lives in the visitor's own IndexedDB.**
 Nothing is synced, there is no account, and the server holds no user data. This
@@ -50,8 +51,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 321 unit tests
-npm run test:e2e      # 23 acceptance tests (local dev server)
+npm run test          # 346 unit tests
+npm run test:e2e      # 24 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -68,7 +69,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **7 static pages + 9 on-demand endpoints.** No page depends on request state,
+- **8 static pages + 10 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker. `/` is a static redirect (meta refresh plus
@@ -149,6 +150,80 @@ Re-run the spike after any Printify change.
   deletes what it creates. Run it after any Printify change; it is the only
   thing that catches API drift.
 
+## Printify mockups: public upload, private selection
+
+The official product create/update schema has **no writable `images` field**.
+Sending one returns 200 and is ignored. The product's mockup selection is a
+separate, undocumented pair of APIs, and only half of it is reachable from a
+server:
+
+1. **Upload a custom product mockup (public API, verified live Oct 2026):**
+   `POST https://api.printify.com/v1/shops/{shop_id}/products/{product_id}/mockups.json`
+   with `Content-Type: application/x-www-form-urlencoded` and body
+   `file_url=<public image URL>`. It returns `201 {"id":"…","src":"…"}`.
+   A JSON body fails. The file URL must already exist, so the app uploads the
+   render through `/uploads/images.json`, then passes its `preview_url`.
+   Uploaded mockups are stored separately: the product's `images` array does
+   not change.
+2. **Select the product's mockups (web BFF, no public API):**
+   `GET /api/v1/users/{user_id}/shops/{shop_id}/products/{product_id}/mockup-library-layout`
+   returns `{groups, selected_mockups, limits}`. `selected_mockups` is an
+   **object keyed by mockup id**.
+   `PUT /api/v1/users/{user_id}/shops/{shop_id}/products/{product_id}/selected-mockups`
+   takes exactly `{groups, selected_mockups}` - **not** `limits`, and here
+   `selected_mockups` is an **array**. Uploaded entries are
+   `{id, src, type:"UPLOADED", ownership:"MPL"}`.
+   Groups are `{group_key, label, variant_ids, mockup_ids}`; the no-variant
+   group is `not_linked`. The web app hides groups with an empty `mockup_ids`
+   and uses group order for display, so the first group is the main image.
+   **The bookmarklet preserves empty groups.** Dropping one would lose the
+   product's group configuration; it only makes sure `not_linked` is first and
+   carries the new ids.
+
+The web session is in `localStorage.session` on **printify.com**:
+`{access_token, embedded, user_id, shop_id}`. CSRF is the readable `XSRF-TOKEN`
+cookie, sent as `X-XSRF-TOKEN`. The session is origin-scoped, which is why the
+bookmarklet requires exactly `printify.com` - `www.printify.com` 301s to it.
+A Cloudflare Worker cannot run a browser and must never hold this session.
+
+**The flow is a clipboard bridge, not a server call.** The app uploads the
+selected renders and builds a payload (`src/lib/printify/mockup-bridge.ts`)
+containing product ids, mockup ids and image URLs only. The bookmarklet
+(`src/lib/printify/bookmarklet.ts`) reads that payload, calls the BFF with the
+user's cookies first, and only on a 401 retries with the session token. It
+**merges** by default: `selected_mockups` is normalised whether the BFF returns
+the keyed object or an array, new ids are deduped and prepended, and every
+group (including an empty one) survives. Any existing entry with a new id is
+not duplicated; `not_linked` becomes the first group. Payload product ids and
+mockup ids must match `[A-Za-z0-9_-]{1,64}` and image URLs must be `https://`,
+so a tampered clipboard payload cannot inject a `javascript:`/`data:` URL.
+If the layout cannot be read (or a 200 is malformed), it asks before replacing.
+Each request has a 30 s abort timeout; it backs off on 429 and runs at most two
+products at once. No token leaves printify.com.
+
+A `javascript:` URL has all ASCII newlines/tabs removed before execution, so
+the bookmarklet source must never contain `//` line comments - they would
+swallow the rest of the code. Use `/* ... */`; the unit test parses the exact
+newline-stripped source the browser runs.
+
+`POST /api/printify/mockups` (`src/pages/api/printify/mockups.ts`) is the
+server half: it requires `confirm:true`, is same-origin only, requires
+`Content-Type: application/json`, rejects a body over 40 MB before parsing,
+validates at most 10 images of 4 MB each and 24 MB total, checks each image is
+valid base64 with JPEG/PNG magic bytes, resolves the shop, and requires the
+product title to match the app's result (409 on a stale or missing title)
+before uploading media + custom product mockups two at a time. The client sends
+8 at a time and downscales to a 2 MB JPEG with a white background
+(`src/lib/client/mockup-upload.ts`); it also rejects an image with no natural
+dimensions instead of dividing by zero. The Printify product must exist before
+its mockups can be uploaded. Because the endpoint spends the operator's key,
+cross-site callers are rejected even when they use a preflight-free content
+type.
+
+**This path needs a real Printify web session to verify end to end.** CI and
+the unit tests can prove the payload and the contract, not the PUT. Use a
+throwaway product and a real printify.com tab for the final check.
+
 ## The Printify Studio (`/printify-studio`)
 
 The bulk listing tool: upload designs, pick the product and its colours,
@@ -161,7 +236,11 @@ place the artwork, create one Printify product per design.
   Everything in there is a pure function with unit tests in
   `tests/studio-printify.test.ts` - the ONLY safety net, because CI has no
   Printify key.
-- `src/views/studio/` - the three tabs: Designs, Colors, Design panel.
+- `src/views/studio/` - the five tabs: Designs, Colors, Design panel,
+  Listing images, Listing details. The Design panel no longer owns title or
+  price; it owns placement and **Create on Printify**. Copy, tags and price
+  belong to the two Listing tabs because they apply per listing, not per
+  placement.
 - **The Designs tab absorbed the old Designs page.** Each card's "…" menu
   (`design-card.tsx`, labelled `Actions for <name>`) renames and tags
   (`edit-design-dialog.tsx`), creates ink variants (`ink-variants-dialog.tsx`,
@@ -193,6 +272,87 @@ Four things that are easy to get wrong, and were:
    batch, not "every design" - otherwise one click turns one design into
    fifty products. Created products are also written to `productDrafts`, so the
    Agent's artifact rail and the Export Center can see them.
+
+### Listing images and Listing details
+
+These two tabs turn the selected mockups and the bulk copy into local listing
+drafts - and, after the product exists, into the Printify product's mockups.
+
+- **One listing per design, or per pair.** `src/lib/printify/listing-plan.ts`
+  is the single answer: only ticked designs are in scope, a complete pair is
+  one listing owned by its **black-ink** half, a half-pair is not a pair, and
+  an ordinary design sits in the ink row only when it is ink-ticked **and
+  actually has an ink asset**. A tick with no ink file prints the main artwork
+  on every colour, so showing it in the ink row would make the tab disagree
+  with the product. The black half's artwork and placement are the listing's
+  preview and render; the pair is emitted at the black half's slot even if the
+  white half sorts first. Designs are ordered by `createdAt`, matching the
+  product loop.
+- **Listing images**: `src/views/studio/listing-images-tab.tsx`. Every mockup
+  in the library is a tile for every listing. Ticks are kept in
+  `session.listingImages[listingId]` **in click order**, and the first tick is
+  the main image; the tile numbers show that order. "Select all" appends only
+  the missing ids; "Clear" removes the listing's selection and records
+  `session.listingImageCleared[listingId] = true`. That marker is the ONLY
+  signal that an empty selection was deliberate - an empty array alone means
+  "never configured". One **Save & render** renders every selected tile for
+  every listing, one at a time with live progress, and reuses a render only
+  when its fingerprint matches. The long render loop reads the latest session
+  from a ref before saving, so edits made on another tab mid-render are not
+  overwritten. The Listing images/details tab panels use `forceMount`, so
+  switching tabs does not discard an unsaved form.
+- A listing render is the batch engine's `renderComposition`, stored as a
+  `mockup-render` asset and keyed by `<listingId>:<mockupId>` in
+  `session.listingRenders`. The fingerprint in
+  `src/lib/printify/listing-render.ts` covers the design asset, the mockup
+  asset/dimensions, the pixel-affecting print-area fields (`areaWidth`,
+  `areaHeight`, `frame`, `crop`, `clipMode`), the Studio placement, the saved
+  fallback transform **only when there is no print area**, and the
+  behind-garment override. `label`, `source`, `reference` and `updatedAt` are
+  deliberately excluded. The fingerprint is `version: 2`; changing it
+  invalidates existing renders once, which is the intended cost of fixing the
+  old over-broad hash.
+- **Downloads** build a ZIP of the current renders only, in click order. The
+  Export Center uses `listing.imageAssetIds` in order when
+  `imageSelectionLocked` is true, and falls back to every render when it is
+  not (`src/lib/export/zip-export.ts`). For a pair, the white half looks up the
+  **black owner's** draft for copy and images; when the owner locked its image
+  selection, the white half does not export its own fallback renders and adds
+  a note pointing at the owner folder instead.
+- **Listing details**: `src/views/studio/listing-details-tab.tsx`. One title
+  template, description, tag list, category/quantity and price rule for the
+  batch. `{design}` and `{product}` expand per listing; tags are capped at 13
+  of 20 characters; price is either one fixed value for every listing or a
+  custom value per listing. Custom prices are explicitly required - there is no
+  silent fallback to the old fixed price, and the card says "Set a price" until
+  one is entered. Price input accepts `24.99` or `24,99` but rejects ambiguous
+  values such as `12.99.00` and `1e3`. A price applies to **every variant** of
+  the product, which is what Printify requires. Save writes the session and all
+  listing drafts together.
+- **Draft locking is deliberate.** `src/lib/printify/listing-drafts.ts` writes
+  one `ListingDraft` per listing, links the newest `ProductDraft`, and stores
+  only asset ids that still exist. Before locking, it recomputes each render's
+  fingerprint, so a placement/artwork change between render and save cannot
+  lock obsolete pixels. `nextListingImageState` has three distinct cases:
+  an explicit **Clear** locks an empty list; a complete fresh selection locks
+  that exact order; anything else (untouched, partial, pending or stale)
+  preserves the previous image state. A global save therefore cannot wipe
+  every listing the user has not configured yet. Product creation saves drafts
+  with `lockSelection:false`; an existing locked selection stays locked.
+  Draft rows are read newest-first by `updatedAt`, not `createdAt`, so a
+  re-saved draft is the one that wins. When the user swaps a pair's black/white
+  roles, `remapListingState` moves images, clears, prices and renders to the
+  new owner and `remapListingDraftOwner` re-points the local draft.
+- **Printify images** are uploaded through `/api/printify/mockups` first, then
+  the clipboard/bookmarklet applies them to the product's mockup selection.
+  Sending is all-or-nothing per listing: if any selected image lacks a current
+  render, that listing is skipped rather than sending a shorter set, because a
+  shorter set changes which image becomes the main one. The render is the
+  listing's image, not the product's print file; the print file still comes
+  from the print areas.
+- **`/printify-bookmarklet`** is the install page. It is intentionally outside
+  the sidebar: it is a utility page opened from the Send dialog, not another
+  work surface.
 
 ## Background removal: two engines, both local, no key and no limit
 
@@ -520,7 +680,7 @@ position pickers here:
   print-area templates; Product Builder → the Studio's Design panel; Listings
   and AI SEO → the agent's `draft_listing`. Their engines
   (`lib/batch/runner.ts`, `lib/canvas/compose.ts`, `lib/printify/*`,
-  `lib/client/tools.ts`, all nine `/api/*` endpoints) are untouched, because the
+  `lib/client/tools.ts`, all ten `/api/*` endpoints) are untouched, because the
   UI and the agent still call them. Accepted losses: there is no batch-job list
   screen (the renders land in the Export Center, and a batch row in the artifact
   rail is inert) and no free-form canvas editor.
@@ -548,6 +708,12 @@ position pickers here:
   (print providers, variants, product creation) fails until the secret is
   rotated with `npx wrangler secret put PRINTIFY_API_KEY`. A visitor can also
   paste their own key in **Settings → API connections**.
+- **The mockup-selection write is proven by contract, not by a live session.**
+  The upload endpoint, the BFF GET/PUT shape, the merge order and the
+  bookmarklet are implemented and unit-tested, but CI has no Printify web
+  session. Run the bookmarklet once on a throwaway product before trusting it
+  for a batch. Also rotate any Printify token that was pasted into a chat;
+  treat it as exposed.
 - **AI is provider-aware.** `src/lib/ai/providers.ts` is the isomorphic registry
   of 14 providers (NVIDIA NIM, OpenRouter, Groq, Cerebras,
   Together, Google Gemini, Mistral, DeepSeek, Fireworks, xAI, OpenAI, Anthropic,
@@ -691,8 +857,12 @@ position pickers here:
   calling Printify. Selecting all 132 variants is what surfaced this.
 - **Printify's gateway has returned a bare 502 on a large upload that a retry
   then completed** (128 s failed, 13 s succeeded). `request()` in
-  `src/lib/server/printify.ts` retries once on 502/503/504 and on a dropped
-  connection; the body is always a string, so replaying the request is safe.
+  `src/lib/server/printify.ts` now retries a dropped connection or
+  502/503/504 only for replay-safe methods (`GET`/`PUT`/`DELETE`). A `POST`
+  may already have been applied even when the response was lost, so replaying
+  it can create duplicate uploads or mockups. A `429` is still retried for
+  every method because that request was not processed. The old "the body is a
+  string, so replay is safe" note was wrong for POST.
 - **Printify rejects artwork it cannot decode, and its top-level message is only
   "Operation failed.".** The real text lives in `error.errors.reason`
   ("Failed to upload image…"), so `extractError()` prefers the deepest message
@@ -720,8 +890,8 @@ position pickers here:
 
 ## Git
 
-History is intact. The eight removed screens were folded into the surviving six in
-`b962c92 feat: consolidate the app around the Printify Studio`. Everything before
+History is intact. The eight removed screens were folded into the surviving
+pages in `b962c92 feat: consolidate the app around the Printify Studio`. Everything before
 it — the foundation, the Astro migration, live Printify product creation, agent
 M1–M4, and the mockup print areas — is still in the log, which is where the
 reasoning behind the domain layer lives.

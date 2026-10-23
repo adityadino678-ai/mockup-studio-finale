@@ -9,7 +9,6 @@ import { authedFetch } from "@/lib/client/integrations";
 import { artworkToBase64Sized } from "@/lib/client/artwork";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, Separator } from "@/components/ui/card";
-import { FieldLabel, Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Switch } from "@/components/ui/primitives";
 import {
@@ -44,7 +43,10 @@ import {
 } from "@/lib/printify/design-colours";
 import { assertCompletePartition } from "@/lib/printify/print-areas";
 import { clampPlacement } from "@/lib/printify/fit";
-import { inkProblems, placementFor, renderTitle, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
+import { inkProblems, placementFor, priceForListing, remapListingState, renderTemplate, renderTitle, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
+import { buildStudioListings } from "@/lib/printify/listing-plan";
+import { remapListingDraftOwner } from "@/lib/printify/listing-drafts";
+import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
 import type { StudioCatalogState } from "@/views/printify-studio-page";
 import type { StudioProductResult, StudioSession, Design } from "@/types/domain";
 import type { DesignCardData } from "@/components/studio/design-card";
@@ -143,7 +145,22 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
 
   /** Moves a paired design to the other half of its pair. */
   const setRole = (id: string, role: "black" | "white") => {
-    update({ inkPairs: setInkPairRole(inkPairs, id, role) });
+    const before = pairForDesign(inkPairs, id);
+    const nextPairs = setInkPairRole(inkPairs, id, role);
+    const after = pairForDesign(nextPairs, id);
+    const fromId = before?.pair.blackInkDesignId;
+    const toId = after?.pair.blackInkDesignId;
+    if (fromId && toId && fromId !== toId) {
+      update({
+        inkPairs: nextPairs,
+        ...remapListingState(session, fromId, toId),
+      });
+      void remapListingDraftOwner(fromId, toId).catch(() => {
+        // The session remap already happened; the next save rewrites the draft.
+      });
+    } else {
+      update({ inkPairs: nextPairs });
+    }
   };
 
   /** Breaks the pair a design belongs to. */
@@ -593,17 +610,25 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           item.designName,
           productName(catalog, session.blueprintId),
         );
+        const description = renderTemplate(
+          session.descriptionTemplate,
+          item.designName,
+          productName(catalog, session.blueprintId),
+          "",
+          5000,
+        );
         const res = await authedFetch("/api/printify/products", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             confirm: true,
             title,
-            description: "",
+            description,
+            tags: session.tags ?? [],
             blueprintId: session.blueprintId,
             printProviderId: session.printProviderId,
             variants: { [String(session.blueprintId)]: enabled },
-            price: session.priceCents ?? 1999,
+            price: priceForListing(session, item.designId),
             artworks,
           }),
         });
@@ -626,6 +651,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
         // must sit in the group whose artwork we uploaded for it. The create
         // response carries the whole product, so this costs no extra calls.
         const product = data.product ?? {};
+        const shopId = typeof data.shopId === "number" ? data.shopId : undefined;
         const uploaded = new Map<string, string>();
         for (const a of data.artworks ?? []) uploaded.set(a.variantIds.join(","), a.imageId);
         const imageByVariant = new Map<number, string>();
@@ -659,6 +685,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
             designName: item.designName,
             status: "failed",
             remoteProductId: product.id,
+            shopId,
             error: `Printify attached the wrong artwork to ${wrongArtwork.length} variant(s). Check the print areas before publishing.`,
             createdAt: Date.now(),
           });
@@ -676,11 +703,13 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           designAssetId: mainAsset,
           blueprintId: session.blueprintId,
           printProviderId: session.printProviderId,
-          priceCents: session.priceCents,
+          description,
+          priceCents: priceForListing(session, item.designId),
           variantSelection: {},
           printAreaConfig: {},
           status: "created-remote",
           remoteProductId: product.id,
+          remoteShopId: shopId,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         });
@@ -691,6 +720,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           designName: item.designName,
           status: "created",
           remoteProductId: product.id,
+          shopId,
           createdAt: Date.now(),
         };
         next.push(record);
@@ -706,6 +736,23 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           ? `Created ${created.length} draft product${created.length === 1 ? "" : "s"} on Printify`
           : `Created ${created.length}, failed ${failed}`,
       );
+
+      // The local listing drafts carry the copy, tags, price and selected
+      // images. Save them now that the products they point at exist.
+      if (created.length > 0) {
+        try {
+          await saveStudioListingDrafts({
+            session,
+            listings: buildStudioListings(designs ?? [], session),
+            productName: productName(catalog, session.blueprintId),
+            lockSelection: false,
+          });
+        } catch {
+          // The products exist either way; the Listing details tab can save
+          // the drafts again without touching Printify.
+          toast.error("The products were created, but the local listing drafts could not be saved.");
+        }
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not create the listings");
     } finally {
@@ -754,43 +801,6 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
         />
       ) : (
         <>
-      {/* --- listing details ------------------------------------------------- */}
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <h2 className="text-[14px] font-semibold text-ink">Listing details</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="studio-title">Title</FieldLabel>
-              <Input
-                id="studio-title"
-                value={session.titleTemplate ?? ""}
-                onChange={(e) => update({ titleTemplate: e.target.value })}
-                placeholder="{design} — {product}"
-                className="h-8 text-[12px]"
-              />
-              <p className="text-[11px] text-ink-subtle">
-                {"{design}"} is the file name, {"{product}"} the product title.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="studio-price">Price (USD)</FieldLabel>
-              <Input
-                id="studio-price"
-                type="number"
-                min={0.5}
-                step={0.01}
-                value={((session.priceCents ?? 1999) / 100).toFixed(2)}
-                onChange={(e) =>
-                  update({ priceCents: Math.round(Number(e.target.value) * 100) || undefined })
-                }
-                className="h-8 text-[12px]"
-              />
-              <p className="text-[11px] text-ink-subtle">Printify needs a price on every variant.</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* --- what will be created -------------------------------------------- */}
       <Card>
         <CardContent className="space-y-3 p-4">
@@ -949,7 +959,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                     </span>
                     {r.remoteProductId && (
                       <a
-                        href={`https://www.printify.com/app/products/${r.remoteProductId}`}
+                        href={`https://printify.com/app/products/${r.remoteProductId}`}
                         target="_blank"
                         rel="noreferrer"
                         className="font-mono text-[11px] text-forest underline"

@@ -506,7 +506,15 @@ test.describe("core workflow", () => {
     page.on("console", (msg) => {
       if (msg.type() === "error") errors.push(msg.text());
     });
-    const routes = ["/agent", "/mockups", "/export", "/activity", "/settings", "/printify-studio"];
+    const routes = [
+      "/agent",
+      "/mockups",
+      "/export",
+      "/activity",
+      "/settings",
+      "/printify-studio",
+      "/printify-bookmarklet",
+    ];
     for (const route of routes) {
       await page.goto(route);
       await page.waitForLoadState("networkidle");
@@ -1254,6 +1262,23 @@ test.describe("core workflow", () => {
     expect(response.status()).toBeGreaterThanOrEqual(400);
     const body = await response.text();
     expect(body).not.toMatch(/background-removal key/i);
+  });
+
+  test("22. the listing tabs and the bookmarklet install page are reachable", async ({ page }) => {
+    await gotoApp(page, "/printify-studio");
+
+    await page.getByRole("tab", { name: "Listing images" }).click();
+    await expect(page.getByRole("heading", { name: "Listing images" })).toBeVisible();
+    await expect(page.getByText("No listings yet")).toBeVisible();
+
+    await page.getByRole("tab", { name: "Listing details" }).click();
+    await expect(page.getByText("No listings to fill in")).toBeVisible();
+
+    await page.goto("/printify-bookmarklet");
+    await expect(
+      page.getByRole("heading", { name: "Printify mockup bookmarklet" }),
+    ).toBeVisible();
+    await expect(page.locator("#bookmarklet-source")).toHaveValue(/^javascript:/);
   });
 });
 

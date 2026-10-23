@@ -32,12 +32,15 @@ const ROUTES = [
   "/printify-studio",
 ];
 
+/** Utility pages that render outside the sidebar shell. */
+const UTILITY_ROUTES = ["/printify-bookmarklet"];
+
 export default async function globalSetup() {
   const baseURL = process.env.BASE_URL ?? "http://localhost:3100";
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
-    for (const route of ROUTES) {
+    for (const route of [...ROUTES, ...UTILITY_ROUTES]) {
       try {
         await page.goto(new URL(route, baseURL).toString(), {
           waitUntil: "domcontentloaded",
@@ -45,10 +48,12 @@ export default async function globalSetup() {
         });
         // The app shell is a React island: it only proves the route works
         // once the shell has hydrated. "Printify Studio" is in the sidebar on
-        // every page.
-        await page
-          .getByRole("link", { name: "Printify Studio" })
-          .waitFor({ state: "attached", timeout: 60_000 });
+        // every page except the standalone bookmarklet utility page.
+        if (!UTILITY_ROUTES.includes(route)) {
+          await page
+            .getByRole("link", { name: "Printify Studio" })
+            .waitFor({ state: "attached", timeout: 60_000 });
+        }
       } catch {
         // A route that will not warm is a route the suite will report on
         // properly, with the real error.

@@ -12,6 +12,7 @@
 import { getSetting, setSetting } from "@/lib/db/schema";
 import type {
   StudioInkPair,
+  StudioListingRender,
   StudioPlacement,
   StudioProductResult,
   StudioRowId,
@@ -53,6 +54,15 @@ export function emptySession(): StudioSession {
     placements: {},
     priceCents: 1999,
     titleTemplate: "{design} — {product}",
+    descriptionTemplate: "",
+    tags: [],
+    priceMode: "fixed",
+    listingPrices: {},
+    category: "",
+    quantity: 1,
+    listingImages: {},
+    listingImageCleared: {},
+    listingRenders: {},
     updatedAt: Date.now(),
   };
 }
@@ -64,6 +74,92 @@ function stringArray(value: unknown): string[] {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function positiveCents(value: unknown): number | undefined {
+  const n = finiteNumber(value);
+  return n !== undefined && n > 0 ? Math.round(n) : undefined;
+}
+
+/** 13 tags of 20 characters - the strictest marketplace the drafts feed. */
+export const MAX_TAGS = 13;
+export const MAX_TAG_LENGTH = 20;
+
+/** Parses a comma/newline separated tag field into the list the drafts store. */
+export function parseTags(value: string | string[] | undefined): string[] {
+  if (!value) return [];
+  const raw = Array.isArray(value) ? value : value.split(/[,\n]/);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const tag = item.trim().replace(/^#+/, "").slice(0, MAX_TAG_LENGTH);
+    const key = tag.toLowerCase();
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+function tagArray(value: unknown): string[] {
+  return Array.isArray(value) ? parseTags(stringArray(value)) : [];
+}
+
+function centsRecord(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [key, raw] of Object.entries(value)) {
+    const cents = positiveCents(raw);
+    if (key && cents !== undefined) out[key] = cents;
+  }
+  return out;
+}
+
+function imageSelectionRecord(value: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [listingId, raw] of Object.entries(value)) {
+    const ids = [...new Set(stringArray(raw))];
+    if (listingId && ids.length > 0) out[listingId] = ids;
+  }
+  return out;
+}
+
+function clearedRecord(value: unknown): Record<string, true> {
+  const out: Record<string, true> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [listingId, raw] of Object.entries(value)) {
+    if (listingId && raw === true) out[listingId] = true;
+  }
+  return out;
+}
+
+function renderRecord(value: unknown): Record<string, StudioListingRender> {
+  const out: Record<string, StudioListingRender> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const raw of Object.values(value)) {
+    if (!raw || typeof raw !== "object") continue;
+    const entry = raw as Partial<StudioListingRender>;
+    if (
+      typeof entry.assetId !== "string" ||
+      typeof entry.fingerprint !== "string" ||
+      typeof entry.designId !== "string" ||
+      typeof entry.mockupId !== "string"
+    ) {
+      continue;
+    }
+    // The key is derived from the entry, never trusted: a malformed blob must
+    // not let another listing/mockup pair return these pixels.
+    out[`${entry.designId}:${entry.mockupId}`] = {
+      assetId: entry.assetId,
+      fingerprint: entry.fingerprint,
+      designId: entry.designId,
+      mockupId: entry.mockupId,
+      renderedAt: finiteNumber(entry.renderedAt) ?? Date.now(),
+    };
+  }
+  return out;
 }
 
 /**
@@ -159,8 +255,21 @@ export async function loadSession(): Promise<StudioSession> {
     universal: stored.universal !== false,
     universalPlacement,
     placements,
-    priceCents: finiteNumber(stored.priceCents) ?? base.priceCents,
+    priceCents: positiveCents(stored.priceCents) ?? base.priceCents,
     titleTemplate: typeof stored.titleTemplate === "string" ? stored.titleTemplate : base.titleTemplate,
+    descriptionTemplate:
+      typeof stored.descriptionTemplate === "string" ? stored.descriptionTemplate : "",
+    tags: tagArray(stored.tags),
+    priceMode: stored.priceMode === "custom" ? "custom" : "fixed",
+    listingPrices: centsRecord(stored.listingPrices),
+    category: typeof stored.category === "string" ? stored.category : "",
+    quantity:
+      finiteNumber(stored.quantity) !== undefined && (stored.quantity as number) > 0
+        ? Math.max(1, Math.round(stored.quantity as number))
+        : 1,
+    listingImages: imageSelectionRecord(stored.listingImages),
+    listingImageCleared: clearedRecord(stored.listingImageCleared),
+    listingRenders: renderRecord(stored.listingRenders),
     updatedAt: finiteNumber(stored.updatedAt) ?? Date.now(),
   };
 }
@@ -201,6 +310,30 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
   if (inkPairs.length !== session.inkPairs.length) {
     changed = true;
   }
+
+  const listingImages = { ...(session.listingImages ?? {}) };
+  if (designId in listingImages) {
+    delete listingImages[designId];
+    changed = true;
+  }
+  const listingImageCleared = { ...(session.listingImageCleared ?? {}) };
+  if (designId in listingImageCleared) {
+    delete listingImageCleared[designId];
+    changed = true;
+  }
+  const listingPrices = { ...(session.listingPrices ?? {}) };
+  if (designId in listingPrices) {
+    delete listingPrices[designId];
+    changed = true;
+  }
+  const listingRenders = { ...(session.listingRenders ?? {}) };
+  for (const [key, entry] of Object.entries(listingRenders)) {
+    if (entry.designId === designId || key.startsWith(`${designId}:`)) {
+      delete listingRenders[key];
+      changed = true;
+    }
+  }
+
   if (changed) {
     await saveSession({
       ...session,
@@ -208,6 +341,10 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
       inkPairIds: session.inkPairIds.filter((id) => id !== designId),
       inkPairs,
       placements,
+      listingImages,
+      listingImageCleared,
+      listingPrices,
+      listingRenders,
     });
   }
 
@@ -227,17 +364,92 @@ export function placementFor(
   return session.placements[designId] ?? session.universalPlacement;
 }
 
+/** Expands `{design}` and `{product}` in any listing template. */
+export function renderTemplate(
+  template: string | undefined,
+  designName: string,
+  productName: string,
+  fallback = "",
+  maxLength = 5000,
+): string {
+  const tpl = template?.trim() || fallback;
+  return tpl
+    .replace(/\{design\}/g, designName)
+    .replace(/\{product\}/g, productName)
+    .slice(0, maxLength)
+    .trim();
+}
+
 /** Expands `{design}` and `{product}` in a title template. */
 export function renderTitle(
   template: string | undefined,
   designName: string,
   productName: string,
 ): string {
-  const tpl = template?.trim() || "{design} — {product}";
-  return tpl
-    .replace(/\{design\}/g, designName)
-    .replace(/\{product\}/g, productName)
-    .slice(0, 140);
+  return renderTemplate(template, designName, productName, "{design} — {product}", 140);
+}
+
+/** The price a listing creates every variant with, in cents. */
+export function priceForListing(session: StudioSession, listingId: string): number {
+  const fixed = positiveCents(session.priceCents) ?? 1999;
+  if (session.priceMode === "custom") {
+    const custom = positiveCents(session.listingPrices?.[listingId]);
+    if (custom !== undefined) return custom;
+  }
+  return fixed;
+}
+
+/** The selected mockup ids for a listing, in click order. */
+export function listingMockupIds(session: StudioSession, listingId: string): string[] {
+  return session.listingImages?.[listingId] ?? [];
+}
+
+/**
+ * Moves listing state from one owner to another when the user swaps the
+ * black/white halves of a pair. The listing identity is the black design's id,
+ * so without this the new owner would look unconfigured while the old draft
+ * kept its locked images.
+ */
+export function remapListingState(
+  session: StudioSession,
+  fromId: string,
+  toId: string,
+): Partial<StudioSession> {
+  if (!fromId || !toId || fromId === toId) return {};
+
+  const move = <T>(record: Record<string, T> | undefined): Record<string, T> => {
+    const next = { ...(record ?? {}) };
+    const value = next[fromId];
+    delete next[fromId];
+    delete next[toId];
+    if (value !== undefined) next[toId] = value;
+    return next;
+  };
+
+  const listingRenders: Record<string, StudioListingRender> = {};
+  for (const entry of Object.values(session.listingRenders ?? {})) {
+    if (entry.designId === fromId) {
+      listingRenders[`${toId}:${entry.mockupId}`] = { ...entry, designId: toId };
+    } else if (entry.designId !== toId) {
+      listingRenders[`${entry.designId}:${entry.mockupId}`] = entry;
+    }
+  }
+
+  return {
+    listingImages: move(session.listingImages),
+    listingImageCleared: move(session.listingImageCleared),
+    listingPrices: move(session.listingPrices),
+    listingRenders,
+  };
+}
+
+/** The cached render for a listing/mockup pair, if one was recorded. */
+export function listingRenderFor(
+  session: StudioSession,
+  listingId: string,
+  mockupId: string,
+): StudioListingRender | undefined {
+  return session.listingRenders?.[`${listingId}:${mockupId}`];
 }
 
 /** The colour names a row selected, in the order they were picked. */

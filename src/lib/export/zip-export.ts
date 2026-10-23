@@ -2,6 +2,7 @@ import { unzip, zip, type Zippable } from "fflate";
 import { db } from "@/lib/db/schema";
 import { designMainAssetId, getAssetBlob } from "@/lib/db/repo";
 import { sanitizeFilename } from "@/lib/image/image";
+import { loadSession } from "@/lib/printify/studio-session";
 import type { Design, ExportJob, ExportSelection, ListingDraft, Mockup } from "@/types/domain";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,15 @@ export async function buildExportArchive(
   onProgress?: ExportProgress,
 ): Promise<ExportResult> {
   const designs = (await db.designs.bulkGet(selection.designIds)).filter((d): d is Design => !!d);
+  const session = await loadSession();
+  // A pair is ONE listing owned by the black-ink half. Its copy, price and
+  // selected images live under that id, so the white half must look them up
+  // there or it would export an unrelated fallback render set.
+  const ownerByDesign = new Map<string, string>();
+  for (const pair of session.inkPairs ?? []) {
+    ownerByDesign.set(pair.blackInkDesignId, pair.blackInkDesignId);
+    ownerByDesign.set(pair.whiteInkDesignId, pair.blackInkDesignId);
+  }
   const files: Zippable = {};
   const missingAssets: string[] = [];
   const errors: string[] = [];
@@ -128,38 +138,91 @@ export async function buildExportArchive(
       totalFiles++;
     }
 
+    // --- the local listing draft (copy, tags, and the selected images) ---
+    const ownerId = ownerByDesign.get(design.id) ?? design.id;
+    const isPartner = ownerId !== design.id;
+    const draftRows = await db.listingDrafts.where("designId").equals(ownerId).toArray();
+    const listing: ListingDraft | undefined =
+      draftRows.sort((a, b) => a.updatedAt - b.updatedAt)[draftRows.length - 1];
+    const ownerName = isPartner
+      ? ((await db.designs.get(ownerId))?.name ?? "the paired design")
+      : design.name;
+
     // --- generated mockups for this design ---
     if (selection.includeMockupRenders) {
-      const renders = await db.assets
-        .where("sourceDesignId")
-        .equals(design.id)
-        .filter((a) => a.kind === "mockup-render")
-        .sortBy("createdAt");
-      let n = 0;
-      for (const render of renders) {
-        const blob = await getAssetBlob(render.id);
-        if (!blob) {
-          missingAssets.push(`${design.name}: render ${render.name} missing`);
-          continue;
+      // When the Studio selected the listing's images, export exactly those, in
+      // click order. Otherwise fall back to every render that exists, which is
+      // the old behaviour for designs that never went through Listing images.
+      const ownerLocked = !!listing?.imageSelectionLocked;
+      const selectedAssetIds =
+        !isPartner && ownerLocked ? (listing?.imageAssetIds ?? []) : null;
+
+      if (isPartner && ownerLocked) {
+        // The pair's images live in the owner's folder. Exporting the white
+        // half alone must not fall back to renders the user never picked.
+        notes.push(
+          `listing images belong to ${ownerName}; add that design to the export to include them`,
+        );
+      } else {
+        const renders = selectedAssetIds
+          ? []
+          : await db.assets
+              .where("sourceDesignId")
+              .equals(design.id)
+              .filter((a) => a.kind === "mockup-render")
+              .sortBy("createdAt");
+
+        const entries = selectedAssetIds
+          ? await Promise.all(
+              [...new Set(selectedAssetIds)].map(async (assetId) => ({
+                blob: await getAssetBlob(assetId),
+                meta: await db.assets.get(assetId),
+                fallbackName: "listing image",
+              })),
+            )
+          : await Promise.all(
+              renders.map(async (render) => ({
+                blob: await getAssetBlob(render.id),
+                meta: render,
+                fallbackName: "mockup",
+              })),
+            );
+
+        let n = 0;
+        for (const [index, entry] of entries.entries()) {
+          if (!entry.blob) {
+            const name = selectedAssetIds
+              ? `selected image ${index + 1}`
+              : `${entry.meta?.name ?? "render"}`;
+            missingAssets.push(`${design.name}: ${name} missing`);
+            continue;
+          }
+          const mockup = entry.meta?.sourceMockupId
+            ? await db.mockups.get(entry.meta.sourceMockupId)
+            : undefined;
+          const mockupName = mockup?.name ?? entry.fallbackName;
+          n += 1;
+          const ext = await extensionFor(entry.blob);
+          const base = `${String(n).padStart(2, "0")}-${sanitizeFilename(mockupName)}`;
+          const path = `${folder}/mockups/${base}.${ext}`;
+          files[path] = [new Uint8Array(await entry.blob.arrayBuffer()), { level: 6 }];
+          mockupEntries.push({ mockup: mockupName, file: `mockups/${base}.${ext}` });
+          totalFiles++;
         }
-        const mockup = await db.mockups.get(render.sourceMockupId ?? "");
-        const mockupName = mockup?.name ?? "mockup";
-        n += 1;
-        const base = `${String(n).padStart(2, "0")}-${sanitizeFilename(mockupName)}`;
-        const path = `${folder}/mockups/${base}.png`;
-        files[path] = [new Uint8Array(await blob.arrayBuffer()), { level: 6 }];
-        mockupEntries.push({ mockup: mockupName, file: `mockups/${base}.png` });
-        totalFiles++;
+        if (n === 0) {
+          notes.push(
+            selectedAssetIds
+              ? "no listing images selected for this design"
+              : "no generated mockups for this design",
+          );
+        }
       }
-      if (renders.length === 0) notes.push("no generated mockups for this design");
     }
 
     // --- listing files ---
     let listingEntry: ManifestDesign["listing"];
     if (selection.includeListings) {
-      const listings = await db.listingDrafts.where("designId").equals(design.id).toArray();
-      if (listings.length > 0) {
-        const listing: ListingDraft = listings[0];
+      if (listing) {
         const listingJson = {
           title: listing.title,
           description: listing.description,

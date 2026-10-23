@@ -17,9 +17,9 @@ import path from "node:path";
 const optionalSecret = { context: "server", access: "secret", optional: true };
 
 // `output: "static"` is deliberate. Every view reads its data from the
-// visitor's own IndexedDB, so no page depends on request state — all 12 pages
+// visitor's own IndexedDB, so no page depends on request state - all 8 pages
 // prerender to static HTML and are served straight from Cloudflare's CDN.
-// Only the five `/api/**` endpoints render on demand, via `prerender = false`
+// Only the ten `/api/**` endpoints render on demand, via `prerender = false`
 // in each of them, because they must reach Printify/AI secrets server-side.
 export default defineConfig({
   output: "static",

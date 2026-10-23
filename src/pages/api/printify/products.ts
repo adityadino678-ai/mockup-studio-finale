@@ -239,6 +239,9 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
+    // Resolve the shop once per request: the response carries it so the
+    // mockup bridge can address the same product without guessing.
+    const shopId = await client.resolveShopId();
     const product = await client.createProduct({
       title: body.title.trim(),
       description: body.description ?? "",
@@ -248,14 +251,14 @@ export const POST: APIRoute = async ({ request }) => {
       variants: body.variants,
       prices,
       printAreaGroups,
-      // Resolve the shop once per request instead of once per product.
-      shopId: await client.resolveShopId(),
+      shopId,
     });
 
     // The uploaded image ids are echoed back so the client can VERIFY that
     // every enabled variant really carries the artwork it was meant to.
     return json({
       product,
+      shopId,
       artworks: printAreaGroups.map((g) => ({
         printAreaId: g.position,
         variantIds: g.variantIds,

@@ -11,6 +11,8 @@ const PRINTIFY_BASE = "https://api.printify.com/v1";
 /** Gateway statuses Printify has returned transiently (a retry then succeeded). */
 const TRANSIENT_STATUS = [502, 503, 504];
 const RETRY_DELAY_MS = 1500;
+/** 429 is retried more than the gateway errors: it is a rate limit, not a fault. */
+const RATE_LIMIT_RETRIES = 2;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -118,6 +120,21 @@ export interface PrintifyProductCreated {
   print_areas?: unknown;
 }
 
+/** The media-library record returned by `/uploads/images.json`. */
+export interface PrintifyUploadedImage {
+  id: string;
+  file_name?: string;
+  preview_url?: string;
+  /** Present on some responses; not required for the mockup bridge. */
+  src?: string;
+}
+
+/** The custom mockup record returned by the product mockups endpoint. */
+export interface PrintifyProductMockup {
+  id: string;
+  src: string;
+}
+
 export interface CreatePrintifyProductInput {
   title: string;
   description?: string;
@@ -214,6 +231,12 @@ export function createPrintifyClient(explicitKey?: string) {
     if (!configured) {
       throw new PrintifyError("Printify API key is not configured", 501);
     }
+    const method = (init.method ?? "GET").toUpperCase();
+    // A gateway error or a dropped connection may arrive AFTER Printify
+    // accepted a POST. Replaying that can create duplicate media/mockups, so
+    // only replay methods that are safe to repeat. A 429 was not processed, so
+    // it stays retryable for every method.
+    const replaySafe = method === "GET" || method === "PUT" || method === "DELETE";
     let res: Response;
     try {
       res = await fetch(`${PRINTIFY_BASE}${path}`, {
@@ -222,9 +245,7 @@ export function createPrintifyClient(explicitKey?: string) {
         cache: "no-store",
       });
     } catch (error) {
-      // A dropped connection is retried once; the body is always a string, so
-      // replaying the request is safe.
-      if (attempt < 1) {
+      if (replaySafe && attempt < 1) {
         await sleep(RETRY_DELAY_MS);
         return request<T>(path, init, attempt + 1);
       }
@@ -238,9 +259,21 @@ export function createPrintifyClient(explicitKey?: string) {
       data = text;
     }
     if (!res.ok) {
-      // Printify's gateway has answered a large upload with a bare 502 that a
-      // retry then completed, so give transient failures one more chance.
-      if (TRANSIENT_STATUS.includes(res.status) && attempt < 1) {
+      // Rate limits back off more patiently than a gateway error. Honour
+      // Retry-After when Printify sends it, capped so a bad header cannot
+      // hold the request open indefinitely.
+      if (res.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const wait = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(8000, retryAfter * 1000)
+          : RETRY_DELAY_MS * (attempt + 1);
+        await sleep(wait);
+        return request<T>(path, init, attempt + 1);
+      }
+      // Printify's gateway has answered a read with a bare 502 that a retry
+      // then completed, so give transient failures on replay-safe methods one
+      // more chance. Never replay a POST here: it may already have been applied.
+      if (replaySafe && TRANSIENT_STATUS.includes(res.status) && attempt < 1) {
         await sleep(RETRY_DELAY_MS);
         return request<T>(path, init, attempt + 1);
       }
@@ -327,12 +360,33 @@ export function createPrintifyClient(explicitKey?: string) {
       return list as PrintifyVariant[];
     },
 
-    /** POST /uploads/images.json — uploads base64 artwork, returns the asset id. */
-    uploadImage(base64: string, filename: string): Promise<{ id: string }> {
-      return request<{ id: string }>("/uploads/images.json", {
+    /** POST /uploads/images.json — uploads base64 artwork, returns the media record. */
+    uploadImage(base64: string, filename: string): Promise<PrintifyUploadedImage> {
+      return request<PrintifyUploadedImage>("/uploads/images.json", {
         method: "POST",
         body: JSON.stringify({ file_name: filename, contents: base64 }),
       });
+    },
+
+    /**
+     * POST /shops/{shop_id}/products/{product_id}/mockups.json
+     *
+     * Undocumented, but verified live (Oct 2026): form-urlencoded `file_url`
+     * returns a custom mockup record. The media library URL is the file URL.
+     */
+    uploadProductMockup(
+      shopId: number,
+      productId: string,
+      fileUrl: string,
+    ): Promise<PrintifyProductMockup> {
+      return request<PrintifyProductMockup>(
+        `/shops/${shopId}/products/${encodeURIComponent(productId)}/mockups.json`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ file_url: fileUrl }).toString(),
+        },
+      );
     },
 
     resolveShopId,
@@ -461,7 +515,9 @@ export function createPrintifyClient(explicitKey?: string) {
 
     /** GET /shops/{shop_id}/products/{product_id}.json - one product in full. */
     getProduct(shopId: number, productId: string): Promise<PrintifyShopProduct> {
-      return request<PrintifyShopProduct>(`/shops/${shopId}/products/${productId}.json`);
+      return request<PrintifyShopProduct>(
+        `/shops/${shopId}/products/${encodeURIComponent(productId)}.json`,
+      );
     },
   };
 }

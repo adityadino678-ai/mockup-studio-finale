@@ -1,0 +1,127 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { MOCKUP_BRIDGE_BOOKMARKLET } from "@/lib/printify/bookmarklet";
+---
+
+<AppLayout>
+  <main class="mx-auto max-w-3xl px-6 py-10">
+    <a
+      href="/printify-studio"
+      class="text-[12px] font-medium text-forest underline underline-offset-2"
+    >
+      ← Back to Printify Studio
+    </a>
+
+    <header class="mt-4 space-y-2">
+      <h1 class="text-2xl font-semibold tracking-tight text-ink">Printify mockup bookmarklet</h1>
+      <p class="text-[13px] leading-relaxed text-ink-muted">
+        Printify's public API can upload listing images, but selecting them as a
+        product's mockups is only exposed to Printify's own web session. This
+        bookmarklet is the bridge: it runs on <strong>printify.com</strong>, reads
+        the payload Mockup Studio copied, and calls Printify's own web API with
+        your signed-in session.
+      </p>
+    </header>
+
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-4 shadow-card">
+      <h2 class="text-[15px] font-semibold text-ink">Install it once</h2>
+      <ol class="mt-2 list-decimal space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink-muted">
+        <li>Make sure your bookmarks bar is visible (Ctrl/Cmd + Shift + B).</li>
+        <li>
+          Drag the <strong>Apply Mockup Studio images</strong> link below onto the
+          bookmarks bar, or copy the bookmarklet and create a bookmark manually.
+        </li>
+        <li>In Mockup Studio, open Listing images and press <strong>Send to Printify</strong>.</li>
+        <li>Open the Printify product, then click the bookmarklet on your bookmarks bar.</li>
+      </ol>
+
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <a
+          href={MOCKUP_BRIDGE_BOOKMARKLET}
+          draggable="true"
+          class="inline-flex items-center rounded-md bg-forest px-3 py-1.5 text-[12px] font-semibold text-white shadow-subtle"
+          title="Drag this to your bookmarks bar"
+        >
+          Apply Mockup Studio images
+        </a>
+        <button
+          id="copy-bookmarklet"
+          type="button"
+          class="inline-flex items-center rounded-md border border-border-strong bg-surface px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-surface-muted"
+        >
+          Copy bookmarklet
+        </button>
+        <a
+          href="https://printify.com/app/products"
+          target="_blank"
+          rel="noreferrer"
+          class="inline-flex items-center rounded-md border border-border-subtle px-3 py-1.5 text-[12px] font-medium text-forest hover:bg-surface-muted"
+        >
+          Open Printify products ↗
+        </a>
+        <span id="copy-status" class="text-[12px] text-ink-muted" aria-live="polite"></span>
+      </div>
+
+      <label for="bookmarklet-source" class="mt-4 block text-[12px] font-medium text-ink">
+        Bookmarklet source
+      </label>
+      <textarea
+        id="bookmarklet-source"
+        readonly
+        spellcheck="false"
+        class="mt-1 h-32 w-full rounded-md border border-border-subtle bg-surface-muted p-2 font-mono text-[10px] text-ink"
+      >{MOCKUP_BRIDGE_BOOKMARKLET}</textarea>
+    </section>
+
+    <section class="mt-6 space-y-2 rounded-lg border border-border-subtle bg-surface p-4">
+      <h2 class="text-[15px] font-semibold text-ink">What it does — and does not do</h2>
+      <ul class="list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink-muted">
+        <li>
+          It only runs on <code class="rounded bg-surface-muted px-1">printify.com</code>. On any
+          other site it stops with a message.
+        </li>
+        <li>
+          It reads the payload from your clipboard. The payload contains product ids,
+          image URLs and mockup ids — never an API key or a password.
+        </li>
+        <li>
+          It uses your existing Printify cookies first. The access token in this
+          browser's Printify session is only a 401 fallback and is sent only to
+          printify.com.
+        </li>
+        <li>
+          It reads the product's current mockup layout and <strong>merges</strong> the new images
+          into the no-variant group, so existing selections are kept. If the layout
+          cannot be read, it asks before replacing instead of guessing.
+        </li>
+        <li>
+          It asks for confirmation, uploads/marks at most two products at a time,
+          and backs off on HTTP 429. Nothing is published.
+        </li>
+      </ul>
+      <p class="text-[12px] leading-relaxed text-ink-subtle">
+        The app itself cannot do this step: Cloudflare Workers cannot run a browser,
+        and the server must never hold your Printify web session. That is why the
+        last click happens in your own browser.
+      </p>
+    </section>
+  </main>
+</AppLayout>
+
+<script>
+  const source = document.getElementById("bookmarklet-source") as HTMLTextAreaElement | null;
+  const button = document.getElementById("copy-bookmarklet") as HTMLButtonElement | null;
+  const status = document.getElementById("copy-status");
+
+  button?.addEventListener("click", async () => {
+    if (!source) return;
+    source.focus();
+    source.select();
+    try {
+      await navigator.clipboard.writeText(source.value);
+      if (status) status.textContent = "Copied. Create a bookmark and paste it as the URL.";
+    } catch {
+      if (status) status.textContent = "Select the source above and copy it manually.";
+    }
+  });
+</script>
