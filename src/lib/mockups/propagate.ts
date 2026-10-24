@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
 // Applying one print area to many mockups.
 //
-// A print area is a frame stored as fractions of the PHOTO, so the same frame
-// means the same relative spot on every photo. The user's rule is "place it on
-// one mockup, and every mockup of that product type gets it" - this module is
-// that rule.
+// A print area is a frame stored as fractions of the PHOTO. The frame belongs
+// to the photo, so the default is to save it on that mockup only. Copying it to
+// same-type or all mockups is an explicit choice; it is never automatic and a
+// new mockup never inherits a sibling's frame.
 //
-// Only the geometry that defines the placement travels:
+// Only the geometry that defines the placement travels when copying:
 //   area size, frame, source, label, clip mode.
 // The photo-specific bits (the crop window and the garment reference) stay on
 // each mockup unless the caller explicitly asks to copy them, because a folded
@@ -36,34 +36,6 @@ export function printAreaScopeTargets(
   if (scope === "this") return [source];
   if (scope === "all") return [...mockups];
   return mockups.filter((m) => m.category === source.category);
-}
-
-/**
- * The area a mockup with no area of its own should start from.
- *
- * It picks the most recently updated sibling in the same category. This is
- * what makes a newly uploaded mockup show the same placement immediately
- * instead of a blank panel - and it is only a draft until it is saved.
- */
-export function inheritedPrintArea(
-  mockup: Mockup,
-  mockups: readonly Mockup[],
-): MockupPrintArea | null {
-  if (printAreaOf(mockup)) return null;
-  const siblings = mockups
-    .filter((m) => m.id !== mockup.id && m.category === mockup.category)
-    .map((m) => ({ mockup: m, area: printAreaOf(m) }))
-    .filter((entry): entry is { mockup: Mockup; area: MockupPrintArea } => !!entry.area)
-    .sort((a, b) => (b.area.updatedAt ?? 0) - (a.area.updatedAt ?? 0));
-  const source = siblings[0]?.area;
-  if (!source) return null;
-  return {
-    ...source,
-    frame: { ...source.frame },
-    crop: source.crop ? { ...source.crop } : undefined,
-    reference: source.reference ? { ...source.reference } : undefined,
-    updatedAt: Date.now(),
-  };
 }
 
 /**

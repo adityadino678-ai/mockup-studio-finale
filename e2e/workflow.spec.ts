@@ -379,10 +379,10 @@ test.describe("core workflow", () => {
       ctx.drawImage(bmp, 0, 0);
       const px = (x: number, y: number) => Array.from(ctx.getImageData(x, y, 1, 1).data);
 
-      // Every mockup of the same type now has the same area, so "the first one
-      // with an area" is not necessarily the one this render was made on. The
-      // asset records its source mockup; use that, or the frame maths below
-      // samples the wrong photo.
+      // The area is saved per mockup, so "the first one with an area" is not
+      // necessarily the one this render was made on. The asset records its
+      // source mockup; use that, or the frame maths below samples the wrong
+      // photo.
       const mockup =
         mockups.find((m) => m.id === metas[0].sourceMockupId) ??
         mockups.find((m) => m.printArea);
@@ -439,14 +439,13 @@ test.describe("core workflow", () => {
     // pass on the first one's toast and the export would run too early.
     await expect(page.getByText(/Mockup render saved/)).toBeHidden({ timeout: 20_000 });
 
-    // Saving a print area applies it to every mockup of the same type by
-    // default. The sibling should therefore already show the front preset -
-    // this is the cross-mockup coherence rule, not a preset default.
+    // The frame belongs to its own photo, so mockup-b did NOT inherit
+    // mockup-a's preset. Give it its own area.
     await page.getByRole("button", { name: /mockup-b/ }).click();
-    await expect(page.getByText("Tee · DTG front")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Tee · DTG front")).toBeHidden({ timeout: 10_000 });
 
-    // The other mockup: a different preset, because a Select does not fire
-    // when its value has not changed.
+    // A different preset, because a Select does not fire when its value has
+    // not changed.
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG back/ }).click();
     await page.getByRole("button", { name: /^Save$/ }).click();
@@ -858,9 +857,7 @@ test.describe("core workflow", () => {
 
     await page.reload();
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    // The spaced readout belongs to the selected mockup's area card; the list
-    // badges are the compact "4500×5400" form and now appear on every mockup of
-    // the same type, because the save propagated by default.
+    // The area was saved on this mockup only, and it comes back with it.
     await expect(page.getByText("4500 × 5400 px")).toBeVisible({ timeout: 30_000 });
   });
 
@@ -874,7 +871,11 @@ test.describe("core workflow", () => {
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
     await page.getByRole("button", { name: /^Save$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(1200);
+    // Let that toast go: the save after the rotation raises an identical one,
+    // and the later assertion would otherwise match the FIRST toast and read
+    // the frame before the rotated write has committed (the trap test 18
+    // documents).
+    await expect(page.getByText(/Print area saved/)).toBeHidden({ timeout: 20_000 });
 
     const canvas = page.locator("canvas").first();
     await expect(canvas).toBeVisible({ timeout: 30_000 });
@@ -991,12 +992,20 @@ test.describe("core workflow", () => {
     await page.mouse.up();
     await page.waitForTimeout(600);
 
-    // The frame turned, and the turn is saved with it.
+    // The frame turned, and the turn is saved with it. Poll rather than read
+    // once: the toast above can belong to the debounced auto-save, so the
+    // explicit save's write may still be in flight.
     await expect(page.getByText(/Frame \d+% of the photo/)).toBeVisible({ timeout: 10_000 });
     await page.getByRole("button", { name: /^Save$/ }).click();
-    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
-    const after = await readFrame();
-    expect(Math.abs(after!.rotation)).toBeGreaterThan(20);
+    await expect
+      .poll(
+        async () => {
+          const frame = await readFrame();
+          return frame ? Math.abs(frame.rotation) : 0;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(20);
 
     // Clicking the empty photo hides the frame's chrome; the design stays.
     // The chrome is the dashed outline AND the Transformer: the Transformer

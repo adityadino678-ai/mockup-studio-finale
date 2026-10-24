@@ -51,7 +51,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 354 unit tests
+npm run test          # 357 unit tests
 npm run test:e2e      # 25 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
@@ -122,8 +122,8 @@ Re-run the spike after any Printify change.
   `scale` is image-width ÷ placeholder-width. Printify's own rule of thumb:
   artwork the width of the placeholder → `scale: 1, x: 0.5, y: 0.5`.
 - Placeholder size is **per variant**, so one blueprint can have different
-  print areas per colour (embroidery front ≠ DTF front). A "universal"
-  placement therefore means different physical sizes on different garments.
+  print areas per colour (embroidery front ≠ DTF front). One shared placement
+  therefore means different physical sizes on different garments.
 - **Colour hexes live on the *product*, not the catalogue.** The v1 catalogue
   only returns colour *names* (`options: {color: "Heather Grey"}`). A product
   carries the real values:
@@ -506,10 +506,12 @@ mockup photo, so the mockup shows what the product actually gets.
   null`; `null` is authoritative ("no area"), while `undefined` would make the
   compositor re-read storage.
 - `src/lib/mockups/propagate.ts` owns applying one area to many mockups. The
-  default is **same category**; "This mockup only" and "All mockups" are
-  explicit choices. The frame, size, source, label and clip mode travel; crop
-  and garment reference stay per photo, because a folded shirt and a flat-lay
-  need different windows even when the design sits in the same place.
+  default is **This mockup only**: a frame belongs to its own photo, so it is
+  never copied or inherited automatically. "All mockups of this type" and "All
+  mockups" are explicit choices. When copying, the frame, size, source, label
+  and clip mode travel; crop and garment reference stay per photo, because a
+  folded shirt and a flat-lay need different windows even when the design sits
+  in the same place.
 - `src/components/mockups/design-picker.tsx` is the Mockups design picker:
   searchable, newest first, with a count, and it lists every design. The old
   Radix `Select` was height-capped, so a newly uploaded design could look like
@@ -517,20 +519,26 @@ mockup photo, so the mockup shows what the product actually gets.
 - `src/components/mockups/print-area-canvas.tsx` is the Konva canvas (lazy
   loaded). `src/views/mockups/print-areas-tab.tsx` is the screen.
 
-**One save reaches every mockup of the type, and one placement reaches every
-design.** The panel's defaults are `All <category> mockups` for the frame and
-`All designs` for the Studio placement. `This design` is the explicit override,
-and it turns the Studio's universal mode off, just like the Studio's own
-"Apply to this design". Saves are debounced and auto-saved; leaving the panel
-or switching mockups flushes a pending draft. The session is read with a LIVE
-query, so a placement written in the Studio or by the agent appears here
-without a reload. Repeated saves reuse one toast id instead of stacking
-identical notifications.
+**The frame is per mockup; the design placement is per design.** Those are
+different scopes and must stay different:
 
-A mockup with no area of its own starts from the most recently updated sibling
-in the same category. That inherited draft is auto-saved, so a newly uploaded
-photo is never blank and the other photos already have the same frame when the
-Studio's **Save & render** runs.
+- A print-area save defaults to **This mockup only** and is auto-saved. The
+  panel does not copy a frame to same-type mockups and does not inherit a
+  sibling's frame for a new photo. `All <category> mockups` and `All mockups`
+  remain explicit copy actions.
+- A design owns ONE placement in the Studio (`placements[designId]`, falling
+  back to `universalPlacement` until it is first edited). Every mockup with a
+  print area uses that same placement inside its own frame, so the design
+  lands at the same relative spot on every photo. Editing design A never moves
+  design B, and there is no universal placement mode.
+- `Set as the placeholder for all designs` is the explicit bulk action: it
+  makes the placement on screen the shared default and clears per-design
+  overrides. "Fit to area" writes only the picked design.
+
+Saves are debounced; leaving the panel or switching mockups flushes a pending
+draft. The session is read with a LIVE query, so a placement written in the
+Studio or by the agent appears here without a reload. Repeated saves reuse one
+toast id instead of stacking identical notifications.
 
 **The print area is a FRAME that carries the design.**
 That is the whole design, and it is deliberate:
@@ -591,8 +599,9 @@ position pickers here:
   saved render and an agent render are pixel-identical, and it clips to the
   print area and its window.
 - `Set as the placeholder for all designs` promotes the placement currently on
-  screen into the Studio's universal placement AND drops the per-design
-  overrides, so every design lands at that one spot inside the area.
+  screen into the Studio's shared default placement AND drops the per-design
+  overrides, so every design starts at that one spot inside the area. Editing a
+  design afterwards gives that design its own placement again.
 
 **Traps in this feature:**
 

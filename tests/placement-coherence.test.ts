@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db/schema";
-import { emptySession } from "@/lib/printify/studio-session";
+import { emptySession, placementFor } from "@/lib/printify/studio-session";
 import { clipFor, mapStudioPlacement } from "@/lib/mockups/print-area";
 import {
   applyPrintAreaToMockups,
-  inheritedPrintArea,
   printAreaScopeTargets,
 } from "@/lib/mockups/propagate";
 import { resolveRenderPlan } from "@/lib/mockups/render-plan";
@@ -71,7 +70,7 @@ describe("resolveRenderPlan", () => {
       crop: { x: 0, y: 0, width: 1, height: 0.6 },
     });
     const mock = mockup("m1", "tshirt", printArea);
-    const session = { ...emptySession(), universal: true, universalPlacement: placement(0.5) };
+    const session = { ...emptySession(), universalPlacement: placement(0.5) };
 
     const plan = await resolveRenderPlan({ designId: "d1", mockup: mock, session });
 
@@ -92,7 +91,7 @@ describe("resolveRenderPlan", () => {
       clipMode: "behind-garment",
     });
     const mock = mockup("m1", "tshirt", saved);
-    const session = { ...emptySession(), universal: true, universalPlacement: placement(0.7) };
+    const session = { ...emptySession(), universalPlacement: placement(0.7) };
 
     const plan = await resolveRenderPlan({
       designId: "d1",
@@ -111,7 +110,7 @@ describe("resolveRenderPlan", () => {
 
   it("falls back to the saved transform when the mockup has no print area", async () => {
     const mock = mockup("m1", "tshirt");
-    const session = { ...emptySession(), universal: true, universalPlacement: placement(0.5) };
+    const session = { ...emptySession(), universalPlacement: placement(0.5) };
     const fallback = {
       x: 0.25,
       y: 0.35,
@@ -136,50 +135,117 @@ describe("resolveRenderPlan", () => {
   });
 });
 
-describe("writeStudioPlacement", () => {
-  it("respects the session's universal mode instead of forcing per-design", async () => {
-    const base = {
+describe("placementFor", () => {
+  it("gives each design its own placement and uses the shared default when it has none", () => {
+    const session = {
       ...emptySession(),
-      universal: true,
       universalPlacement: placement(0.4),
+      placements: { d1: placement(0.9, 12) },
     };
 
-    const next = await writeStudioPlacement("d1", placement(0.8, 15), {
-      session: base,
-      scope: "auto",
-    });
-
-    expect(next.universal).toBe(true);
-    expect(next.universalPlacement).toEqual(placement(0.8, 15));
-    expect(next.placements.d1).toBeUndefined();
+    expect(placementFor(session, "d1")).toEqual(placement(0.9, 12));
+    expect(placementFor(session, "d2")).toEqual(placement(0.4));
   });
+});
 
-  it("writes a per-design override when the scope says this design", async () => {
+describe("writeStudioPlacement", () => {
+  it("writes only the named design by default, never the other designs", async () => {
     const base = {
       ...emptySession(),
-      universal: true,
       universalPlacement: placement(0.4),
+      placements: { d2: placement(0.6) },
     };
 
     const next = await writeStudioPlacement("d1", placement(0.9, -10), {
       session: base,
-      scope: "design",
     });
 
-    expect(next.universal).toBe(false);
     expect(next.placements.d1).toEqual(placement(0.9, -10));
-    // The old universal placement remains the fallback for other designs.
+    // The other design keeps its own placement.
+    expect(next.placements.d2).toEqual(placement(0.6));
+    // The shared default is untouched.
     expect(next.universalPlacement).toEqual(placement(0.4));
+    expect(placementFor(next, "d2")).toEqual(placement(0.6));
+  });
+
+  it("scope all makes the placement the default and clears stale overrides", async () => {
+    const base = {
+      ...emptySession(),
+      universalPlacement: placement(0.4),
+      placements: { d1: placement(0.6), d2: placement(0.7) },
+    };
+
+    const next = await writeStudioPlacement("d1", placement(0.85, 15), {
+      session: base,
+      scope: "all",
+    });
+
+    expect(next.placements).toEqual({});
+    expect(next.universalPlacement).toEqual(placement(0.85, 15));
+    // Every design, including the one with an old override, now uses it.
+    expect(placementFor(next, "d1")).toEqual(placement(0.85, 15));
+    expect(placementFor(next, "d2")).toEqual(placement(0.85, 15));
+  });
+});
+
+describe("one design on every mockup", () => {
+  it("uses the same design placement on two mockups with different frames", async () => {
+    const first = mockup(
+      "m1",
+      "tshirt",
+      area({ frame: { x: 0.5, y: 0.42, scale: 0.32, rotation: 0 } }),
+    );
+    const second = mockup(
+      "m2",
+      "tshirt",
+      area({ frame: { x: 0.44, y: 0.5, scale: 0.4, rotation: 8 } }),
+    );
+    const session = {
+      ...emptySession(),
+      universalPlacement: placement(0.3),
+      placements: { d1: placement(0.8, 10), d2: placement(0.4, -5) },
+    };
+
+    const a1 = await resolveRenderPlan({ designId: "d1", mockup: first, session });
+    const a2 = await resolveRenderPlan({ designId: "d1", mockup: second, session });
+    const b1 = await resolveRenderPlan({ designId: "d2", mockup: first, session });
+    const b2 = await resolveRenderPlan({ designId: "d2", mockup: second, session });
+
+    // The SAME design uses the same placement on both mockups...
+    expect(a1.placement).toEqual(a2.placement);
+    expect(a1.placement).toEqual(placementFor(session, "d1"));
+    expect(b1.placement).toEqual(b2.placement);
+    expect(b1.placement).toEqual(placementFor(session, "d2"));
+    // ...while the two designs stay independent.
+    expect(a1.placement).not.toEqual(b1.placement);
+    // The frames differ, so the mockup-space transforms differ even though the
+    // area-space placement is identical.
+    expect(a1.transform).not.toEqual(a2.transform);
+  });
+
+  it("editing one design leaves the other design's placement alone", async () => {
+    const session = {
+      ...emptySession(),
+      universalPlacement: placement(0.3),
+      placements: { d1: placement(0.8), d2: placement(0.4) },
+    };
+
+    const next = await writeStudioPlacement("d1", placement(0.55, 20), {
+      session,
+    });
+
+    expect(placementFor(next, "d2")).toEqual(placement(0.4));
   });
 });
 
 describe("print-area propagation", () => {
-  it("targets the same category by default and can target all mockups", () => {
+  it("targets only the scopes the user explicitly chose", () => {
     const source = mockup("m1", "tshirt", area());
     const sameType = mockup("m2", "tshirt", area());
     const other = mockup("m3", "mug", area());
     const all = [source, sameType, other];
 
+    expect(printAreaScopeTargets(all, source, "this").map((m) => m.id)).toEqual(["m1"]);
     expect(printAreaScopeTargets(all, source, "category").map((m) => m.id)).toEqual([
       "m1",
       "m2",
@@ -189,7 +255,39 @@ describe("print-area propagation", () => {
       "m2",
       "m3",
     ]);
-    expect(printAreaScopeTargets(all, source, "this").map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("saves this mockup only by default and never touches a sibling", async () => {
+    const sourceFrame = { x: 0.5, y: 0.42, scale: 0.32, rotation: 0 };
+    const siblingFrame = { x: 0.35, y: 0.6, scale: 0.2, rotation: 3 };
+    const source = mockup("m1", "tshirt", area({ frame: sourceFrame }));
+    const sibling = mockup("m2", "tshirt", area({ frame: siblingFrame }));
+    await db.mockups.bulkPut([source, sibling]);
+
+    const draft = area({
+      areaWidth: 1500,
+      areaHeight: 1800,
+      frame: { x: 0.48, y: 0.44, scale: 0.36, rotation: 4 },
+      crop: { x: 0, y: 0, width: 1, height: 0.4 },
+      updatedAt: 3,
+    });
+
+    const result = await applyPrintAreaToMockups({
+      sourceMockupId: "m1",
+      area: draft,
+      scope: "this",
+    });
+
+    expect(result.updated).toBe(1);
+    expect(result.mockupIds).toEqual(["m1"]);
+
+    const savedSource = (await db.mockups.get("m1"))!;
+    const savedSibling = (await db.mockups.get("m2"))!;
+    expect(savedSource.printArea?.frame).toEqual(draft.frame);
+    expect(savedSource.printArea?.areaWidth).toBe(1500);
+    // The sibling's frame belongs to its own photo and was not copied over.
+    expect(savedSibling.printArea?.frame).toEqual(siblingFrame);
+    expect(savedSibling.printArea?.areaWidth).toBe(1200);
   });
 
   it("copies the frame to siblings but keeps their own crop and reference", async () => {
@@ -244,21 +342,5 @@ describe("print-area propagation", () => {
     expect(savedSibling.printArea?.reference?.inches).toBe(20);
     // The mug is untouched by a t-shirt save.
     expect(savedMug.printArea?.areaWidth).toBe(1200);
-  });
-
-  it("inherits the most recently updated sibling area for an empty mockup", () => {
-    const older = mockup("m1", "tshirt", area({ updatedAt: 1, areaWidth: 1000 }));
-    const newer = mockup(
-      "m2",
-      "tshirt",
-      area({ updatedAt: 9, areaWidth: 1400 }),
-    );
-    const empty = mockup("m3", "tshirt");
-    const inherited = inheritedPrintArea(empty, [older, newer, empty]);
-
-    expect(inherited?.areaWidth).toBe(1400);
-    // The result is a copy, not a shared reference.
-    inherited!.frame.x = 0.1;
-    expect(newer.printArea?.frame.x).toBe(0.5);
   });
 });

@@ -51,16 +51,15 @@ export async function transformFromPrintArea(params: {
 }
 
 /** Which designs a placement write should affect. */
-export type PlacementScope = "auto" | "all" | "design";
+export type PlacementScope = "all" | "design";
 
 /**
- * Writes a placement back into the Studio session.
+ * Writes a placement into the Studio session.
  *
- * `auto` (the default) follows the session's own mode: when the Studio is in
- * "one placement for every design" mode, the edit updates that placement; when
- * it is in per-design mode, it writes an override. This is the same rule the
- * Studio's Design panel uses, so editing from Mockups can no longer silently
- * disable the universal placement.
+ * `design` (the default) writes only this design's placement. Every mockup
+ * uses it, but no other design moves. `all` is the explicit bulk action: it
+ * makes the placement the default for every design and clears the per-design
+ * overrides, so stale placements cannot reappear later.
  */
 export async function writeStudioPlacement(
   designId: string,
@@ -68,35 +67,34 @@ export async function writeStudioPlacement(
   opts: { scope?: PlacementScope; session?: StudioSession } = {},
 ): Promise<StudioSession> {
   const active = opts.session ?? (await loadSession());
-  const scope = opts.scope ?? "auto";
-  const useUniversal = scope === "all" || (scope === "auto" && active.universal);
-  const next: StudioSession = useUniversal
-    ? {
-        ...active,
-        universal: true,
-        universalPlacement: { ...placement },
-        updatedAt: Date.now(),
-      }
-    : {
-        ...active,
-        universal: false,
-        placements: { ...active.placements, [designId]: { ...placement } },
-        updatedAt: Date.now(),
-      };
+  const scope = opts.scope ?? "design";
+  const next: StudioSession =
+    scope === "all"
+      ? {
+          ...active,
+          universalPlacement: { ...placement },
+          placements: {},
+          updatedAt: Date.now(),
+        }
+      : {
+          ...active,
+          placements: { ...active.placements, [designId]: { ...placement } },
+          updatedAt: Date.now(),
+        };
   await saveSession(next);
   return next;
 }
 
 /**
- * Backwards-compatible wrapper. New code should call `writeStudioPlacement`
- * with an explicit scope; this keeps the session's mode by default.
+ * Writes the placement for one design. Kept as the name the agent and the
+ * older callers use; it is deliberately per-design, never a bulk write.
  */
 export async function writeBackStudioPlacement(
   designId: string,
   placement: StudioPlacement,
   session?: StudioSession,
 ): Promise<StudioSession> {
-  return writeStudioPlacement(designId, placement, { session, scope: "auto" });
+  return writeStudioPlacement(designId, placement, { session, scope: "design" });
 }
 
 /**

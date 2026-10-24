@@ -220,7 +220,7 @@ async function summarizeWorkspace(): Promise<ToolExecResult> {
     exports,
     listingDrafts: listings,
     studioPlacements: Object.keys(session.placements).length,
-    studioUniversalPlacement: session.universal,
+    studioPlacementMode: "per-design",
     listingRenders: Object.keys(session.listingRenders ?? {}).length,
     studioProductSelected: Boolean(session.blueprintId && session.printProviderId),
   };

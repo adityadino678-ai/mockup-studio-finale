@@ -146,7 +146,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "save_placement",
     description:
-      "Save where a design sits on a mockup. When the mockup has a print area this writes the Printify Studio placement inside that area (the same placement the Studio and every render use); otherwise it writes the mockup transform. Optionally also save it as a reusable placement template. Nothing is written until the user confirms.",
+      "Save where ONE design sits. When the mockup has a print area this writes that design's Printify Studio placement inside the area; every mockup with an area then renders the design at that same relative spot, while other designs keep their own placements. Without a print area it writes the mockup transform. Optionally also save it as a reusable placement template. Nothing is written until the user confirms.",
     confirm: true,
     parameters: {
       type: "object",

@@ -28,7 +28,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FieldLabel, Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/primitives";
 import { designMainAssetId, getAssetBlob } from "@/lib/db/repo";
 import { decodeImage } from "@/lib/image/image";
 import {
@@ -325,9 +324,9 @@ export interface DesignAdjustmentPanelProps {
 /**
  * The adjustment panel: where ONE design's artwork sits in the print area.
  *
- * It edits the same placement the listing uses - `universalPlacement` when
- * "one placement for every design" is on, this design's own entry otherwise
- * - so what the user arranges here is what gets created.
+ * Each design owns its placement. Every mockup with a print area uses that
+ * same placement, mapped through the mockup's own frame. Editing this design
+ * never moves another design.
  */
 export function DesignAdjustmentPanel({
   design,
@@ -376,14 +375,14 @@ export function DesignAdjustmentPanel({
     };
   }, [assetId]);
 
-  /** The placement being edited, honouring the universal toggle. */
-  const editing: StudioPlacement = React.useMemo(() => {
-    if (session.universal) return session.universalPlacement;
-    return session.placements[design.id] ?? session.universalPlacement;
-  }, [session.universal, session.universalPlacement, session.placements, design.id]);
+  /** The placement of THIS design. The shared default is only a starting point. */
+  const editing: StudioPlacement = React.useMemo(
+    () => session.placements[design.id] ?? session.universalPlacement,
+    [session.universalPlacement, session.placements, design.id],
+  );
 
   /**
-   * Writes the placement.
+   * Writes THIS design's placement.
    *
    * The values are rounded on write: a drag produces raw floats like
    * 0.5045991124897677, which is not a value the number inputs can show.
@@ -397,26 +396,19 @@ export function DesignAdjustmentPanel({
       scale: Math.round(merged.scale * 1000) / 1000,
       angle: Math.round(merged.angle * 10) / 10,
     };
-    if (session.universal) {
-      update({ universalPlacement: next });
-      return;
-    }
     update({ placements: { ...session.placements, [design.id]: next } });
   };
 
-  /** Copies the placement onto this design only. */
-  const applyToThisDesign = () => {
-    update({
-      universal: false,
-      placements: { ...session.placements, [design.id]: editing },
-    });
-    toast.success(`Placement applied to "${design.name}"`);
-  };
-
-  /** Copies the placement onto every design in the batch. */
+  /**
+   * Copies this placement onto every design.
+   *
+   * Clearing `placements` is deliberate: it makes the copy the default for
+   * every design, so an old override cannot resurface on a design the user
+   * has not touched.
+   */
   const applyToEveryDesign = () => {
-    update({ universal: true, universalPlacement: editing });
-    toast.success("Placement applied to every design");
+    update({ universalPlacement: editing, placements: {} });
+    toast.success("Placement used for every design");
   };
 
   const areas: PrintAreaOption[] =
@@ -439,19 +431,11 @@ export function DesignAdjustmentPanel({
         </DialogHeader>
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-muted/60 px-3 py-2">
-          <label className="flex cursor-pointer items-center gap-2">
-            <Switch
-              checked={session.universal}
-              onCheckedChange={(v) => update({ universal: v })}
-              aria-label="Use one placement for every design"
-              id="studio-universal"
-            />
-            <span className="text-[12px] text-ink">One placement for every design</span>
-          </label>
+          <span className="text-[12px] text-ink">
+            This placement belongs to “{design.name}”
+          </span>
           <span className="text-[11px] text-ink-subtle">
-            {session.universal
-              ? "Every design in the batch uses this placement."
-              : `Only "${design.name}" uses its own placement.`}
+            Every mockup with a print area uses it. Other designs keep their own placement.
           </span>
         </div>
 
@@ -561,11 +545,11 @@ export function DesignAdjustmentPanel({
 
         <DialogFooter className="flex-wrap justify-between">
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" onClick={applyToThisDesign}>
-              Apply to this design
-            </Button>
+            <span className="text-[11px] text-ink-subtle">
+              Saved for “{design.name}” · every mockup uses it
+            </span>
             <Button size="sm" variant="outline" onClick={applyToEveryDesign}>
-              Apply to every design
+              Use for every design
             </Button>
           </div>
           <Button size="sm" onClick={onClose}>

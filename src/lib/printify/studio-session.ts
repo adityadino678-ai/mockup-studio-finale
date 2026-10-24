@@ -49,7 +49,6 @@ export function emptySession(): StudioSession {
     designIds: [],
     inkPairIds: [],
     inkPairs: [],
-    universal: true,
     universalPlacement: { ...DEFAULT_PLACEMENT },
     placements: {},
     priceCents: 1999,
@@ -252,7 +251,6 @@ export async function loadSession(): Promise<StudioSession> {
     designIds: stringArray(stored.designIds),
     inkPairIds: stringArray(stored.inkPairIds),
     inkPairs: inkPairArray(stored.inkPairs),
-    universal: stored.universal !== false,
     universalPlacement,
     placements,
     priceCents: positiveCents(stored.priceCents) ?? base.priceCents,
@@ -355,12 +353,17 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
   }
 }
 
-/** The placement that applies to a design, honouring the universal toggle. */
+/**
+ * The placement for a design.
+ *
+ * A design owns ONE placement, and every mockup uses it: the print-area frame
+ * maps that placement onto each photo. There is no "all designs share this"
+ * mode - editing one design can never move another.
+ */
 export function placementFor(
   session: StudioSession,
   designId: string,
 ): StudioPlacement {
-  if (session.universal) return session.universalPlacement;
   return session.placements[designId] ?? session.universalPlacement;
 }
 

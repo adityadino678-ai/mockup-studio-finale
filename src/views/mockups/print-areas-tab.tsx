@@ -59,7 +59,6 @@ import {
 import { writeStudioPlacement } from "@/lib/mockups/resolve";
 import {
   applyPrintAreaToMockups,
-  inheritedPrintArea,
   printAreaScopeLabel,
   printAreaScopeTargets,
   type PrintAreaScope,
@@ -121,12 +120,11 @@ export function PrintAreasTab({
   const [studioArea, setStudioArea] = React.useState<PrintAreaOption | null>(null);
   /** True while the composed mockup is being written to storage. */
   const [rendering, setRendering] = React.useState(false);
-  /** Whether a placement edit is for every design or only the picked one. */
-  const [placementScope, setPlacementScope] = React.useState<"all" | "design">("all");
-  /** How far a frame save travels. Same type by default; never a mug by accident. */
-  const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("category");
-  /** Set when the draft came from a sibling mockup rather than this record. */
-  const [inheritNote, setInheritNote] = React.useState<string | null>(null);
+  /**
+   * How far a frame save travels. The print area is a property of the PHOTO,
+   * so the default is this mockup only; copying is an explicit choice.
+   */
+  const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("this");
   const lastMockupId = React.useRef<string | null>(null);
   /** Bumped on every user edit, so a slow save cannot clear a newer draft. */
   const draftVersion = React.useRef(0);
@@ -148,9 +146,6 @@ export function PrintAreasTab({
   React.useEffect(() => {
     if (liveSession) setSession(liveSession);
   }, [liveSession]);
-  React.useEffect(() => {
-    setPlacementScope(session.universal ? "all" : "design");
-  }, [session.universal]);
 
   // --- selection -------------------------------------------------------------
   const mockup = React.useMemo(
@@ -176,13 +171,12 @@ export function PrintAreasTab({
   );
 
   // The mockup's saved area becomes the draft whenever the mockup changes.
-  // A mockup with no area of its own starts from the most recent sibling in
-  // the same category, so a newly uploaded photo is never blank. The draft is
-  // then auto-saved by the effect below.
+  // A photo with no area starts blank: the frame belongs to that photo, so it
+  // is never copied from a sibling. The draft is auto-saved by the effect
+  // below, and only for the scope the user chose (this mockup by default).
   React.useEffect(() => {
     if (!mockup) {
       setArea(null);
-      setInheritNote(null);
       setDirty(false);
       lastMockupId.current = null;
       return;
@@ -206,37 +200,21 @@ export function PrintAreasTab({
       setReferenceOpen(false);
       setCropMode(false);
     } else if (dirty) {
-      // The live query brought back the record this panel just saved (or a
-      // sibling write). Do not overwrite the draft the user is editing.
+      // The live query brought back the record this panel just saved. Do not
+      // overwrite the draft the user is editing.
       return;
     }
 
-    const own = printAreaOf(mockup);
-    if (own) {
-      setArea(own);
-      setInheritNote(null);
-      setDirty(false);
-      return;
-    }
-    const inherited = inheritedPrintArea(mockup, mockups ?? []);
-    if (inherited) {
-      setArea(inherited);
-      setInheritNote("Inherited from a matching mockup — saving applies it here.");
-      markAreaDirty();
-      return;
-    }
-    setArea(null);
-    setInheritNote(null);
+    setArea(printAreaOf(mockup) ?? null);
     setDirty(false);
-  }, [mockup, mockups, dirty, markAreaDirty]);
+  }, [mockup, dirty]);
 
-  // The Studio placement for the picked design.
+  // The Studio placement for the picked design. Each design owns its
+  // placement; every mockup uses it inside that mockup's own frame.
   const placement = React.useMemo<StudioPlacement | null>(() => {
     if (!designId) return null;
-    return session.universal
-      ? session.universalPlacement
-      : (session.placements[designId] ?? session.universalPlacement);
-  }, [designId, session.universal, session.universalPlacement, session.placements]);
+    return session.placements[designId] ?? session.universalPlacement;
+  }, [designId, session.universalPlacement, session.placements]);
 
   // The artwork's pixel size, needed for the fit maths and the physical size.
   React.useEffect(() => {
@@ -372,9 +350,9 @@ export function PrintAreasTab({
     [mockup, areaScope],
   );
 
-  // Auto-save the draft. It is debounced (a drag writes once) and it uses the
-  // chosen scope, so the frame is already on the other photos when the user
-  // walks over to the Studio and presses Save & render.
+  // Auto-save the draft. It is debounced (a drag writes once) and uses the
+  // chosen scope: this mockup only by default, or the explicit copy scope the
+  // user picked.
   React.useEffect(() => {
     if (!dirty || !mockup || !area) return;
     pendingDraft.current = { mockupId: mockup.id, area, scope: areaScope };
@@ -465,16 +443,15 @@ export function PrintAreasTab({
   // --- the Studio's placement ------------------------------------------------
   const commitPlacement = async (next: StudioPlacement) => {
     if (!designId) return;
-    const current = session.universal
-      ? session.universalPlacement
-      : (session.placements[designId] ?? session.universalPlacement);
+    const current = session.placements[designId] ?? session.universalPlacement;
     const unchanged =
       current.x === next.x &&
       current.y === next.y &&
       current.scale === next.scale &&
       current.angle === next.angle;
     if (unchanged) return;
-    const updated = await writeStudioPlacement(designId, next, { scope: placementScope });
+    // One placement per design. This button changes the picked design only.
+    const updated = await writeStudioPlacement(designId, next, { scope: "design" });
     setSession(updated);
   };
 
@@ -496,15 +473,14 @@ export function PrintAreasTab({
    * design lands in the same spot inside this area.
    */
   const setAsPlaceholder = async () => {
-    const placements = { ...session.placements };
-    for (const id of Object.keys(placements)) delete placements[id];
     const next: StudioSession = {
       ...session,
-      universal: true,
-      // Promote the placement on screen, not whatever the old universal
-      // fallback happened to be: "this is the placeholder" must mean THIS one.
+      // Promote the placement on screen, not whatever the old fallback
+      // happened to be: "this is the placeholder" must mean THIS one.
       universalPlacement: placement ? { ...placement } : session.universalPlacement,
-      placements,
+      // Clearing the per-design entries makes this the default every design
+      // starts from, so an old override cannot resurface.
+      placements: {},
       updatedAt: Date.now(),
     };
     await saveSession(next);
@@ -744,23 +720,6 @@ export function PrintAreasTab({
             triggerId="area-design"
             className="w-[220px]"
           />
-          <div className="flex items-center gap-1">
-            <Label htmlFor="placement-scope" className="text-[11px] text-ink-subtle">
-              Placement
-            </Label>
-            <Select
-              value={placementScope}
-              onValueChange={(value) => setPlacementScope(value === "design" ? "design" : "all")}
-            >
-              <SelectTrigger id="placement-scope" className="h-8 w-[130px] text-[12px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All designs</SelectItem>
-                <SelectItem value="design">This design</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
           <Badge variant="outline">from Printify Studio</Badge>
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={fitToArea} disabled={!area || !design}>
@@ -833,12 +792,6 @@ export function PrintAreasTab({
                     <span className="text-ink-muted">From</span>
                     <span className="font-medium">{sourceLabel}</span>
                   </div>
-                </div>
-              ) : null}
-
-              {inheritNote ? (
-                <div className="mb-3 rounded-md bg-surface-muted px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
-                  {inheritNote}
                 </div>
               ) : null}
 

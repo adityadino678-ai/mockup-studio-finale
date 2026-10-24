@@ -30,9 +30,10 @@ Confirm-gated tools (each prepares an action — nothing is created until the us
 - create_mockup_render(design?, mockup?, ink?, behindMockup?): merge ONE design onto ONE mockup. If the
   mockup has a print area, the render uses that area and the Printify Studio placement, exactly like
   the Mockups preview and Save render.
-- save_placement(design?, mockup?, transform?, asTemplate?, templateName?): remember where a design
-  sits on a mockup. On a print-area mockup this writes the Studio placement inside the area; otherwise
-  it writes the mockup transform. Optionally as a reusable template.
+- save_placement(design?, mockup?, transform?, asTemplate?, templateName?): remember where ONE design
+  sits. On a print-area mockup this writes that design's Studio placement inside the area; every
+  mockup with an area uses it, and other designs keep their own placements. Without an area it writes
+  the mockup transform. Optionally as a reusable template.
 - create_ink_variant(design?, ink): generate a white- or black-ink version of a design.
 - remove_background(design?, engine?, tolerance?): cut the background out of a design.
 - save_chat_image(kind?, name?, index?, category?): save an image the user attached in chat as a

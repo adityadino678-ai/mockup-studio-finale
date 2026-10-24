@@ -531,10 +531,19 @@ export interface StudioSession {
    * the old behaviour (its own ink files, or one artwork on every colour).
    */
   inkPairs: StudioInkPair[];
-  /** When true, every design uses `universalPlacement`. */
-  universal: boolean;
+  /**
+   * The placement a design starts from when it has no override yet.
+   *
+   * Every new design uses this default. Editing a design writes its own entry
+   * in `placements`, so the two never move together.
+   */
   universalPlacement: StudioPlacement;
-  /** Per-design placement overrides, used when `universal` is false. */
+  /**
+   * Per-design placements, keyed by design id.
+   *
+   * A design has ONE placement, used by every mockup: the mockup's print-area
+   * frame maps it onto that photo. Designs do not share placements.
+   */
   placements: Record<string, StudioPlacement>;
   /** Price in cents, applied to every enabled variant. */
   priceCents?: number;
