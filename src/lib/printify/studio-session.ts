@@ -268,6 +268,17 @@ export async function loadSession(): Promise<StudioSession> {
     listingImages: imageSelectionRecord(stored.listingImages),
     listingImageCleared: clearedRecord(stored.listingImageCleared),
     listingRenders: renderRecord(stored.listingRenders),
+    // UI memory for the Mockups panel's per-design tabs. A non-empty string
+    // survives; anything else (including a deleted id, which the panel itself
+    // re-validates against the live tables) is dropped.
+    mockupsActiveDesignId:
+      typeof stored.mockupsActiveDesignId === "string" && stored.mockupsActiveDesignId
+        ? stored.mockupsActiveDesignId
+        : undefined,
+    mockupsActiveMockupId:
+      typeof stored.mockupsActiveMockupId === "string" && stored.mockupsActiveMockupId
+        ? stored.mockupsActiveMockupId
+        : undefined,
     updatedAt: finiteNumber(stored.updatedAt) ?? Date.now(),
   };
 }

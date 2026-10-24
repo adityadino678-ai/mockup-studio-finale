@@ -70,9 +70,8 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
-import { DesignPicker } from "@/components/mockups/design-picker";
 import type { Mockup, MockupPrintArea, StudioPlacement, StudioSession, Template } from "@/types/domain";
-import { AlertTriangle, Crop, Download, ImagePlus, Loader2, Ruler, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Crop, Download, ImagePlus, Layers, Loader2, Ruler, Save, Trash2 } from "lucide-react";
 
 /** The crop windows offered as one-click presets. */
 const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
@@ -120,11 +119,14 @@ export function PrintAreasTab({
   const [studioArea, setStudioArea] = React.useState<PrintAreaOption | null>(null);
   /** True while the composed mockup is being written to storage. */
   const [rendering, setRendering] = React.useState(false);
+  /** True while the design is being rendered onto every mockup with an area. */
+  const [bulkRendering, setBulkRendering] = React.useState(false);
   /**
-   * How far a frame save travels. The print area is a property of the PHOTO,
-   * so the default is this mockup only; copying is an explicit choice.
+   * How far a frame save travels. Inside a per-design tab the workflow is
+   * "place it on one photo, save, next design", so the default is every
+   * mockup of the same product type; narrower or wider scopes are explicit.
    */
-  const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("this");
+  const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("category");
   const lastMockupId = React.useRef<string | null>(null);
   /** Bumped on every user edit, so a slow save cannot clear a newer draft. */
   const draftVersion = React.useRef(0);
@@ -153,17 +155,52 @@ export function PrintAreasTab({
     [mockups, selectedId],
   );
 
+  // The design tabs are newest first, like the picker they replaced.
+  const tabDesigns = React.useMemo(
+    () => [...(designs ?? [])].sort((a, b) => b.createdAt - a.createdAt),
+    [designs],
+  );
+
   React.useEffect(() => {
     if (!mockups || mockups.length === 0) return;
     if (selectedId && mockups.some((m) => m.id === selectedId)) return;
-    setSelectedId(mockups[0].id);
-  }, [mockups, selectedId]);
+    const remembered = liveSession?.mockupsActiveMockupId;
+    setSelectedId(
+      remembered && mockups.some((m) => m.id === remembered)
+        ? remembered
+        : mockups[0].id,
+    );
+  }, [mockups, selectedId, liveSession]);
 
   React.useEffect(() => {
-    if (!designs || designs.length === 0) return;
-    if (designId && designs.some((d) => d.id === designId)) return;
-    setDesignId(designs[0].id);
-  }, [designs, designId]);
+    if (tabDesigns.length === 0) return;
+    if (designId && tabDesigns.some((d) => d.id === designId)) return;
+    const remembered = liveSession?.mockupsActiveDesignId;
+    setDesignId(
+      remembered && tabDesigns.some((d) => d.id === remembered)
+        ? remembered
+        : tabDesigns[0].id,
+    );
+  }, [tabDesigns, designId, liveSession]);
+
+  // Remember the working tab + mockup in the session, so a reload resumes
+  // the same design-by-design pass. Writes only when the selection actually
+  // changed; the live query echoes the write back and this then early-returns.
+  React.useEffect(() => {
+    if (!liveSession) return;
+    if (
+      (liveSession.mockupsActiveDesignId ?? null) === designId &&
+      (liveSession.mockupsActiveMockupId ?? null) === selectedId
+    ) {
+      return;
+    }
+    const next: StudioSession = { ...liveSession, updatedAt: Date.now() };
+    if (designId) next.mockupsActiveDesignId = designId;
+    else delete next.mockupsActiveDesignId;
+    if (selectedId) next.mockupsActiveMockupId = selectedId;
+    else delete next.mockupsActiveMockupId;
+    void saveSession(next);
+  }, [liveSession, designId, selectedId]);
 
   const design = React.useMemo(
     () => designs?.find((d) => d.id === designId) ?? null,
@@ -171,9 +208,9 @@ export function PrintAreasTab({
   );
 
   // The mockup's saved area becomes the draft whenever the mockup changes.
-  // A photo with no area starts blank: the frame belongs to that photo, so it
-  // is never copied from a sibling. The draft is auto-saved by the effect
-  // below, and only for the scope the user chose (this mockup by default).
+  // A photo with no area starts blank: a re-save on any sibling of its type
+  // is all it takes to bring it in line. The draft is auto-saved by the
+  // effect below, for the scope the user chose (same type by default).
   React.useEffect(() => {
     if (!mockup) {
       setArea(null);
@@ -351,8 +388,8 @@ export function PrintAreasTab({
   );
 
   // Auto-save the draft. It is debounced (a drag writes once) and uses the
-  // chosen scope: this mockup only by default, or the explicit copy scope the
-  // user picked.
+  // chosen scope: every mockup of this type by default, so one save per
+  // design is enough before moving to the next tab.
   React.useEffect(() => {
     if (!dirty || !mockup || !area) return;
     pendingDraft.current = { mockupId: mockup.id, area, scope: areaScope };
@@ -630,6 +667,71 @@ export function PrintAreasTab({
     }
   };
 
+  /**
+   * Renders THIS design onto every mockup that has a print area.
+   *
+   * This is the payoff of the per-design tabs: place the design once, save,
+   * and one click produces the whole set. Mockups without an area are skipped
+   * rather than failing the run — they simply have nothing to paint on yet.
+   * Each target resolves through the SAME render plan as the preview, so
+   * these renders are pixel-identical to what the panel shows.
+   */
+  const renderEverywhere = async () => {
+    if (!design || !mockups) return;
+    const targets = mockups.filter((m) => printAreaOf(m));
+    if (targets.length === 0) {
+      toast.info("No mockup has a print area yet. Set one first.");
+      return;
+    }
+    setBulkRendering(true);
+    let done = 0;
+    let failed = 0;
+    try {
+      for (const target of targets) {
+        try {
+          const plan = await resolveRenderPlan({
+            designId: design.id,
+            mockup: target,
+            session,
+            // The mockup on screen renders from its unsaved draft, exactly
+            // like the single Save render; the rest use their saved areas.
+            areaOverride: target.id === mockup?.id ? area : undefined,
+          });
+          await renderComposition({
+            designId: design.id,
+            mockupId: target.id,
+            designAssetId: designMainAssetId(design),
+            transform: plan.transform,
+            clip: plan.clip ?? null,
+            behindMockup: plan.behindMockup,
+          });
+          done += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      if (done > 0) {
+        await logActivity(
+          "batch.item",
+          `Rendered "${design.name}" on ${done} mockup${done === 1 ? "" : "s"}`,
+        );
+      }
+      const skipped = mockups.length - targets.length;
+      if (skipped > 0) {
+        toast.success(
+          `Rendered on ${done} mockup${done === 1 ? "" : "s"} · skipped ${skipped} without a print area`,
+        );
+      } else if (done > 0) {
+        toast.success(`Rendered on ${done} mockup${done === 1 ? "" : "s"}`);
+      }
+      if (failed > 0) {
+        toast.error(`${failed} render${failed === 1 ? "" : "s"} failed`);
+      }
+    } finally {
+      setBulkRendering(false);
+    }
+  };
+
   // --- readouts --------------------------------------------------------------
   const physical = area ? areaInches(area, mockupW, mockupH) : null;
   const scopeCount =
@@ -709,18 +811,49 @@ export function PrintAreasTab({
 
       {/* --- the workspace --- */}
       <div className="min-w-0">
+        {/* The per-design tabs: one tab per design, newest first. Everything
+            below - the canvas, the frame, the renders - is THAT design only,
+            and it shows the placement the Printify Studio uses for it. Save
+            on one mockup, move to the next tab. */}
+        {tabDesigns.length === 0 ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-ink-muted">
+              Upload a design in the Printify Studio to place it on a mockup.
+            </span>
+          </div>
+        ) : (
+          <div className="mb-3 flex items-end gap-2 border-b border-border-subtle">
+            <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" id="design-tabs">
+              {tabDesigns.map((d) => {
+                const active = d.id === designId;
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setDesignId(d.id)}
+                    className={`whitespace-nowrap border-b-2 px-3 py-2 text-[13px] font-semibold transition-colors ${
+                      active
+                        ? "border-forest text-forest"
+                        : "border-transparent text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    {d.name}
+                  </button>
+                );
+              })}
+            </div>
+            <Badge variant="outline" className="mb-1.5 shrink-0">
+              from Printify Studio
+            </Badge>
+          </div>
+        )}
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Label htmlFor="area-design" className="text-[12px] text-ink-muted">
-            Design
-          </Label>
-          <DesignPicker
-            designs={designs ?? []}
-            value={designId}
-            onChange={setDesignId}
-            triggerId="area-design"
-            className="w-[220px]"
-          />
-          <Badge variant="outline">from Printify Studio</Badge>
+          {design ? (
+            <span className="text-[12px] text-ink-subtle">
+              {design.name} · its placement is used on every mockup, and by the Studio
+            </span>
+          ) : null}
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={fitToArea} disabled={!area || !design}>
               Fit to area
@@ -1140,11 +1273,27 @@ export function PrintAreasTab({
                   )}
                   Save render
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={renderEverywhere}
+                  disabled={!design || bulkRendering}
+                  title={`Render "${design?.name ?? "this design"}" on every mockup that has a print area`}
+                >
+                  {bulkRendering ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Layers className="h-3.5 w-3.5" />
+                  )}
+                  Render on every mockup
+                </Button>
               </div>
               <p className="mt-2 text-[11.5px] leading-relaxed text-ink-subtle">
                 A template carries the area and the frame as a fraction of the photo. Tick mockups on
                 the left to apply it to them. <strong className="font-medium text-ink-muted">Save
-                render</strong> stores the composed mockup for the Export Center.
+                render</strong> stores the composed mockup for the Export Center, and{" "}
+                <strong className="font-medium text-ink-muted">Render on every mockup</strong> does
+                the whole set for this design in one pass.
               </p>
             </Card>
 

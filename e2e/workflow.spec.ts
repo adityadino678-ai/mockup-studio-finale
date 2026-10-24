@@ -333,6 +333,9 @@ test.describe("core workflow", () => {
     // The mockup follows the Studio: the design is 200% of the area width.
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
+    // Tabs are newest first, so design-b is the default tab. The 200%
+    // placement was written for design-a: select its tab explicitly.
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
     await expect(page.getByText(/200% of the print area/)).toBeVisible({ timeout: 30_000 });
 
     // Save the composed mockup. This is the same renderComposition the
@@ -427,6 +430,9 @@ test.describe("core workflow", () => {
     // One render on each mockup, from the Print areas tab.
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
+    // Tabs are newest first, so design-b is the default tab. The renders and
+    // the export below are about design-a: select its tab explicitly.
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
@@ -439,10 +445,10 @@ test.describe("core workflow", () => {
     // pass on the first one's toast and the export would run too early.
     await expect(page.getByText(/Mockup render saved/)).toBeHidden({ timeout: 20_000 });
 
-    // The frame belongs to its own photo, so mockup-b did NOT inherit
-    // mockup-a's preset. Give it its own area.
+    // A save inside a design tab reaches every mockup of the product type,
+    // so mockup-b already carries the front preset without being visited.
     await page.getByRole("button", { name: /mockup-b/ }).click();
-    await expect(page.getByText("Tee · DTG front")).toBeHidden({ timeout: 10_000 });
+    await expect(page.getByText("Tee · DTG front")).toBeVisible({ timeout: 30_000 });
 
     // A different preset, because a Select does not fire when its value has
     // not changed.
@@ -857,7 +863,8 @@ test.describe("core workflow", () => {
 
     await page.reload();
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    // The area was saved on this mockup only, and it comes back with it.
+    // The area was saved (and travels with the mockup's whole type), so it
+    // comes back after a reload.
     await expect(page.getByText("4500 × 5400 px")).toBeVisible({ timeout: 30_000 });
   });
 
@@ -866,6 +873,9 @@ test.describe("core workflow", () => {
 
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
+    // Tabs are newest first, so design-b is the default tab. The red-ink
+    // assertions below are about design-a: select its tab explicitly.
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
@@ -1080,6 +1090,9 @@ test.describe("core workflow", () => {
 
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
+    // Tabs are newest first, so design-b is the default tab. The red-ink
+    // assertions below are about design-a: select its tab explicitly.
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
@@ -1309,14 +1322,14 @@ test.describe("core workflow", () => {
     await expect(page.locator("#bookmarklet-source")).toHaveValue(/^javascript:/);
   });
 
-  test("23. the print-area design picker lists every design, not just the first eight", async ({
+  test("23. every design gets its own tab, newest first", async ({
     page,
   }) => {
     await seedLibrary(page);
 
-    // The old picker was a 16rem-tall Select: about eight rows, alphabetical,
-    // with a hidden scrollbar. Add twelve designs whose names sort LAST, so a
-    // capped list would hide exactly the ones a user just uploaded.
+    // Add twelve designs whose createdAt is in the future so they sort FIRST in
+    // the newest-first strip. If tabs were capped like the old picker, exactly
+    // these would be the ones hidden.
     await page.evaluate(async () => {
       const db: IDBDatabase = await new Promise((res) => {
         const r = indexedDB.open("mockup-studio");
@@ -1350,16 +1363,25 @@ test.describe("core workflow", () => {
 
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    await page.locator("#area-design").waitFor({ timeout: 30_000 });
-    await page.locator("#area-design").click();
 
-    // Two uploaded designs plus twelve seeded ones, and the count proves the
-    // picker is reading the whole table rather than a truncated page.
-    await expect(page.getByText("14 of 14 designs")).toBeVisible({ timeout: 15_000 });
-    await page.getByPlaceholder("Search designs…").fill("zz-late-12");
-    await expect(page.getByText("1 of 14 designs")).toBeVisible();
-    await page.getByRole("option", { name: /zz-late-12/ }).click();
-    await expect(page.locator("#area-design")).toContainText("zz-late-12");
+    // Every design gets a tab - the strip is scrollable but renders all of them,
+    // newest first. Two uploaded + twelve seeded = fourteen tabs.
+    await expect(
+      page.locator("#design-tabs button").last(),
+    ).toContainText("design-a", { timeout: 30_000 });
+    await expect(page.locator("#design-tabs button")).toHaveCount(14);
+
+    // The newest (zz-late-12) is leftmost in the newest-first strip.
+    await expect(
+      page.locator("#design-tabs button").first(),
+    ).toContainText("zz-late-12");
+
+    // Clicking a tab switches THIS tab's context to that design: the design
+    // name appears in the context line above the canvas controls.
+    await page.getByRole("button", { name: "zz-late-12", exact: true }).click();
+    await expect(
+      page.getByText(/zz-late-12 · its placement is used/),
+    ).toBeVisible();
   });
 });
 

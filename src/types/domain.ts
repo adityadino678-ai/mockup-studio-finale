@@ -545,6 +545,15 @@ export interface StudioSession {
    * frame maps it onto that photo. Designs do not share placements.
    */
   placements: Record<string, StudioPlacement>;
+  /**
+   * The design tab the Mockups → Print areas panel was last on.
+   *
+   * Pure UI memory: a reload resumes the same per-design tab, so a
+   * design-by-design pass survives closing the browser.
+   */
+  mockupsActiveDesignId?: string;
+  /** The mockup the Print areas panel was last showing. Same UI memory. */
+  mockupsActiveMockupId?: string;
   /** Price in cents, applied to every enabled variant. */
   priceCents?: number;
   /** `{design}` and `{product}` are replaced when a product is created. */

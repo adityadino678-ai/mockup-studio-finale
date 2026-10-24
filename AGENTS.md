@@ -506,31 +506,38 @@ mockup photo, so the mockup shows what the product actually gets.
   null`; `null` is authoritative ("no area"), while `undefined` would make the
   compositor re-read storage.
 - `src/lib/mockups/propagate.ts` owns applying one area to many mockups. The
-  default is **This mockup only**: a frame belongs to its own photo, so it is
-  never copied or inherited automatically. "All mockups of this type" and "All
+  default inside a design tab is **All mockups of this type** — the workflow is
+  "place it on one photo, save, next design" — and "This mockup only" and "All
   mockups" are explicit choices. When copying, the frame, size, source, label
   and clip mode travel; crop and garment reference stay per photo, because a
   folded shirt and a flat-lay need different windows even when the design sits
-  in the same place.
-- `src/components/mockups/design-picker.tsx` is the Mockups design picker:
-  searchable, newest first, with a count, and it lists every design. The old
-  Radix `Select` was height-capped, so a newly uploaded design could look like
-  it came from an old version of the app.
+  in the same place. A mockup uploaded LATER starts with no area; one re-save
+  on any sibling of its type brings it in line.
 - `src/components/mockups/print-area-canvas.tsx` is the Konva canvas (lazy
   loaded). `src/views/mockups/print-areas-tab.tsx` is the screen.
 
-**The frame is per mockup; the design placement is per design.** Those are
-different scopes and must stay different:
+**The workspace is organised as one TAB PER DESIGN** (newest first, a
+horizontally scrollable strip — the searchable `DesignPicker` dropdown it
+replaced was deleted). Everything in the tab — canvas, frame, controls,
+renders — is that design only:
 
-- A print-area save defaults to **This mockup only** and is auto-saved. The
-  panel does not copy a frame to same-type mockups and does not inherit a
-  sibling's frame for a new photo. `All <category> mockups` and `All mockups`
-  remain explicit copy actions.
 - A design owns ONE placement in the Studio (`placements[designId]`, falling
   back to `universalPlacement` until it is first edited). Every mockup with a
   print area uses that same placement inside its own frame, so the design
   lands at the same relative spot on every photo. Editing design A never moves
-  design B, and there is no universal placement mode.
+  design B, and there is no universal placement mode. The Studio's Design
+  panel and these tabs show the SAME placement, live, from the shared session.
+- The frame save defaults to **All <category> mockups**, so "adjust on one
+  mockup, hit Save, next tab" leaves the whole type consistent. This reversed
+  an earlier per-mockup default — deliberately.
+- **Render on every mockup** renders the tab's design onto every mockup that
+  HAS a print area, skipping the rest (named in the toast). It resolves each
+  target through `resolveRenderPlan`, so the set is pixel-identical to the
+  preview and to a single Save render.
+- The active tab and mockup are remembered in the session
+  (`mockupsActiveDesignId` / `mockupsActiveMockupId`, validated on load), so a
+  reload resumes the same design-by-design pass. An explicit "Set the print
+  area" from a library card still wins over the memory.
 - `Set as the placeholder for all designs` is the explicit bulk action: it
   makes the placement on screen the shared default and clears per-design
   overrides. "Fit to area" writes only the picked design.
