@@ -389,6 +389,33 @@ export function createPrintifyClient(explicitKey?: string) {
       );
     },
 
+    /**
+     * POST /shops/{shop_id}/products/{product_id}/publish.json
+     *
+     * Verified contract (Oct 2026, see AGENTS.md): the body is a set of
+     * BOOLEANS, one per field — each flag says "publish this field"; it is not
+     * a simple toggle. Publishing an UNPUBLISHED draft is the only path; an
+     * already-published product errors upstream, and that error surfaces
+     * verbatim through `extractError`.
+     */
+    publishProduct(shopId: number, productId: string): Promise<unknown> {
+      return request<unknown>(
+        `/shops/${shopId}/products/${encodeURIComponent(productId)}/publish.json`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            title: true,
+            description: true,
+            images: true,
+            variants: true,
+            tags: true,
+            keyFeatures: true,
+            shipping_template: true,
+          }),
+        },
+      );
+    },
+
     resolveShopId,
 
     /**

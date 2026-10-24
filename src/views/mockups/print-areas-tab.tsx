@@ -63,7 +63,7 @@ import {
   printAreaScopeTargets,
   type PrintAreaScope,
 } from "@/lib/mockups/propagate";
-import { resolveRenderPlan } from "@/lib/mockups/render-plan";
+import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render";
 import { canRenderPrintFile, renderPrintFile } from "@/lib/mockups/print-file";
 import { renderComposition } from "@/lib/batch/runner";
 import { Badge, Card } from "@/components/ui/card";
@@ -155,9 +155,11 @@ export function PrintAreasTab({
     [mockups, selectedId],
   );
 
-  // The design tabs are newest first, like the picker they replaced.
+  // The tabs are numbered OLDEST FIRST: tab 1 is the first uploaded design,
+  // so the numbering matches the Studio's design order and the loop that
+  // creates one product per design, which both walk uploads in order.
   const tabDesigns = React.useMemo(
-    () => [...(designs ?? [])].sort((a, b) => b.createdAt - a.createdAt),
+    () => [...(designs ?? [])].sort((a, b) => a.createdAt - b.createdAt),
     [designs],
   );
 
@@ -345,9 +347,11 @@ export function PrintAreasTab({
    * Writes the draft to every mockup in the chosen scope, in one transaction.
    *
    * The frame is stored as fractions of the photo, so the same numbers are the
-   * same relative spot on every mockup of the product type. Crop and reference
-   * are deliberately preserved per photo: a folded shirt and a flat-lay need
-   * different visible windows even when the design sits in the same place.
+   * same relative spot on every mockup of the product type, and the crop
+   * travels with the frame - the visible window is part of the staged pose.
+   * The inches reference is deliberately kept per photo: a folded shirt and a
+   * flat-lay are measured differently even when the design sits in the same
+   * place.
    */
   const persistArea = React.useCallback(
     async (
@@ -642,13 +646,16 @@ export function PrintAreasTab({
     try {
       // Resolve transform AND clip from the same draft the canvas is showing.
       // renderComposition receives both, so it cannot re-read a saved area that
-      // is one edit behind the preview.
-      const plan = await resolveRenderPlan({
+      // is one edit behind the preview. No explicit behindMockup: the plan
+      // resolves it from the area's clipMode (the listing path's rule), and the
+      // fingerprint hashes the listing convention — so the Listing images page
+      // can ADOPT this render instead of re-rendering the same pixels.
+      const { plan, fp } = await resolveRenderPlanWithFingerprint({
         designId: design.id,
+        designAssetId: designMainAssetId(design),
         mockup,
         session,
         areaOverride: area,
-        behindMockup: area.clipMode === "behind-garment",
       });
       await renderComposition({
         designId: design.id,
@@ -657,6 +664,7 @@ export function PrintAreasTab({
         transform: plan.transform,
         clip: plan.clip ?? null,
         behindMockup: plan.behindMockup,
+        renderFp: fp,
       });
       await logActivity("batch.item", `Rendered "${design.name}" on "${mockup.name}"`);
       toast.success("Mockup render saved — find it in the Export Center");
@@ -689,8 +697,9 @@ export function PrintAreasTab({
     try {
       for (const target of targets) {
         try {
-          const plan = await resolveRenderPlan({
+          const { plan, fp } = await resolveRenderPlanWithFingerprint({
             designId: design.id,
+            designAssetId: designMainAssetId(design),
             mockup: target,
             session,
             // The mockup on screen renders from its unsaved draft, exactly
@@ -704,6 +713,7 @@ export function PrintAreasTab({
             transform: plan.transform,
             clip: plan.clip ?? null,
             behindMockup: plan.behindMockup,
+            renderFp: fp,
           });
           done += 1;
         } catch {
@@ -811,10 +821,14 @@ export function PrintAreasTab({
 
       {/* --- the workspace --- */}
       <div className="min-w-0">
-        {/* The per-design tabs: one tab per design, newest first. Everything
-            below - the canvas, the frame, the renders - is THAT design only,
-            and it shows the placement the Printify Studio uses for it. Save
-            on one mockup, move to the next tab. */}
+        {/* The per-design tabs: one small numbered tab per design, oldest
+            first - tab 1 is the first uploaded design, matching the Studio's
+            design order and the product-creation loop. The tab shows only its
+            number; the design's name lives in the title and the aria-label,
+            which is what screen readers and tests address. Everything below -
+            the canvas, the frame, the renders - is THAT design only, and it
+            shows the placement the Printify Studio uses for it. Save on one
+            mockup, move to the next tab. */}
         {tabDesigns.length === 0 ? (
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-[12px] text-ink-muted">
@@ -824,21 +838,26 @@ export function PrintAreasTab({
         ) : (
           <div className="mb-3 flex items-end gap-2 border-b border-border-subtle">
             <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" id="design-tabs">
-              {tabDesigns.map((d) => {
+              {tabDesigns.map((d, i) => {
                 const active = d.id === designId;
+                // The number is all that is visible; the name stays the
+                // accessible name, so screen readers and tests still address
+                // the tab by it.
                 return (
                   <button
                     key={d.id}
                     type="button"
                     aria-pressed={active}
                     onClick={() => setDesignId(d.id)}
-                    className={`whitespace-nowrap border-b-2 px-3 py-2 text-[13px] font-semibold transition-colors ${
+                    title={d.name}
+                    aria-label={d.name}
+                    className={`border-b-2 px-2.5 py-1 text-[12px] font-semibold transition-colors ${
                       active
                         ? "border-forest text-forest"
                         : "border-transparent text-ink-muted hover:text-ink"
                     }`}
                   >
-                    {d.name}
+                    {i + 1}
                   </button>
                 );
               })}
@@ -849,6 +868,9 @@ export function PrintAreasTab({
           </div>
         )}
         <div className="mb-3 flex flex-wrap items-center gap-2">
+          {/* The tabs show numbers, so this line is the only place the active
+              design's name is on screen - it names what the canvas below is
+              editing. */}
           {design ? (
             <span className="text-[12px] text-ink-subtle">
               {design.name} · its placement is used on every mockup, and by the Studio
@@ -952,7 +974,7 @@ export function PrintAreasTab({
                   </Select>
                   <p className="mt-1 text-[10.5px] text-ink-subtle">
                     {scopeCount} mockup{scopeCount === 1 ? "" : "s"} · {printAreaScopeLabel(areaScope)}.
-                    Crop and reference stay per photo.
+                    The crop follows the frame; the inches reference stays per photo.
                   </p>
                 </div>
               ) : null}

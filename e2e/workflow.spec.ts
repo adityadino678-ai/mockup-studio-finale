@@ -7,7 +7,7 @@ import os from "node:os";
  * End-to-end acceptance coverage for the core workflow:
  *   upload â†’ place â†’ render â†’ export
  *
- * The app has six pages. The Designs library, the mockup editor, the batch
+ * The app has eleven pages. The Designs library, the mockup editor, the batch
  * runner, templates, the Product Builder, listings and the AI SEO studio were
  * folded into these pages or removed, so their screens no longer exist and the
  * tests that drove them are gone. What is left probes the paths that still
@@ -56,7 +56,7 @@ async function clearWorkspace(page: Page) {
  */
 async function gotoApp(page: Page, route: string) {
   await page.goto(route);
-  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({
+  await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
     timeout: 30_000,
   });
 }
@@ -333,8 +333,9 @@ test.describe("core workflow", () => {
     // The mockup follows the Studio: the design is 200% of the area width.
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    // Tabs are newest first, so design-b is the default tab. The 200%
-    // placement was written for design-a: select its tab explicitly.
+    // Tabs are numbered oldest first, so design-a (uploaded first) is tab 1
+    // and the default. The 200% placement was written for design-a: select
+    // its tab explicitly anyway.
     await page.getByRole("button", { name: "design-a", exact: true }).click();
     await expect(page.getByText(/200% of the print area/)).toBeVisible({ timeout: 30_000 });
 
@@ -430,8 +431,9 @@ test.describe("core workflow", () => {
     // One render on each mockup, from the Print areas tab.
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    // Tabs are newest first, so design-b is the default tab. The renders and
-    // the export below are about design-a: select its tab explicitly.
+    // Tabs are numbered oldest first, so design-a (uploaded first) is tab 1
+    // and the default. The renders and the export below are about design-a:
+    // select its tab explicitly anyway.
     await page.getByRole("button", { name: "design-a", exact: true }).click();
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
@@ -531,6 +533,9 @@ test.describe("core workflow", () => {
       "/activity",
       "/settings",
       "/printify-studio",
+      "/listing-images",
+      "/listing-details",
+      "/listing-preview",
       "/printify-bookmarklet",
     ];
     for (const route of routes) {
@@ -567,6 +572,21 @@ test.describe("core workflow", () => {
     const sections: Array<{ link: RegExp; path: string; copy: RegExp }> = [
       { link: /^Mockups$/, path: "/mockups", copy: /Photos of your products/ },
       { link: /^Printify Studio$/, path: "/printify-studio", copy: /Upload designs, choose the product/ },
+      {
+        link: /^Listing images$/,
+        path: "/listing-images",
+        copy: /Every design in the batch gets its own row/,
+      },
+      {
+        link: /^Listing details$/,
+        path: "/listing-details",
+        copy: /No listings to fill in/,
+      },
+      {
+        link: /^Listing preview$/,
+        path: "/listing-preview",
+        copy: /Each tab is one listing in the batch/,
+      },
       { link: /^Agent$/, path: "/agent", copy: /How can I help\?/ },
       { link: /^Export Center$/, path: "/export", copy: /organized ZIP archive with a manifest/ },
       { link: /^Activity$/, path: "/activity", copy: /No activity yet/ },
@@ -873,8 +893,9 @@ test.describe("core workflow", () => {
 
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    // Tabs are newest first, so design-b is the default tab. The red-ink
-    // assertions below are about design-a: select its tab explicitly.
+    // Tabs are numbered oldest first, so design-a (uploaded first) is tab 1
+    // and the default. The red-ink assertions below are about design-a:
+    // select its tab explicitly anyway.
     await page.getByRole("button", { name: "design-a", exact: true }).click();
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
@@ -1090,8 +1111,9 @@ test.describe("core workflow", () => {
 
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    // Tabs are newest first, so design-b is the default tab. The red-ink
-    // assertions below are about design-a: select its tab explicitly.
+    // Tabs are numbered oldest first, so design-a (uploaded first) is tab 1
+    // and the default. The red-ink assertions below are about design-a:
+    // select its tab explicitly anyway.
     await page.getByRole("button", { name: "design-a", exact: true }).click();
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
@@ -1259,7 +1281,7 @@ test.describe("core workflow", () => {
       },
     });
     await page.reload();
-    await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({
+    await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
       timeout: 30_000,
     });
 
@@ -1305,15 +1327,31 @@ test.describe("core workflow", () => {
     expect(body).not.toMatch(/background-removal key/i);
   });
 
-  test("22. the listing tabs and the bookmarklet install page are reachable", async ({ page }) => {
-    await gotoApp(page, "/printify-studio");
-
-    await page.getByRole("tab", { name: "Listing images" }).click();
+  test("22. the three listing pages stand alone and the bookmarklet install page is reachable", async ({
+    page,
+  }) => {
+    // The two listing tabs used to live inside the Studio. They are real
+    // pages now, and the Studio is back to its three tabs.
+    await gotoApp(page, "/listing-images");
     await expect(page.getByRole("heading", { name: "Listing images" })).toBeVisible();
     await expect(page.getByText("No listings yet")).toBeVisible();
 
-    await page.getByRole("tab", { name: "Listing details" }).click();
-    await expect(page.getByText("No listings to fill in")).toBeVisible();
+    await gotoApp(page, "/listing-details");
+    // An empty batch has no form to show: the page says why instead of
+    // rendering six hundred blank fields.
+    await expect(page.getByRole("heading", { name: "No listings to fill in" })).toBeVisible();
+
+    await gotoApp(page, "/listing-preview");
+    await expect(page.getByRole("heading", { name: "Listing preview" })).toBeVisible();
+    await expect(page.getByText("No listings to preview")).toBeVisible();
+    // Publishing is the whole point of the page, and it must never be offered
+    // for an empty batch (there would be no product this app created).
+    await expect(page.getByRole("button", { name: /Publish to Printify/ })).toHaveCount(0);
+
+    await gotoApp(page, "/printify-studio");
+    await expect(page.getByRole("tab", { name: "Listing images" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Listing details" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Design panel" })).toBeVisible();
 
     await page.goto("/printify-bookmarklet");
     await expect(
@@ -1322,14 +1360,15 @@ test.describe("core workflow", () => {
     await expect(page.locator("#bookmarklet-source")).toHaveValue(/^javascript:/);
   });
 
-  test("23. every design gets its own tab, newest first", async ({
+  test("23. every design gets a small numbered tab, first uploaded is 1", async ({
     page,
   }) => {
     await seedLibrary(page);
 
-    // Add twelve designs whose createdAt is in the future so they sort FIRST in
-    // the newest-first strip. If tabs were capped like the old picker, exactly
-    // these would be the ones hidden.
+    // Add twelve designs whose createdAt is in the future, so the oldest-first
+    // numbering places them at the far END of the strip, after the two uploaded
+    // designs. If tabs were capped like the old picker, exactly these would be
+    // the ones hidden.
     await page.evaluate(async () => {
       const db: IDBDatabase = await new Promise((res) => {
         const r = indexedDB.open("mockup-studio");
@@ -1364,24 +1403,111 @@ test.describe("core workflow", () => {
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
 
-    // Every design gets a tab - the strip is scrollable but renders all of them,
-    // newest first. Two uploaded + twelve seeded = fourteen tabs.
-    await expect(
-      page.locator("#design-tabs button").last(),
-    ).toContainText("design-a", { timeout: 30_000 });
-    await expect(page.locator("#design-tabs button")).toHaveCount(14);
+    // Every design gets a tab - the strip is scrollable but renders all of
+    // them, oldest first. Two uploaded + twelve seeded = fourteen tabs.
+    await expect(page.locator("#design-tabs button")).toHaveCount(14, {
+      timeout: 30_000,
+    });
 
-    // The newest (zz-late-12) is leftmost in the newest-first strip.
-    await expect(
-      page.locator("#design-tabs button").first(),
-    ).toContainText("zz-late-12");
+    // Tab 1 is the first uploaded design; its number is all the visible text.
+    // The design's name rides on the tab's aria-label.
+    await expect(page.locator("#design-tabs button").first()).toHaveAttribute(
+      "aria-label",
+      "design-a",
+      { timeout: 30_000 },
+    );
+    await expect(page.locator("#design-tabs button").first()).toHaveText("1");
+
+    // The last-uploaded seeded design sits at the other end of the strip.
+    await expect(page.locator("#design-tabs button").last()).toHaveAttribute(
+      "aria-label",
+      "zz-late-12",
+      { timeout: 30_000 },
+    );
 
     // Clicking a tab switches THIS tab's context to that design: the design
-    // name appears in the context line above the canvas controls.
+    // name appears in the context line above the canvas controls - the one
+    // place a numbered tab spells its design out.
     await page.getByRole("button", { name: "zz-late-12", exact: true }).click();
     await expect(
       page.getByText(/zz-late-12 · its placement is used/),
     ).toBeVisible();
+  });
+
+  test("24. one ticked batch flows through images, details and preview", async ({ page }) => {
+    await seedLibrary(page);
+
+    // The ticked designs ARE the batch, so the three listing pages all read
+    // the same two listings.
+    await gotoApp(page, "/printify-studio");
+    for (const name of ["design-a", "design-b"]) {
+      await page.getByRole("checkbox", { name: `Select ${name}` }).check();
+    }
+    // The Studio persists the session 400 ms after a change. Navigating
+    // sooner would race that debounce and land on a page with an empty batch.
+    await expect(page.getByText("2 designs selected")).toBeVisible();
+    await page.waitForTimeout(800);
+
+    // --- Listing images ---------------------------------------------------
+    await gotoApp(page, "/listing-images");
+    await expect(page.getByRole("heading", { name: "Listing images" })).toBeVisible();
+    // One row per design, oldest first.
+    await expect(page.locator("[data-listing-id]")).toHaveCount(2, { timeout: 30_000 });
+
+    // Nothing was configured yet, so EVERY mockup starts included: two
+    // designs x two library mockups, with no picking step.
+    await expect(page.locator('[data-tile][data-included="true"]')).toHaveCount(4);
+    await expect(page.locator('[data-tile][data-included="false"]')).toHaveCount(0);
+
+    // A click takes one mockup out of ONE listing.
+    await page.getByRole("button", { name: "Remove mockup-a for design-a" }).click();
+    await expect(page.locator('[data-tile][data-included="true"]')).toHaveCount(3);
+    await expect(page.locator('[data-tile][data-included="false"]')).toHaveCount(1);
+
+    // A long-press (right-click here) starts a removal set; one click marks
+    // more, and one button commits the set. Removed mockups are simply not
+    // in the selection, which is what keeps them out of Printify.
+    await page
+      .getByRole("button", { name: "Remove mockup-b for design-a" })
+      .click({ button: "right" });
+    await expect(page.getByRole("button", { name: "Remove 1 from this listing" })).toBeVisible();
+    await page.getByRole("button", { name: "Remove 1 from this listing" }).click();
+    await expect(page.locator('[data-tile][data-included="true"]')).toHaveCount(2);
+    await expect(page.locator('[data-tile][data-included="false"]')).toHaveCount(2);
+
+    // --- Listing details --------------------------------------------------
+    await gotoApp(page, "/listing-details");
+    // The same numbered tabs: visible text is the number, the design's name
+    // is the accessible name.
+    await expect(page.getByRole("button", { name: "design-a", exact: true })).toHaveText("1");
+    await expect(page.getByRole("button", { name: "design-b", exact: true })).toHaveText("2");
+
+    // Per-design by default: the form shows THIS design's template
+    // expansion, and switching tabs shows the other one.
+    await expect(page.locator("#listing-title")).toHaveValue(/design-a/);
+    await page.getByRole("button", { name: "design-b", exact: true }).click();
+    await expect(page.locator("#listing-title")).toHaveValue(/design-b/);
+    await expect(page.getByRole("switch", { name: "Apply to every design" })).not.toBeChecked();
+
+    // --- Listing preview --------------------------------------------------
+    await gotoApp(page, "/listing-preview");
+    await expect(page.getByRole("heading", { name: "Listing preview" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "design-a", exact: true })).toHaveText("1");
+
+    // The two mockups removed from design-a are the whole selection, so the
+    // gallery says that honestly instead of inventing an image.
+    await expect(page.getByText("No images selected", { exact: true })).toBeVisible();
+
+    // Design-b still has both mockups, but nothing has been rendered yet - the
+    // tiles say so rather than showing a placeholder as if it were real.
+    await page.getByRole("button", { name: "design-b", exact: true }).click();
+    await expect(page.getByText("Not rendered yet").first()).toBeVisible({ timeout: 30_000 });
+
+    // Publish is present, and blocked rather than guessed at: there is no
+    // description and no current render, and CI has no Printify key.
+    const publish = page.getByRole("button", { name: "Publish to Printify" });
+    await expect(publish).toBeVisible();
+    await expect(publish).toBeDisabled();
   });
 });
 
@@ -1402,7 +1528,7 @@ async function setStudioSession(page: Page, patch: Record<string, unknown>) {
   // The Mockups library tab reads only the mockups table; the Print areas tab
   // (the one that reads the session) is not mounted yet.
   await page.goto("/mockups");
-  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({
+  await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
     timeout: 30_000,
   });
   await page.evaluate(async (changes) => {
@@ -1425,7 +1551,7 @@ async function setStudioSession(page: Page, patch: Record<string, unknown>) {
   }, patch);
 
   await page.goto("/printify-studio");
-  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({
+  await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
     timeout: 30_000,
   });
 }

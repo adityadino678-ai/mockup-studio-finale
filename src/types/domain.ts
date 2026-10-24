@@ -29,6 +29,15 @@ export interface AssetMeta {
   sourceDesignId?: string;
   /** For mockup-render assets: which mockup was used. */
   sourceMockupId?: string;
+  /**
+   * For mockup-render assets: the render fingerprint (version 2) of the
+   * inputs that produced these pixels — design, mockup, print-area fields,
+   * Studio placement, fallback transform and behind-garment mode. The Listing
+   * images page matches this to ADOPT an existing render instead of
+   * re-rendering it. Absent on renders written before fingerprints were
+   * recorded; absent means "cannot prove what produced this".
+   */
+  renderFp?: string;
 }
 
 export type InkVariant = "main" | "white" | "black";

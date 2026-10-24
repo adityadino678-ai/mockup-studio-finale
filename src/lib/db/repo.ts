@@ -55,6 +55,8 @@ export async function storeAsset(
     makeThumb?: boolean;
     sourceDesignId?: string;
     sourceMockupId?: string;
+    /** Mockup renders only: the render fingerprint of the inputs (see AssetMeta). */
+    renderFp?: string;
   } = {},
 ): Promise<AssetMeta> {
   const info = await getImageInfo(file);
@@ -71,6 +73,10 @@ export async function storeAsset(
     parentId: opts.parentId,
     sourceDesignId: opts.sourceDesignId,
     sourceMockupId: opts.sourceMockupId,
+    // Only present when a caller actually fingerprinted the render. Writing
+    // `renderFp: undefined` would leave the key on every new asset record and
+    // blur "no fingerprint"(absent) with "unknown"(undefined) for adoption.
+    ...(opts.renderFp !== undefined ? { renderFp: opts.renderFp } : {}),
   };
   await db.blobs.put({ id, blob: file });
   await db.assets.put(meta);

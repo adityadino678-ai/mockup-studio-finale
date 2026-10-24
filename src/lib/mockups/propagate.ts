@@ -6,12 +6,13 @@
 // same-type or all mockups is an explicit choice; it is never automatic and a
 // new mockup never inherits a sibling's frame.
 //
-// Only the geometry that defines the placement travels when copying:
-//   area size, frame, source, label, clip mode.
-// The photo-specific bits (the crop window and the garment reference) stay on
-// each mockup unless the caller explicitly asks to copy them, because a folded
-// shirt and a flat-lay need different windows even though the design sits in
-// the same place.
+// The frame travels when copying, and the CROP travels with it: the visible
+// window is part of the staged pose - what the frame shows is one decision
+// with where the frame sits, so a copy that kept the target's old window
+// would put the new frame behind the wrong fold. What does NOT travel is the
+// garment reference (the inches measurement): it describes the photo's real
+// scale, so a folded shirt and a flat-lay keep their own unless the caller
+// explicitly asks to copy it.
 // ---------------------------------------------------------------------------
 
 import { db } from "@/lib/db/schema";
@@ -41,8 +42,10 @@ export function printAreaScopeTargets(
 /**
  * Writes `area` to every mockup in `scope` in ONE transaction.
  *
- * `copyCrop` and `copyReference` default to false: the frame is portable, the
- * visible window and the inches measurement are properties of the photo.
+ * `copyCrop` defaults to true: the crop follows the frame, so every target
+ * receives the window the user just staged (and the whole area when the draft
+ * has none). `copyReference` defaults to false: the inches measurement is a
+ * property of the photo, not of the frame.
  */
 export async function applyPrintAreaToMockups(params: {
   sourceMockupId: string;
@@ -51,6 +54,8 @@ export async function applyPrintAreaToMockups(params: {
   copyCrop?: boolean;
   copyReference?: boolean;
 }): Promise<{ updated: number; mockupIds: string[] }> {
+  const copyCrop = params.copyCrop ?? true;
+  const copyReference = params.copyReference ?? false;
   const source = await db.mockups.get(params.sourceMockupId);
   if (!source) return { updated: 0, mockupIds: [] };
   const all = await db.mockups.toArray();
@@ -67,16 +72,18 @@ export async function applyPrintAreaToMockups(params: {
       const next: MockupPrintArea = {
         ...params.area,
         frame: { ...params.area.frame },
-        // The source's own crop/reference are the draft the user just edited;
-        // a sibling keeps its own photo-specific window.
+        // The crop follows the frame: a sibling receives the window the user
+        // just staged (or the whole area when the draft has none) instead of
+        // keeping a window that fit the old frame. The reference stays per
+        // photo unless the caller explicitly asks to copy it.
         crop:
-          params.copyCrop || isSource
+          copyCrop || isSource
             ? params.area.crop
               ? { ...params.area.crop }
               : undefined
             : previous?.crop,
         reference:
-          params.copyReference || isSource
+          copyReference || isSource
             ? params.area.reference
               ? { ...params.area.reference }
               : undefined

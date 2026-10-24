@@ -8,8 +8,6 @@ import { Button } from "@/components/ui/button";
 import { DesignsTab } from "@/views/studio/designs-tab";
 import { ColorsTab } from "@/views/studio/colors-tab";
 import { PlacementTab } from "@/views/studio/placement-tab";
-import { ListingImagesTab } from "@/views/studio/listing-images-tab";
-import { ListingDetailsTab } from "@/views/studio/listing-details-tab";
 import {
   fetchBlueprints,
   fetchColourSource,
@@ -21,9 +19,9 @@ import { emptySession, loadSession, saveSession, ROWS } from "@/lib/printify/stu
 import { hexForColourName, primaryHex, suggestInk } from "@/lib/printify/colors";
 import type { CatalogBlueprint, CatalogProvider, CatalogVariant } from "@/lib/printify/types";
 import type { StudioRowId, StudioSession } from "@/types/domain";
-import { Cloud, FileText, Images, Layers, Palette, Wand2 } from "lucide-react";
+import { Cloud, Layers, Palette, Wand2 } from "lucide-react";
 
-type StudioTab = "designs" | "colors" | "panel" | "images" | "details";
+type StudioTab = "designs" | "colors" | "panel";
 
 export interface StudioCatalogState {
   configured: boolean;
@@ -37,10 +35,15 @@ export interface StudioCatalogState {
 
 /**
  * The Printify Studio: upload designs, pick the product and its colours, and
- * place the artwork - then create the listings.
+ * place the artwork - then create one Printify product per design.
  *
  * The session (product, colours, sizes, placement) is stored in IndexedDB, so
  * switching tabs or reloading keeps your work.
+ *
+ * The listing work has its own pages now - Listing images, Listing details
+ * and Listing preview. They read and write the SAME session blob, so a batch
+ * ticked here is exactly what those pages configure, and a placement changed
+ * here is what their renders use.
  */
 export function PrintifyStudioPage() {
   const [session, setSession] = React.useState<StudioSession>(() => emptySession());
@@ -304,7 +307,7 @@ export function PrintifyStudioPage() {
     <div className="mx-auto max-w-6xl p-8">
       <PageHeader
         title="Printify Studio"
-        description="Upload designs, choose the product and its colours, place the artwork, and create the listings in one go. Everything stays on this device until you publish."
+        description="Upload designs, choose the product and its colours, place the artwork, and create one Printify product per design. Everything stays on this device until you publish."
         actions={
           catalog.configured ? (
             <Button size="sm" variant="outline" onClick={() => setTab("colors")}>
@@ -327,12 +330,6 @@ export function PrintifyStudioPage() {
           </TabsTrigger>
           <TabsTrigger value="panel">
             <Layers className="h-3.5 w-3.5" /> Design panel
-          </TabsTrigger>
-          <TabsTrigger value="images">
-            <Images className="h-3.5 w-3.5" /> Listing images
-          </TabsTrigger>
-          <TabsTrigger value="details">
-            <FileText className="h-3.5 w-3.5" /> Listing details
           </TabsTrigger>
         </TabsList>
 
@@ -359,29 +356,6 @@ export function PrintifyStudioPage() {
             catalog={catalog}
             hexFor={hexFor}
             onGoToColors={() => setTab("colors")}
-          />
-        </TabsContent>
-
-        <TabsContent value="images" forceMount>
-          <ListingImagesTab
-            session={session}
-            update={update}
-            catalog={catalog}
-            onGoToDesigns={() => setTab("designs")}
-            onGoToPanel={() => setTab("panel")}
-            onGoToDetails={() => setTab("details")}
-          />
-        </TabsContent>
-
-        <TabsContent value="details" forceMount>
-          <ListingDetailsTab
-            session={session}
-            update={update}
-            catalog={catalog}
-            loaded={loaded}
-            onGoToDesigns={() => setTab("designs")}
-            onGoToImages={() => setTab("images")}
-            onGoToPanel={() => setTab("panel")}
           />
         </TabsContent>
       </Tabs>

@@ -51,3 +51,6 @@ playwright-report/
 
 # local dev server logs
 .dev-*.log
+
+# local scratch (commit messages, screenshots, probe scripts)
+/tmp/

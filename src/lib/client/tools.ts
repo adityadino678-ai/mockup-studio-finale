@@ -36,7 +36,7 @@ import {
   studioPlacementFromTransform,
 } from "@/lib/mockups/print-area";
 import { writeBackStudioPlacement } from "@/lib/mockups/resolve";
-import { resolveRenderPlan } from "@/lib/mockups/render-plan";
+import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render";
 import {
   DEFAULT_TRANSFORM,
   type ImagePartData,
@@ -507,12 +507,15 @@ export async function confirmMockupRender(payload: Record<string, unknown>): Pro
     ? (payload.ink as InkVariant)
     : "main";
   const saved = await getPlacement(designId, mockupId);
-  const plan = await resolveRenderPlan({
+  const { plan, fp } = await resolveRenderPlanWithFingerprint({
     designId,
+    designAssetId: designAssetIdFor(design, ink),
     mockup,
     fallbackTransform: saved?.transform ?? null,
     // Only an explicit true forces behind-garment; otherwise the print area's
-    // clip mode (or the saved placement) decides.
+    // clip mode (or the saved placement) decides. The fingerprint hashes the
+    // same value, so an agent render made without the override can be adopted
+    // by the Listing images page just like a panel render.
     behindMockup:
       payload.behindMockup === true ? true : (saved?.behindMockup ?? null),
   });
@@ -524,6 +527,7 @@ export async function confirmMockupRender(payload: Record<string, unknown>): Pro
       transform: plan.transform,
       clip: plan.clip ?? null,
       behindMockup: plan.behindMockup,
+      renderFp: fp,
     });
     await logActivity("batch.item", `Agent made a mockup: “${design.name}” on “${mockup.name}”`, { assetId });
     return {

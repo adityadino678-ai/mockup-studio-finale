@@ -30,6 +30,11 @@ const ROUTES = [
   "/activity",
   "/settings",
   "/printify-studio",
+  // The three listing pages each hydrate their own view (and their own
+  // modules), so each one needs its own warm-up pass.
+  "/listing-images",
+  "/listing-details",
+  "/listing-preview",
 ];
 
 /** Utility pages that render outside the sidebar shell. */

@@ -1,0 +1,8 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { ListingDetailsRoute } from "@/routes/ListingDetailsRoute";
+---
+
+<AppLayout>
+  <ListingDetailsRoute client:only="react" />
+</AppLayout>

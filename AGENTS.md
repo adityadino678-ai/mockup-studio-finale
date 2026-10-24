@@ -9,12 +9,15 @@ A local-first print-on-demand workspace for sellers: upload artwork, place it on
 real Printify print area, map that area onto mockup photos, generate renders,
 create ink variants, remove backgrounds, and export verified ZIP archives.
 
-There are **eight pages** — `/` (a static redirect to the Studio), Printify
-Studio, Mockups, Export Center, Agent, Activity, Settings, and the Printify
-bookmarklet install page. The Designs, editor, Batch Studio, Templates, Product
-Builder, Listings and AI SEO screens were folded into those pages or removed;
-their engines (batch runner, compositor, Printify core, agent tools) are still
-here and still what the UI and the agent call.
+There are **eleven pages** — `/` (a static redirect to the Studio), Printify
+Studio, Mockups, Listing images, Listing details, Listing preview, Export
+Center, Agent, Activity, Settings, and the Printify bookmarklet install page.
+The Designs, editor, Batch Studio, Templates, Product Builder, Listings and AI
+SEO screens were folded into those pages or removed; their engines (batch
+runner, compositor, Printify core, agent tools) are still here and still what
+the UI and the agent call. The two listing tabs that used to live inside the
+Studio were promoted to their own pages (below), and the Studio went back to
+three tabs: Designs, Colors, Design panel.
 
 **The defining constraint: all user data lives in the visitor's own IndexedDB.**
 Nothing is synced, there is no account, and the server holds no user data. This
@@ -51,8 +54,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 357 unit tests
-npm run test:e2e      # 25 acceptance tests (local dev server)
+npm run test          # 383 unit tests
+npm run test:e2e      # 26 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -69,7 +72,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **8 static pages + 10 on-demand endpoints.** No page depends on request state,
+- **11 static pages + 11 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker. `/` is a static redirect (meta refresh plus
@@ -137,7 +140,12 @@ Re-run the spike after any Printify change.
   `POST /shops/{id}/products/{pid}/publish.json` with a body of **booleans**
   (`{title:true, description:true, images:true, variants:true, tags:true,
   keyFeatures:true, shipping_template:true}`) — each flag says "publish this
-  field". It is not a simple toggle.
+  field". It is not a simple toggle. `POST /api/printify/publish` is the server
+  half of that call: same-origin only, `application/json` only, requires
+  `confirm:true`, validates the product id, answers an honest 503 with no key,
+  and passes Printify's status and message through. It publishes an existing
+  product id only - the client sends the draft this app created for its own
+  listing.
 - `GET /shops/{id}/products.json` returns `{current_page, data:[…]}`, **not**
   `{products:[…]}`. `limit` may not exceed 50.
 - **The catalogue is a SUBSET of the product's variants.** Measured: blueprint
@@ -236,11 +244,20 @@ place the artwork, create one Printify product per design.
   Everything in there is a pure function with unit tests in
   `tests/studio-printify.test.ts` - the ONLY safety net, because CI has no
   Printify key.
-- `src/views/studio/` - the five tabs: Designs, Colors, Design panel,
-  Listing images, Listing details. The Design panel no longer owns title or
-  price; it owns placement and **Create on Printify**. Copy, tags and price
-  belong to the two Listing tabs because they apply per listing, not per
-  placement.
+- `src/views/studio/` - the three tabs: Designs, Colors, Design panel. The
+  Design panel no longer owns title or price; it owns placement and **Create
+  on Printify**. Copy, tags and price belong to the Listing pages because they
+  apply per listing, not per placement.
+- `src/views/listings/` - the three listing pages the two old Studio tabs
+  became (plus their shared `listing-catalog.ts` loader): **Listing images**
+  (`listing-images-view.tsx`, `/listing-images`), **Listing details**
+  (`listing-details-view.tsx`, `/listing-details`) and **Listing preview**
+  (`listing-preview-view.tsx`, `/listing-preview` — the Printify "My
+  products"-style preview with the confirm-gated Publish button). The engines
+  underneath are unchanged: `listing-plan`, `listing-drafts`,
+  `listing-render`, `renderComposition`, the send/bookmarklet bridge, and
+  `src/lib/server/printify.ts` (+ the new `/api/printify/publish` endpoint
+  for the final publish step, which sends the documented booleans body).
 - **The Designs tab absorbed the old Designs page.** Each card's "…" menu
   (`design-card.tsx`, labelled `Actions for <name>`) renames and tags
   (`edit-design-dialog.tsx`), creates ink variants (`ink-variants-dialog.tsx`,
@@ -276,10 +293,11 @@ Four things that are easy to get wrong, and were:
    fifty products. Created products are also written to `productDrafts`, so the
    Agent's artifact rail and the Export Center can see them.
 
-### Listing images and Listing details
+### Listing images, Listing details, Listing preview
 
-These two tabs turn the selected mockups and the bulk copy into local listing
-drafts - and, after the product exists, into the Printify product's mockups.
+These three pages turn the selected mockups and the bulk copy into local
+listing drafts - and, after the product exists, into the Printify product's
+mockups and finally a live product.
 
 - **One listing per design, or per pair.** `src/lib/printify/listing-plan.ts`
   is the single answer: only ticked designs are in scope, a complete pair is
@@ -291,22 +309,44 @@ drafts - and, after the product exists, into the Printify product's mockups.
   preview and render; the pair is emitted at the black half's slot even if the
   white half sorts first. Designs are ordered by `createdAt`, matching the
   product loop.
-- **Listing images**: `src/views/studio/listing-images-tab.tsx`. Every mockup
-  in the library is a tile for every listing. Ticks are kept in
-  `session.listingImages[listingId]` **in click order**, and the first tick is
-  the main image; the tile numbers show that order. "Select all" appends only
-  the missing ids; "Clear" removes the listing's selection and records
-  `session.listingImageCleared[listingId] = true`. That marker is the ONLY
-  signal that an empty selection was deliberate - an empty array alone means
-  "never configured". One **Save & render** renders every selected tile for
-  every listing, one at a time with live progress, and reuses a render only
-  when its fingerprint matches. The long render loop reads the latest session
-  from a ref before saving, so edits made on another tab mid-render are not
-  overwritten. The Listing images/details tab panels use `forceMount`, so
-  switching tabs does not discard an unsaved form.
+- **Listing images**: `src/views/listings/listing-images-view.tsx` (page
+  `/listing-images` — moved out of the Studio, rebuilt as one horizontal strip
+  of mockup tiles per design). Every design in the batch gets a row (plain and
+  ink), oldest first and numbered like the Mockups tabs; nothing is picked by
+  hand. Every mockup in the library is a tile for every listing.
+  - **A listing that was never configured starts with EVERY mockup included.**
+    An explicit `session.listingImages[listingId]` wins; the cleared marker
+    (`listingImageCleared`) records a deliberate empty selection; only those
+    two states are "configured". Before a render or a send, the page persists
+    the effective ids, so the drafts engine and the page agree about what will
+    be sent. "Include all" appends the missing ids; "Clear" persists the empty
+    selection; "Reset to all mockups" drops the explicit list and returns to
+    the default.
+  - **Long-press removal**: holding a tile (~500 ms, or right-click) starts a
+    removal set for that row; clicks then toggle marked tiles; "Remove N from
+    this listing" persists the effective selection minus the marked ones and
+    "Cancel" discards the set. Removed mockups are simply absent from the
+    selection, which is what keeps them out of Printify. The first included
+    tile is the main image (order badge + "main" chip).
+  - **Tiles show saved renders, not fresh guesses.** A tile adopts a
+    `mockup-render` asset from the Mockups panel whose recorded `renderFp`
+    equals the listing's current fingerprint (`render-adoption.ts`); only then
+    are its pixels provably what the listing would render. Missing renders say
+    "Not rendered" honestly. One **Save & render** adopts/reuses every current
+    render, renders the rest one at a time with live progress, and writes the
+    local listing drafts. The long render loop reads the latest session from a
+    ref before saving, so edits made on another page mid-render are not
+    overwritten.
+  - Designs that are in the library but not ticked for the batch appear in a
+    "Not in this batch" card with an explicit **Add to batch** button. They are
+    never added automatically: an empty tick list means NO products.
+  - The page is a real document, so an unsaved details form does not survive a
+    round-trip through it - it hydrates from the last SAVED session.
 - A listing render is the batch engine's `renderComposition`, stored as a
   `mockup-render` asset and keyed by `<listingId>:<mockupId>` in
-  `session.listingRenders`. The fingerprint in
+  `session.listingRenders`. `renderComposition` also stores the fingerprint as
+  `renderFp` on the asset's meta, which is what lets the Listing images page
+  adopt a render made in the Mockups panel or by the agent. The fingerprint in
   `src/lib/printify/listing-render.ts` covers the design asset, the mockup
   asset/dimensions, the pixel-affecting print-area fields (`areaWidth`,
   `areaHeight`, `frame`, `crop`, `clipMode`), the Studio placement, the saved
@@ -322,16 +362,49 @@ drafts - and, after the product exists, into the Printify product's mockups.
   **black owner's** draft for copy and images; when the owner locked its image
   selection, the white half does not export its own fallback renders and adds
   a note pointing at the owner folder instead.
-- **Listing details**: `src/views/studio/listing-details-tab.tsx`. One title
-  template, description, tag list, category/quantity and price rule for the
-  batch. `{design}` and `{product}` expand per listing; tags are capped at 13
-  of 20 characters; price is either one fixed value for every listing or a
-  custom value per listing. Custom prices are explicitly required - there is no
-  silent fallback to the old fixed price, and the card says "Set a price" until
-  one is entered. Price input accepts `24.99` or `24,99` but rejects ambiguous
-  values such as `12.99.00` and `1e3`. A price applies to **every variant** of
-  the product, which is what Printify requires. Save writes the session and all
-  listing drafts together.
+- **Listing details**: `src/views/listings/listing-details-view.tsx` (page
+  `/listing-details`). Numbered per-design tabs (same oldest-first numbering as
+  the Mockups panel) with a SMALL design card beside a dominant form.
+  - **Per-design by default.** The form edits the open listing and saves only
+    that listing's draft (title/description/tags/category/quantity) plus its
+    own price override in `session.listingPrices`; it must never rewrite the
+    other designs' drafts. A design that was never individually edited shows
+    its batch-template expansion, so the form shows what WILL be sent.
+  - **"Apply to every design" starts OFF.** Turning it on writes the batch
+    templates (`titleTemplate`, `descriptionTemplate`, `tags`, `priceMode`,
+    `priceCents`, `listingPrices`, `category`, `quantity`) and regenerates
+    every active listing's draft from them - the old bulk save's semantics,
+    per-design price overrides included in what it replaces.
+  - `{design}` and `{product}` expand per listing; tags are capped at 13 of 20
+    characters; price is either one fixed value for every listing or a custom
+    value per listing. Custom prices are explicitly required - there is no
+    silent fallback to the old fixed price, and the card says "Set a price"
+    until one is entered. Price input accepts `24.99` or `24,99` but rejects
+    ambiguous values such as `12.99.00` and `1e3`. A price applies to **every
+    variant** of the product, which is what Printify requires.
+- **Listing preview**: `src/views/listings/listing-preview-view.tsx` (page
+  `/listing-preview`). The same numbered tabs, then a Printify "My products"
+  style layout: the effective selection's first image as the MAIN image with
+  the rest as thumbnails (session renders or fingerprint-adopted assets),
+  expanded title, price, description, tag chips, meta rows, and a "What
+  Printify gets" checklist that fails honestly and links to the page that
+  fixes each miss.
+  - **Publish is one confirm-gated pipeline, reusing the existing engines:**
+    create the product draft if this listing has none (the same path
+    `confirmPrintifyProduct` uses), upload the listing's selected renders
+    through `/api/printify/mockups`, hand the mockup SELECTION step to the
+    clipboard/bookmarklet bridge (only a printify.com tab can write it), then
+    `POST /api/printify/publish` with `{confirm:true, productId}`. Any failure
+    stops the pipeline and shows the upstream message verbatim; a publish is
+    never retried automatically, because publishing an already-published
+    product errors upstream. The page never publishes a product this app did
+    not create or link for that listing.
+  - A **pair** is created in the Studio, not here: `confirmPrintifyProduct`
+    takes one artwork, while a pair's product needs both halves' print-area
+    groups from the Studio's own loop. The preview says so and links to
+    `/printify-studio`; once the pair's product exists it links and publishes
+    normally. Placement is not forwarded by that creation path either, so a
+    non-default scale warns before creating a centred draft.
 - **Draft locking is deliberate.** `src/lib/printify/listing-drafts.ts` writes
   one `ListingDraft` per listing, links the newest `ProductDraft`, and stores
   only asset ids that still exist. Before locking, it recomputes each render's
@@ -342,6 +415,13 @@ drafts - and, after the product exists, into the Printify product's mockups.
   preserves the previous image state. A global save therefore cannot wipe
   every listing the user has not configured yet. Product creation saves drafts
   with `lockSelection:false`; an existing locked selection stays locked.
+  **Copy is protected the same way, through `copyMode`.** `regenerate` is the
+  Listing details page's explicit write (the form or the batch templates are
+  the source of truth); `preserve` is the default for every incidental save -
+  image selections, a placement fix, product creation - and keeps the title,
+  description, tags, category and quantity already written for that design. A
+  listing with no draft yet is seeded from the templates in either mode, so
+  "per-design" never means "blank".
   Draft rows are read newest-first by `updatedAt`, not `createdAt`, so a
   re-saved draft is the one that wins. When the user swaps a pair's black/white
   roles, `remapListingState` moves images, clears, prices and renders to the
@@ -508,18 +588,24 @@ mockup photo, so the mockup shows what the product actually gets.
 - `src/lib/mockups/propagate.ts` owns applying one area to many mockups. The
   default inside a design tab is **All mockups of this type** — the workflow is
   "place it on one photo, save, next design" — and "This mockup only" and "All
-  mockups" are explicit choices. When copying, the frame, size, source, label
-  and clip mode travel; crop and garment reference stay per photo, because a
-  folded shirt and a flat-lay need different windows even when the design sits
-  in the same place. A mockup uploaded LATER starts with no area; one re-save
-  on any sibling of its type brings it in line.
+  mockups" are explicit choices. When copying, the frame, size, source, label,
+  clip mode AND the visible window (crop) travel; only the garment reference
+  (the inches measurement) stays per photo, because a line drawn across one
+  garment says nothing about another photo. A whole-area save clears a
+  sibling's stale crop — that is what "crop follows the frame" means. A
+  mockup uploaded LATER starts with no area; one re-save on any sibling of
+  its type brings it in line.
 - `src/components/mockups/print-area-canvas.tsx` is the Konva canvas (lazy
   loaded). `src/views/mockups/print-areas-tab.tsx` is the screen.
 
-**The workspace is organised as one TAB PER DESIGN** (newest first, a
-horizontally scrollable strip — the searchable `DesignPicker` dropdown it
-replaced was deleted). Everything in the tab — canvas, frame, controls,
-renders — is that design only:
+**The workspace is organised as one TAB PER DESIGN** — small numbered pills
+(1, 2, 3…), oldest design first so **tab 1 = the first uploaded**, matching
+the Studio's design order and the product-creation loop. The design NAME
+lives in the tab's tooltip/`aria-label` (tests and screen readers address
+tabs by name) and the active design's name shows in the context line above
+the canvas — the only place it is visible. The searchable `DesignPicker`
+dropdown these replaced was deleted. Everything in the tab — canvas, frame,
+controls, renders — is that design only:
 
 - A design owns ONE placement in the Studio (`placements[designId]`, falling
   back to `universalPlacement` until it is first edited). Every mockup with a
@@ -730,7 +816,7 @@ position pickers here:
   print-area templates; Product Builder → the Studio's Design panel; Listings
   and AI SEO → the agent's `draft_listing`. Their engines
   (`lib/batch/runner.ts`, `lib/canvas/compose.ts`, `lib/printify/*`,
-  `lib/client/tools.ts`, all ten `/api/*` endpoints) are untouched, because the
+  `lib/client/tools.ts`, all eleven `/api/*` endpoints) are untouched, because the
   UI and the agent still call them. Accepted losses: there is no batch-job list
   screen (the renders land in the Export Center, and a batch row in the artifact
   rail is inert) and no free-form canvas editor.

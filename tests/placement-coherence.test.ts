@@ -290,7 +290,7 @@ describe("print-area propagation", () => {
     expect(savedSibling.printArea?.areaWidth).toBe(1200);
   });
 
-  it("copies the frame to siblings but keeps their own crop and reference", async () => {
+  it("copies the frame and crop to siblings but keeps their own reference", async () => {
     const sourceCrop = { x: 0, y: 0, width: 1, height: 0.55 };
     const siblingCrop = { x: 0.1, y: 0, width: 0.8, height: 1 };
     const source = mockup(
@@ -334,11 +334,13 @@ describe("print-area propagation", () => {
     // The source keeps the crop the user just edited...
     expect(savedSource.printArea?.crop).toEqual(draft.crop);
     expect(savedSource.printArea?.frame).toEqual(draft.frame);
-    // ...a sibling gets the same frame and size but keeps its own window and
-    // reference, because those describe the photo, not the placement.
+    // ...and a sibling gets the same frame, size AND visible window: the crop
+    // follows the frame, so the old window that fitted the sibling's old frame
+    // is replaced. The reference is the one thing that stays per photo, because
+    // the inches measurement describes the sibling's own photo.
     expect(savedSibling.printArea?.frame).toEqual(draft.frame);
     expect(savedSibling.printArea?.areaWidth).toBe(1500);
-    expect(savedSibling.printArea?.crop).toEqual(siblingCrop);
+    expect(savedSibling.printArea?.crop).toEqual(draft.crop);
     expect(savedSibling.printArea?.reference?.inches).toBe(20);
     // The mug is untouched by a t-shirt save.
     expect(savedMug.printArea?.areaWidth).toBe(1200);

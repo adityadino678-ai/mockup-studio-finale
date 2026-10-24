@@ -90,9 +90,21 @@ export async function saveStudioListingDrafts(params: {
    * stays locked.
    */
   lockSelection?: boolean;
+  /**
+   * Whether this save's COPY (title/description/tags/category/quantity) is
+   * the source of truth.
+   *
+   * `regenerate` is the Listing details page writing: the templates or the
+   * per-design form were just edited, so the draft must change to match them.
+   * `preserve` (the default) is every incidental save - image selections, a
+   * placement fix, product creation - and must NOT throw away copy the user
+   * wrote per design. A listing with no draft yet still gets the templates.
+   */
+  copyMode?: "regenerate" | "preserve";
 }): Promise<SaveListingDraftsResult> {
   const { session, listings, productName } = params;
   const lockSelection = params.lockSelection ?? true;
+  const preserveCopy = (params.copyMode ?? "preserve") === "preserve";
   const now = Date.now();
   let created = 0;
   let updated = 0;
@@ -144,21 +156,29 @@ export async function saveStudioListingDrafts(params: {
     const products = await db.productDrafts.where("designId").equals(listing.listingId).toArray();
     const product = products.sort((a, b) => b.createdAt - a.createdAt)[0];
 
-    const title = renderTitle(session.titleTemplate, listing.designName, productName);
+    const generatedTitle = renderTitle(session.titleTemplate, listing.designName, productName);
+    const generatedDescription = renderTemplate(
+      session.descriptionTemplate,
+      listing.designName,
+      productName,
+      "",
+      5000,
+    );
+    const generatedTags = parseTags(session.tags);
+    const generatedCategory = session.category?.trim() || undefined;
+    const generatedQuantity =
+      session.quantity && session.quantity > 0 ? Math.round(session.quantity) : 1;
+    // `preserve` keeps what the user wrote for THIS design; it only applies to
+    // a draft that already exists. A first save still seeds from the templates.
+    const keepCopy = preserveCopy && Boolean(existing);
     const draft: ListingDraft = {
       id: existing?.id ?? uid(),
-      title,
-      description: renderTemplate(
-        session.descriptionTemplate,
-        listing.designName,
-        productName,
-        "",
-        5000,
-      ),
-      tags: parseTags(session.tags),
-      category: session.category?.trim() || undefined,
+      title: keepCopy && existing ? existing.title : generatedTitle,
+      description: keepCopy && existing ? existing.description : generatedDescription,
+      tags: keepCopy && existing ? existing.tags : generatedTags,
+      category: keepCopy && existing ? existing.category : generatedCategory,
       priceCents: priceForListing(session, listing.listingId),
-      quantity: session.quantity && session.quantity > 0 ? Math.round(session.quantity) : 1,
+      quantity: keepCopy && existing ? existing.quantity : generatedQuantity,
       productDraftId: product?.id ?? existing?.productDraftId,
       designId: listing.listingId,
       imageAssetIds: imageState.imageAssetIds,

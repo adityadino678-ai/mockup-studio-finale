@@ -1,0 +1,8 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro";
+import { ListingImagesRoute } from "@/routes/ListingImagesRoute";
+---
+
+<AppLayout>
+  <ListingImagesRoute client:only="react" />
+</AppLayout>

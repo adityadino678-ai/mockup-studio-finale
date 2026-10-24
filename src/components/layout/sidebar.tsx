@@ -7,8 +7,11 @@ import { cn } from "@/lib/utils";
 import {
   Aperture,
   Bot,
+  ClipboardList,
+  Eye,
   FileArchive,
   History,
+  Images,
   Settings as SettingsIcon,
   Shapes,
   Shirt,
@@ -31,8 +34,9 @@ interface NavGroup {
  * Small on purpose: the eight tools that used to sit beside these (the
  * Designs library, the mockup editor, the batch runner, templates, the
  * Product Builder, listings, the SEO studio and the overview) were folded
- * into the Printify Studio, the Mockups page or the agent. A new page here
- * should replace one of these, not extend the list.
+ * into the Printify Studio, the Mockups page or the agent. The three Listing
+ * pages are the one deliberate addition since: they were Studio tabs and
+ * moved out so the Studio stays about designs, colours and placement.
  */
 const NAV: NavGroup[] = [
   {
@@ -40,6 +44,9 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/printify-studio", label: "Printify Studio", icon: <Shirt className="h-4 w-4" /> },
       { href: "/mockups", label: "Mockups", icon: <Shapes className="h-4 w-4" /> },
+      { href: "/listing-images", label: "Listing images", icon: <Images className="h-4 w-4" /> },
+      { href: "/listing-details", label: "Listing details", icon: <ClipboardList className="h-4 w-4" /> },
+      { href: "/listing-preview", label: "Listing preview", icon: <Eye className="h-4 w-4" /> },
     ],
   },
   {

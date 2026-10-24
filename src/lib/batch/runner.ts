@@ -59,6 +59,13 @@ export async function renderComposition(params: {
    * preview's clip here so an unsaved frame cannot produce a different cut.
    */
   clip?: RotatedRect | null;
+  /**
+   * The caller's render fingerprint (see `computeRenderFingerprint` in
+   * listing-render.ts), stored on the created asset's meta alongside the
+   * parentId/source fields. Absent = the asset is written exactly as before,
+   * so existing callers and tests stay valid.
+   */
+  renderFp?: string;
 }): Promise<string> {
   const mockup = await db.mockups.get(params.mockupId);
   if (!mockup) throw new Error("Mockup no longer exists");
@@ -97,6 +104,11 @@ export async function renderComposition(params: {
         parentId: params.designAssetId,
         sourceDesignId: params.designId,
         sourceMockupId: params.mockupId,
+        // The fingerprint travels on the same meta record as the parentId and
+        // source ids, so a render made here can later be ADOPTED by matching
+        // it instead of re-rendering. It is deliberately NOT indexed — it is
+        // only read with the record.
+        ...(params.renderFp !== undefined ? { renderFp: params.renderFp } : {}),
       },
     );
     return asset.id;
