@@ -9,8 +9,9 @@ import {
 } from "@/lib/db/repo";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
 import { composeToCanvas } from "@/lib/canvas/compose";
-import { clipFor, printAreaOf } from "@/lib/mockups/print-area";
+import { clipFor, printAreaOf, type RotatedRect } from "@/lib/mockups/print-area";
 import { transformFromPrintArea } from "@/lib/mockups/resolve";
+import { resolveRenderPlan } from "@/lib/mockups/render-plan";
 import {
   DEFAULT_TRANSFORM,
   type BatchItem,
@@ -50,6 +51,14 @@ export async function renderComposition(params: {
   designAssetId: string;
   transform: Transform;
   behindMockup?: boolean;
+  /**
+   * The clip the caller resolved from the SAME snapshot as `transform`.
+   *
+   * `undefined` keeps the old behaviour (read the mockup's saved area);
+   * `null` means "no clip"; a value is used verbatim. Save render passes the
+   * preview's clip here so an unsaved frame cannot produce a different cut.
+   */
+  clip?: RotatedRect | null;
 }): Promise<string> {
   const mockup = await db.mockups.get(params.mockupId);
   if (!mockup) throw new Error("Mockup no longer exists");
@@ -65,9 +74,12 @@ export async function renderComposition(params: {
     // A mockup with a print area clips the design to it: whatever falls
     // outside the printable area is not on the product either.
     const area = printAreaOf(mockup);
-    const clip = area
-      ? clipFor(area, area.frame, mockup.width, mockup.height)
-      : undefined;
+    const clip =
+      params.clip !== undefined
+        ? (params.clip ?? undefined)
+        : area
+          ? clipFor(area, area.frame, mockup.width, mockup.height)
+          : undefined;
     const composed = composeToCanvas(canvas, mockupBmp, designBmp, params.transform, {
       drawDesignFirst: params.behindMockup ?? area?.clipMode === "behind-garment",
       clip,
@@ -95,13 +107,28 @@ export async function renderComposition(params: {
 }
 
 async function renderItem(item: BatchItem): Promise<string> {
-  const placement = await getPlacement(item.designId, item.mockupId);
+  const mockup = await db.mockups.get(item.mockupId);
+  if (!mockup) throw new Error("Mockup no longer exists");
+  const saved = await getPlacement(item.designId, item.mockupId);
+  // Re-resolve at render time. A batch item stores a transform, but a print
+  // area may have been edited since the job was created; using the stored
+  // transform with a freshly-read clip is exactly the mismatch this prevents.
+  const plan = await resolveRenderPlan({
+    designId: item.designId,
+    mockup,
+    fallbackTransform: saved?.transform ?? item.transform,
+    behindMockup: saved?.behindMockup,
+  });
   return renderComposition({
     designId: item.designId,
     mockupId: item.mockupId,
     designAssetId: item.designAssetId,
-    transform: item.transform,
-    behindMockup: placement?.behindMockup ?? false,
+    transform: plan.transform,
+    // `null`, not `undefined`: the plan is the single snapshot, so a caller
+    // that explicitly resolved "no area" must not make the compositor re-read
+    // a stored one.
+    clip: plan.clip ?? null,
+    behindMockup: plan.behindMockup,
   });
 }
 

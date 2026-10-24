@@ -345,7 +345,7 @@ test.describe("core workflow", () => {
         const r = indexedDB.open("mockup-studio");
         r.onsuccess = () => res(r.result);
       });
-      const metas: Array<{ id: string }> = await new Promise((res) => {
+      const metas: Array<{ id: string; sourceMockupId?: string }> = await new Promise((res) => {
         const rq = db
           .transaction(["assets"], "readonly")
           .objectStore("assets")
@@ -359,6 +359,7 @@ test.describe("core workflow", () => {
         rq.onsuccess = () => res(rq.result.blob);
       });
       const mockups: Array<{
+        id: string;
         width: number;
         height: number;
         printArea?: {
@@ -378,7 +379,13 @@ test.describe("core workflow", () => {
       ctx.drawImage(bmp, 0, 0);
       const px = (x: number, y: number) => Array.from(ctx.getImageData(x, y, 1, 1).data);
 
-      const mockup = mockups.find((m) => m.printArea);
+      // Every mockup of the same type now has the same area, so "the first one
+      // with an area" is not necessarily the one this render was made on. The
+      // asset records its source mockup; use that, or the frame maths below
+      // samples the wrong photo.
+      const mockup =
+        mockups.find((m) => m.id === metas[0].sourceMockupId) ??
+        mockups.find((m) => m.printArea);
       if (!mockup) return { found: false as const, reason: "no print area" };
       const area = mockup.printArea!;
       // The area's frame in photo pixels.
@@ -425,15 +432,21 @@ test.describe("core workflow", () => {
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
     await page.getByRole("button", { name: /^Save$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Print area saved/)).toBeHidden({ timeout: 20_000 });
     await page.getByRole("button", { name: /Save render/ }).click();
     await expect(page.getByText(/Mockup render saved/)).toBeVisible({ timeout: 60_000 });
     // Wait for the toast to go before the next render, or its assertion would
     // pass on the first one's toast and the export would run too early.
     await expect(page.getByText(/Mockup render saved/)).toBeHidden({ timeout: 20_000 });
 
+    // Saving a print area applies it to every mockup of the same type by
+    // default. The sibling should therefore already show the front preset -
+    // this is the cross-mockup coherence rule, not a preset default.
+    await page.getByRole("button", { name: /mockup-b/ }).click();
+    await expect(page.getByText("Tee · DTG front")).toBeVisible({ timeout: 30_000 });
+
     // The other mockup: a different preset, because a Select does not fire
     // when its value has not changed.
-    await page.getByRole("button", { name: /mockup-b/ }).click();
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG back/ }).click();
     await page.getByRole("button", { name: /^Save$/ }).click();
@@ -845,7 +858,10 @@ test.describe("core workflow", () => {
 
     await page.reload();
     await page.getByRole("button", { name: /^Print areas/ }).click();
-    await expect(page.getByText("4500×5400")).toBeVisible({ timeout: 30_000 });
+    // The spaced readout belongs to the selected mockup's area card; the list
+    // badges are the compact "4500×5400" form and now appear on every mockup of
+    // the same type, because the save propagated by default.
+    await expect(page.getByText("4500 × 5400 px")).toBeVisible({ timeout: 30_000 });
   });
 
   test("17. the print area is a frame that carries the design", async ({ page }) => {
@@ -1061,6 +1077,9 @@ test.describe("core workflow", () => {
     await page.getByRole("button", { name: /^Save$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1200);
+    // Let the first toast go: the crop save below raises a second, identical
+    // one, and a strict-text assertion would then match both.
+    await expect(page.getByText(/Print area saved/)).toBeHidden({ timeout: 20_000 });
 
     const designInk = () =>
       page.evaluate(() => {
@@ -1279,6 +1298,59 @@ test.describe("core workflow", () => {
       page.getByRole("heading", { name: "Printify mockup bookmarklet" }),
     ).toBeVisible();
     await expect(page.locator("#bookmarklet-source")).toHaveValue(/^javascript:/);
+  });
+
+  test("23. the print-area design picker lists every design, not just the first eight", async ({
+    page,
+  }) => {
+    await seedLibrary(page);
+
+    // The old picker was a 16rem-tall Select: about eight rows, alphabetical,
+    // with a hidden scrollbar. Add twelve designs whose names sort LAST, so a
+    // capped list would hide exactly the ones a user just uploaded.
+    await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const designs = await new Promise<Array<Record<string, unknown>>>((res) => {
+        const rq = db
+          .transaction(["designs"], "readonly")
+          .objectStore("designs")
+          .getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const base = designs[0];
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction(["designs"], "readwrite");
+        tx.oncomplete = () => res();
+        tx.onerror = () => rej(tx.error);
+        const store = tx.objectStore("designs");
+        for (let i = 1; i <= 12; i += 1) {
+          const now = Date.now() + i;
+          store.put({
+            ...base,
+            id: `design-late-${i}`,
+            name: `zz-late-${String(i).padStart(2, "0")}`,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      });
+    });
+
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.locator("#area-design").waitFor({ timeout: 30_000 });
+    await page.locator("#area-design").click();
+
+    // Two uploaded designs plus twelve seeded ones, and the count proves the
+    // picker is reading the whole table rather than a truncated page.
+    await expect(page.getByText("14 of 14 designs")).toBeVisible({ timeout: 15_000 });
+    await page.getByPlaceholder("Search designs…").fill("zz-late-12");
+    await expect(page.getByText("1 of 14 designs")).toBeVisible();
+    await page.getByRole("option", { name: /zz-late-12/ }).click();
+    await expect(page.locator("#area-design")).toContainText("zz-late-12");
   });
 });
 

@@ -51,8 +51,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 346 unit tests
-npm run test:e2e      # 24 acceptance tests (local dev server)
+npm run test          # 354 unit tests
+npm run test:e2e      # 25 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -251,7 +251,10 @@ place the artwork, create one Printify product per design.
   button does, with an explicit id - there is no separate dialog, because a
   second remover was how the two paths drifted apart before.
 - The session is one blob in the `settings` table (`printifyStudio:session`).
-  It survives a reload without a schema migration.
+  It survives a reload without a schema migration. The Studio, the Mockups
+  panel and the agent all write it, so the Studio's auto-save merges the
+  latest stored blob and only overrides the fields this tab actually edited;
+  saving the whole local copy used to put a stale placement back.
 
 Four things that are easy to get wrong, and were:
 
@@ -496,8 +499,38 @@ mockup photo, so the mockup shows what the product actually gets.
   the area list derived from the catalogue, the physical sizes, and the
   template payload. No DOM, no React, no IndexedDB - so it is unit-tested on
   its own.
+- `src/lib/mockups/render-plan.ts` is the ONE resolver for a render. It takes a
+  single mockup snapshot and returns the placement, transform AND clip, so the
+  preview, Save render, batch renders, listing renders and the agent cannot
+  disagree about which frame was on screen. Callers pass `clip: plan.clip ??
+  null`; `null` is authoritative ("no area"), while `undefined` would make the
+  compositor re-read storage.
+- `src/lib/mockups/propagate.ts` owns applying one area to many mockups. The
+  default is **same category**; "This mockup only" and "All mockups" are
+  explicit choices. The frame, size, source, label and clip mode travel; crop
+  and garment reference stay per photo, because a folded shirt and a flat-lay
+  need different windows even when the design sits in the same place.
+- `src/components/mockups/design-picker.tsx` is the Mockups design picker:
+  searchable, newest first, with a count, and it lists every design. The old
+  Radix `Select` was height-capped, so a newly uploaded design could look like
+  it came from an old version of the app.
 - `src/components/mockups/print-area-canvas.tsx` is the Konva canvas (lazy
   loaded). `src/views/mockups/print-areas-tab.tsx` is the screen.
+
+**One save reaches every mockup of the type, and one placement reaches every
+design.** The panel's defaults are `All <category> mockups` for the frame and
+`All designs` for the Studio placement. `This design` is the explicit override,
+and it turns the Studio's universal mode off, just like the Studio's own
+"Apply to this design". Saves are debounced and auto-saved; leaving the panel
+or switching mockups flushes a pending draft. The session is read with a LIVE
+query, so a placement written in the Studio or by the agent appears here
+without a reload. Repeated saves reuse one toast id instead of stacking
+identical notifications.
+
+A mockup with no area of its own starts from the most recently updated sibling
+in the same category. That inherited draft is auto-saved, so a newly uploaded
+photo is never blank and the other photos already have the same frame when the
+Studio's **Save & render** runs.
 
 **The print area is a FRAME that carries the design.**
 That is the whole design, and it is deliberate:
@@ -557,8 +590,9 @@ position pickers here:
   Center. It is the same call the agent's `create_mockup_render` makes, so a
   saved render and an agent render are pixel-identical, and it clips to the
   print area and its window.
-- `Set as the placeholder for all designs` drops the per-design Studio
-  overrides, so every design lands at the Studio's universal placement.
+- `Set as the placeholder for all designs` promotes the placement currently on
+  screen into the Studio's universal placement AND drops the per-design
+  overrides, so every design lands at that one spot inside the area.
 
 **Traps in this feature:**
 

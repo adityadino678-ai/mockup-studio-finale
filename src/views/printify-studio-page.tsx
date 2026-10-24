@@ -45,6 +45,19 @@ export interface StudioCatalogState {
 export function PrintifyStudioPage() {
   const [session, setSession] = React.useState<StudioSession>(() => emptySession());
   const [loaded, setLoaded] = React.useState(false);
+  /**
+   * Fields this tab has edited since the last save.
+   *
+   * The session is one blob written by the Studio, the Mockups panel and the
+   * agent. Saving the whole local copy after a Mockups placement edit would
+   * silently put the old placement back. This set lets the save merge the
+   * latest stored session: local keys win only when this tab actually changed
+   * them, everything else comes from storage.
+   */
+  const dirtyKeys = React.useRef<Set<keyof StudioSession>>(new Set());
+  /** The latest local session, for an async save that started earlier. */
+  const sessionRef = React.useRef(session);
+  sessionRef.current = session;
   const [tab, setTab] = React.useState<StudioTab>("designs");
   const [catalog, setCatalog] = React.useState<StudioCatalogState>({
     configured: true,
@@ -73,22 +86,53 @@ export function PrintifyStudioPage() {
   React.useEffect(() => {
     if (!loaded) return;
     const timer = setTimeout(() => {
-      void saveSession(session).catch(() => toast.error("Could not save the studio session"));
+      void (async () => {
+        // Snapshot before the await: a key edited while the load is in
+        // flight must stay dirty for the next save.
+        const saving = new Set(dirtyKeys.current);
+        if (saving.size === 0) return;
+        try {
+          const latest = await loadSession();
+          const merged: StudioSession = { ...latest };
+          for (const key of Object.keys(session) as Array<keyof StudioSession>) {
+            if (saving.has(key)) {
+              (merged as unknown as Record<string, unknown>)[key] = session[key];
+            }
+          }
+          merged.updatedAt = Date.now();
+          await saveSession(merged);
+          // Only clear the keys whose local value this save actually wrote.
+          // A newer edit (e.g. a placement changed while this was loading)
+          // keeps its key dirty and is saved by the next effect.
+          const current = sessionRef.current;
+          for (const key of saving) {
+            if (Object.is(current[key], session[key])) dirtyKeys.current.delete(key);
+          }
+        } catch {
+          toast.error("Could not save the studio session");
+        }
+      })();
     }, 400);
     return () => clearTimeout(timer);
   }, [session, loaded]);
 
-  const update = React.useCallback((patch: Partial<StudioSession>) => {
-    setSession((prev) => ({ ...prev, ...patch, updatedAt: Date.now() }));
+  const markDirty = React.useCallback((keys: Array<keyof StudioSession>) => {
+    for (const key of keys) dirtyKeys.current.add(key);
   }, []);
 
+  const update = React.useCallback((patch: Partial<StudioSession>) => {
+    markDirty(Object.keys(patch) as Array<keyof StudioSession>);
+    setSession((prev) => ({ ...prev, ...patch, updatedAt: Date.now() }));
+  }, [markDirty]);
+
   const updateRow = React.useCallback((row: StudioRowId, patch: Partial<StudioSession["rows"][StudioRowId]>) => {
+    markDirty(["rows"]);
     setSession((prev) => ({
       ...prev,
       rows: { ...prev.rows, [row]: { ...prev.rows[row], ...patch } },
       updatedAt: Date.now(),
     }));
-  }, []);
+  }, [markDirty]);
 
   // --- catalogue -------------------------------------------------------------
   React.useEffect(() => {
@@ -168,6 +212,8 @@ export function PrintifyStudioPage() {
           if (colour) colourNames.add(colour);
           if (size) sizeNames.add(size);
         }
+        dirtyKeys.current.add("rows");
+        dirtyKeys.current.add("sizes");
         setSession((prev) => {
           const droppedColors: string[] = [];
           const droppedSizes: string[] = [];

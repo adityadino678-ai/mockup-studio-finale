@@ -10,10 +10,8 @@
 
 import { getPlacement } from "@/lib/db/repo";
 import { renderComposition } from "@/lib/batch/runner";
-import {
-  mapStudioPlacement,
-  printAreaOf,
-} from "@/lib/mockups/print-area";
+import { printAreaOf } from "@/lib/mockups/print-area";
+import { resolveRenderPlan } from "@/lib/mockups/render-plan";
 import type {
   Design,
   Mockup,
@@ -129,7 +127,6 @@ export async function renderListingMockup(params: {
   placement: StudioPlacement;
 }): Promise<{ assetId: string; fingerprint: string }> {
   const designAssetId = params.listing.artworkAssetId;
-  const area = printAreaOf(params.mockup);
   const saved = await getPlacement(params.design.id, params.mockup.id);
   const fingerprint = listingImageFingerprint({
     listing: params.listing,
@@ -138,24 +135,21 @@ export async function renderListingMockup(params: {
     saved,
   });
 
-  const transform = area
-    ? mapStudioPlacement(
-        params.placement,
-        area,
-        area.frame,
-        params.mockup.width,
-        params.mockup.height,
-      )
-    : (saved?.transform ?? DEFAULT_TRANSFORM);
+  const plan = await resolveRenderPlan({
+    designId: params.design.id,
+    mockup: params.mockup,
+    placementOverride: params.placement,
+    fallbackTransform: saved?.transform ?? DEFAULT_TRANSFORM,
+    behindMockup: saved?.behindMockup,
+  });
 
   const assetId = await renderComposition({
     designId: params.design.id,
     mockupId: params.mockup.id,
     designAssetId,
-    transform: { ...transform },
-    // `undefined` lets a print area's behind-garment mode apply; an explicit
-    // saved placement still wins when the user chose one for this mockup.
-    behindMockup: saved?.behindMockup,
+    transform: { ...plan.transform },
+    clip: plan.clip ?? null,
+    behindMockup: plan.behindMockup,
   });
 
   return { assetId, fingerprint };

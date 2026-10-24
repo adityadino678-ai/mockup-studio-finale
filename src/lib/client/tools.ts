@@ -30,6 +30,13 @@ import {
 import { createInkVariantBlob } from "@/lib/canvas/compose";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
 import { removeBackgroundAuto } from "@/lib/printify/remove-background";
+import { loadSession } from "@/lib/printify/studio-session";
+import {
+  printAreaOf,
+  studioPlacementFromTransform,
+} from "@/lib/mockups/print-area";
+import { writeBackStudioPlacement } from "@/lib/mockups/resolve";
+import { resolveRenderPlan } from "@/lib/mockups/render-plan";
 import {
   DEFAULT_TRANSFORM,
   type ImagePartData,
@@ -192,16 +199,32 @@ function explainHowto(args: Record<string, unknown>): ToolExecResult {
 }
 
 async function summarizeWorkspace(): Promise<ToolExecResult> {
-  const [designs, mockups, renders, jobs, exports, listings] = await Promise.all([
-    db.designs.count(),
-    db.mockups.count(),
-    db.assets.where("kind").equals("mockup-render").count(),
-    db.batchJobs.count(),
-    db.exports.count(),
-    db.listingDrafts.count(),
-  ]);
-  const counts = { designs, mockups, renders, batchJobs: jobs, exports, listingDrafts: listings };
-  const summary = `${designs} designs · ${mockups} mockups · ${renders} renders · ${jobs} batch jobs`;
+  const [designs, mockups, renders, jobs, exports, listings, mockupRows, session] =
+    await Promise.all([
+      db.designs.count(),
+      db.mockups.count(),
+      db.assets.where("kind").equals("mockup-render").count(),
+      db.batchJobs.count(),
+      db.exports.count(),
+      db.listingDrafts.count(),
+      db.mockups.toArray(),
+      loadSession(),
+    ]);
+  const withAreas = mockupRows.filter((m) => printAreaOf(m)).length;
+  const counts = {
+    designs,
+    mockups,
+    mockupsWithPrintAreas: withAreas,
+    renders,
+    batchJobs: jobs,
+    exports,
+    listingDrafts: listings,
+    studioPlacements: Object.keys(session.placements).length,
+    studioUniversalPlacement: session.universal,
+    listingRenders: Object.keys(session.listingRenders ?? {}).length,
+    studioProductSelected: Boolean(session.blueprintId && session.printProviderId),
+  };
+  const summary = `${designs} designs · ${mockups} mockups (${withAreas} with print areas) · ${renders} renders · ${jobs} batch jobs`;
   return { summary, result: counts };
 }
 
@@ -214,7 +237,22 @@ async function listLibrary(args: Record<string, unknown>): Promise<ToolExecResul
     const items = all
       .filter((m) => match(m.name))
       .slice(0, 50)
-      .map((m) => ({ id: m.id, name: m.name, category: m.category }));
+      .map((m) => {
+        const area = printAreaOf(m);
+        return {
+          id: m.id,
+          name: m.name,
+          category: m.category,
+          printArea: area
+            ? {
+                width: area.areaWidth,
+                height: area.areaHeight,
+                position: area.source.kind === "studio" ? area.source.position : null,
+                clipMode: area.clipMode,
+              }
+            : null,
+        };
+      });
     return {
       summary: `${items.length} mockup${items.length === 1 ? "" : "s"}${query ? ` matching “${query}”` : ""}`,
       result: { kind: "mockups", items },
@@ -433,12 +471,17 @@ async function proposeMockupRender(args: Record<string, unknown>): Promise<ToolE
     ? (args.ink as InkVariant)
     : "main";
   const behindMockup = args.behindMockup === true;
+  const area = printAreaOf(mockup);
   return {
     summary: `Ready to place “${design.name}” on “${mockup.name}” (${ink} ink)`,
     confirmation: {
-      detail: `Composite “${design.name}” onto “${mockup.name}” with its saved placement (or the default), ${ink} ink${
-        behindMockup ? ", drawn behind the mockup" : ""
-      }.`,
+      detail: area
+        ? `Composite “${design.name}” onto “${mockup.name}” with its print area and the Studio placement, ${ink} ink${
+            behindMockup ? ", drawn behind the mockup" : ""
+          }.`
+        : `Composite “${design.name}” onto “${mockup.name}” with its saved placement (or the default), ${ink} ink${
+            behindMockup ? ", drawn behind the mockup" : ""
+          }.`,
       payload: {
         designId: design.id,
         designName: design.name,
@@ -464,15 +507,23 @@ export async function confirmMockupRender(payload: Record<string, unknown>): Pro
     ? (payload.ink as InkVariant)
     : "main";
   const saved = await getPlacement(designId, mockupId);
-  const transform = saved?.transform ?? { ...DEFAULT_TRANSFORM };
-  const behindMockup = payload.behindMockup === true || saved?.behindMockup === true;
+  const plan = await resolveRenderPlan({
+    designId,
+    mockup,
+    fallbackTransform: saved?.transform ?? null,
+    // Only an explicit true forces behind-garment; otherwise the print area's
+    // clip mode (or the saved placement) decides.
+    behindMockup:
+      payload.behindMockup === true ? true : (saved?.behindMockup ?? null),
+  });
   try {
     const assetId = await renderComposition({
       designId,
       mockupId,
       designAssetId: designAssetIdFor(design, ink),
-      transform,
-      behindMockup,
+      transform: plan.transform,
+      clip: plan.clip ?? null,
+      behindMockup: plan.behindMockup,
     });
     await logActivity("batch.item", `Agent made a mockup: “${design.name}” on “${mockup.name}”`, { assetId });
     return {
@@ -499,12 +550,17 @@ async function proposeSavePlacement(args: Record<string, unknown>): Promise<Tool
   const transform = clampTransform(args.transform);
   const asTemplate = args.asTemplate === true;
   const templateName = String(args.templateName ?? "").trim() || `${design.name} placement`;
+  const area = printAreaOf(mockup);
   return {
     summary: `Ready to save where “${design.name}” sits on “${mockup.name}”`,
     confirmation: {
-      detail: `Save the placement for “${design.name}” on “${mockup.name}”${
-        asTemplate ? ` and a template named “${templateName}”` : ""
-      }.`,
+      detail: area
+        ? `Save the Studio placement for “${design.name}” inside “${mockup.name}”'s print area${
+            asTemplate ? ` and a template named “${templateName}”` : ""
+          }. It uses the same placement the Studio and every render use.`
+        : `Save the placement for “${design.name}” on “${mockup.name}”${
+            asTemplate ? ` and a template named “${templateName}”` : ""
+          }.`,
       payload: {
         designId: design.id,
         designName: design.name,
@@ -529,12 +585,30 @@ export async function confirmSavePlacement(payload: Record<string, unknown>): Pr
   }
   const transform = clampTransform(payload.transform);
   try {
-    await savePlacement({
-      designId,
-      mockupId,
-      designAssetId: designMainAssetId(design),
-      transform,
-    });
+    // A print-area mockup ignores the `placements` table: its render reads the
+    // Studio placement. Writing the old row would look saved and change
+    // nothing, so convert the transform back into area space and write THAT.
+    const area = printAreaOf(mockup);
+    const studioPlacement = area
+      ? studioPlacementFromTransform(
+          transform,
+          area,
+          area.frame,
+          mockup.width,
+          mockup.height,
+          area.source.kind === "studio" ? area.source.position : "front",
+        )
+      : null;
+    if (studioPlacement) {
+      await writeBackStudioPlacement(designId, studioPlacement);
+    } else {
+      await savePlacement({
+        designId,
+        mockupId,
+        designAssetId: designMainAssetId(design),
+        transform,
+      });
+    }
     let templateId: string | undefined;
     if (payload.asTemplate === true) {
       const now = Date.now();
@@ -554,7 +628,7 @@ export async function confirmSavePlacement(payload: Record<string, unknown>): Pr
     }
     return {
       summary: `Saved the placement for “${design.name}” on “${mockup.name}”${templateId ? " and its template" : ""}`,
-      result: { designId, mockupId, transform, templateId },
+      result: { designId, mockupId, transform, studioPlacement, templateId },
     };
   } catch (error) {
     return { summary: "Could not save the placement", error: error instanceof Error ? error.message : "Save failed." };

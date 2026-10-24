@@ -50,20 +50,28 @@ import {
   designInches,
   describeCrop,
   isFullCrop,
-  mapStudioPlacement,
   printAreaFromTemplate,
   printAreaOf,
   printAreaTemplateFrom,
   type AreaCrop,
   type PrintAreaOption,
 } from "@/lib/mockups/print-area";
-import { writeBackStudioPlacement } from "@/lib/mockups/resolve";
+import { writeStudioPlacement } from "@/lib/mockups/resolve";
+import {
+  applyPrintAreaToMockups,
+  inheritedPrintArea,
+  printAreaScopeLabel,
+  printAreaScopeTargets,
+  type PrintAreaScope,
+} from "@/lib/mockups/propagate";
+import { resolveRenderPlan } from "@/lib/mockups/render-plan";
 import { canRenderPrintFile, renderPrintFile } from "@/lib/mockups/print-file";
 import { renderComposition } from "@/lib/batch/runner";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
+import { DesignPicker } from "@/components/mockups/design-picker";
 import type { Mockup, MockupPrintArea, StudioPlacement, StudioSession, Template } from "@/types/domain";
 import { AlertTriangle, Crop, Download, ImagePlus, Loader2, Ruler, Save, Trash2 } from "lucide-react";
 
@@ -113,17 +121,36 @@ export function PrintAreasTab({
   const [studioArea, setStudioArea] = React.useState<PrintAreaOption | null>(null);
   /** True while the composed mockup is being written to storage. */
   const [rendering, setRendering] = React.useState(false);
+  /** Whether a placement edit is for every design or only the picked one. */
+  const [placementScope, setPlacementScope] = React.useState<"all" | "design">("all");
+  /** How far a frame save travels. Same type by default; never a mug by accident. */
+  const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("category");
+  /** Set when the draft came from a sibling mockup rather than this record. */
+  const [inheritNote, setInheritNote] = React.useState<string | null>(null);
+  const lastMockupId = React.useRef<string | null>(null);
+  /** Bumped on every user edit, so a slow save cannot clear a newer draft. */
+  const draftVersion = React.useRef(0);
+  /** The debounced draft, so switching mockups cannot lose it. */
+  const pendingDraft = React.useRef<{
+    mockupId: string;
+    area: MockupPrintArea;
+    scope: PrintAreaScope;
+  } | null>(null);
+  const markAreaDirty = React.useCallback(() => {
+    draftVersion.current += 1;
+    setDirty(true);
+  }, []);
 
   // --- session ---------------------------------------------------------------
+  // Live, not one-shot: the Studio page and the Agent write the same blob, and
+  // the Mockups panel must see those writes without a reload.
+  const liveSession = useLiveQuery(() => loadSession(), []);
   React.useEffect(() => {
-    let cancelled = false;
-    void loadSession().then((stored) => {
-      if (!cancelled) setSession(stored);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (liveSession) setSession(liveSession);
+  }, [liveSession]);
+  React.useEffect(() => {
+    setPlacementScope(session.universal ? "all" : "design");
+  }, [session.universal]);
 
   // --- selection -------------------------------------------------------------
   const mockup = React.useMemo(
@@ -149,14 +176,59 @@ export function PrintAreasTab({
   );
 
   // The mockup's saved area becomes the draft whenever the mockup changes.
+  // A mockup with no area of its own starts from the most recent sibling in
+  // the same category, so a newly uploaded photo is never blank. The draft is
+  // then auto-saved by the effect below.
   React.useEffect(() => {
-    setArea(mockup ? (printAreaOf(mockup) ?? null) : null);
+    if (!mockup) {
+      setArea(null);
+      setInheritNote(null);
+      setDirty(false);
+      lastMockupId.current = null;
+      return;
+    }
+    const changed = lastMockupId.current !== mockup.id;
+    if (changed) {
+      // Switching away from a draft that has not hit its debounce yet: write
+      // it against the OLD mockup before the new one replaces it.
+      const pending = pendingDraft.current;
+      if (pending && pending.mockupId !== mockup.id) {
+        pendingDraft.current = null;
+        void applyPrintAreaToMockups({
+          sourceMockupId: pending.mockupId,
+          area: pending.area,
+          scope: pending.scope,
+        });
+      }
+      lastMockupId.current = mockup.id;
+      setMeasuredPixels(null);
+      setReferenceInches("");
+      setReferenceOpen(false);
+      setCropMode(false);
+    } else if (dirty) {
+      // The live query brought back the record this panel just saved (or a
+      // sibling write). Do not overwrite the draft the user is editing.
+      return;
+    }
+
+    const own = printAreaOf(mockup);
+    if (own) {
+      setArea(own);
+      setInheritNote(null);
+      setDirty(false);
+      return;
+    }
+    const inherited = inheritedPrintArea(mockup, mockups ?? []);
+    if (inherited) {
+      setArea(inherited);
+      setInheritNote("Inherited from a matching mockup — saving applies it here.");
+      markAreaDirty();
+      return;
+    }
+    setArea(null);
+    setInheritNote(null);
     setDirty(false);
-    setMeasuredPixels(null);
-    setReferenceInches("");
-    setReferenceOpen(false);
-    setCropMode(false);
-  }, [mockup]);
+  }, [mockup, mockups, dirty, markAreaDirty]);
 
   // The Studio placement for the picked design.
   const placement = React.useMemo<StudioPlacement | null>(() => {
@@ -235,7 +307,7 @@ export function PrintAreasTab({
       clipMode: area?.clipMode ?? "area",
       updatedAt: Date.now(),
     });
-    setDirty(true);
+    markAreaDirty();
   };
 
   /**
@@ -251,8 +323,83 @@ export function PrintAreasTab({
       crop: crop && !isFullCrop(crop) ? crop : undefined,
       updatedAt: Date.now(),
     });
-    setDirty(true);
+    markAreaDirty();
   };
+
+  /**
+   * Writes the draft to every mockup in the chosen scope, in one transaction.
+   *
+   * The frame is stored as fractions of the photo, so the same numbers are the
+   * same relative spot on every mockup of the product type. Crop and reference
+   * are deliberately preserved per photo: a folded shirt and a flat-lay need
+   * different visible windows even when the design sits in the same place.
+   */
+  const persistArea = React.useCallback(
+    async (
+      next: MockupPrintArea,
+      opts: { notify?: boolean; scope?: PrintAreaScope } = {},
+    ): Promise<{ updated: number; mockupIds: string[] }> => {
+      if (!mockup) return { updated: 0, mockupIds: [] };
+      const scope = opts.scope ?? areaScope;
+      const version = draftVersion.current;
+      try {
+        const result = await applyPrintAreaToMockups({
+          sourceMockupId: mockup.id,
+          area: next,
+          scope,
+        });
+        // Only clear the draft if the user has not edited again while the
+        // transaction was running.
+        if (draftVersion.current === version) setDirty(false);
+        if (opts.notify) {
+          toast.success(
+            result.updated <= 1
+              ? `Print area saved on "${mockup.name}"`
+              : `Print area saved on ${result.updated} mockups`,
+            // One toast, not a stack: repeated saves are the same event and
+            // used to leave two identical notifications on screen.
+            { id: "print-area-saved" },
+          );
+        }
+        return result;
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "The print area could not be saved",
+        );
+        return { updated: 0, mockupIds: [] };
+      }
+    },
+    [mockup, areaScope],
+  );
+
+  // Auto-save the draft. It is debounced (a drag writes once) and it uses the
+  // chosen scope, so the frame is already on the other photos when the user
+  // walks over to the Studio and presses Save & render.
+  React.useEffect(() => {
+    if (!dirty || !mockup || !area) return;
+    pendingDraft.current = { mockupId: mockup.id, area, scope: areaScope };
+    const handle = setTimeout(() => {
+      pendingDraft.current = null;
+      void persistArea(area);
+    }, 700);
+    return () => clearTimeout(handle);
+  }, [dirty, area, mockup, areaScope, persistArea]);
+
+  // A full navigation can unmount the panel before the debounce fires. Kick
+  // the pending write so leaving the page does not discard the last drag.
+  React.useEffect(
+    () => () => {
+      const pending = pendingDraft.current;
+      if (!pending) return;
+      pendingDraft.current = null;
+      void applyPrintAreaToMockups({
+        sourceMockupId: pending.mockupId,
+        area: pending.area,
+        scope: pending.scope,
+      });
+    },
+    [],
+  );
 
   /** The exact print area of the product selected in the Printify Studio. */
   const useStudioArea = () => {
@@ -304,9 +451,7 @@ export function PrintAreasTab({
 
   const saveArea = async () => {
     if (!mockup || !area) return;
-    await savePrintArea(mockup.id, area);
-    setDirty(false);
-    toast.success(`Print area saved on "${mockup.name}"`);
+    await persistArea(area, { notify: true });
   };
 
   const removeArea = async () => {
@@ -329,7 +474,7 @@ export function PrintAreasTab({
       current.scale === next.scale &&
       current.angle === next.angle;
     if (unchanged) return;
-    const updated = await writeBackStudioPlacement(designId, next, session);
+    const updated = await writeStudioPlacement(designId, next, { scope: placementScope });
     setSession(updated);
   };
 
@@ -356,6 +501,9 @@ export function PrintAreasTab({
     const next: StudioSession = {
       ...session,
       universal: true,
+      // Promote the placement on screen, not whatever the old universal
+      // fallback happened to be: "this is the placeholder" must mean THIS one.
+      universalPlacement: placement ? { ...placement } : session.universalPlacement,
       placements,
       updatedAt: Date.now(),
     };
@@ -380,7 +528,7 @@ export function PrintAreasTab({
         pixelsPerInch: measuredPixels / inches,
       },
     });
-    setDirty(true);
+    markAreaDirty();
     setMeasuredPixels(null);
     toast.success("Garment reference saved");
   };
@@ -389,7 +537,7 @@ export function PrintAreasTab({
     if (!area) return;
     const { reference: _removed, ...rest } = area;
     setArea(rest);
-    setDirty(true);
+    markAreaDirty();
     setMeasuredPixels(null);
   };
 
@@ -479,13 +627,23 @@ export function PrintAreasTab({
     }
     setRendering(true);
     try {
-      const transform = mapStudioPlacement(placement, area, area.frame, mockup.width, mockup.height);
+      // Resolve transform AND clip from the same draft the canvas is showing.
+      // renderComposition receives both, so it cannot re-read a saved area that
+      // is one edit behind the preview.
+      const plan = await resolveRenderPlan({
+        designId: design.id,
+        mockup,
+        session,
+        areaOverride: area,
+        behindMockup: area.clipMode === "behind-garment",
+      });
       await renderComposition({
         designId: design.id,
         mockupId: mockup.id,
         designAssetId: designMainAssetId(design),
-        transform,
-        behindMockup: area.clipMode === "behind-garment",
+        transform: plan.transform,
+        clip: plan.clip ?? null,
+        behindMockup: plan.behindMockup,
       });
       await logActivity("batch.item", `Rendered "${design.name}" on "${mockup.name}"`);
       toast.success("Mockup render saved — find it in the Export Center");
@@ -498,6 +656,8 @@ export function PrintAreasTab({
 
   // --- readouts --------------------------------------------------------------
   const physical = area ? areaInches(area, mockupW, mockupH) : null;
+  const scopeCount =
+    mockup && mockups ? printAreaScopeTargets(mockups, mockup, areaScope).length : 0;
   const designSize =
     area && placement && designMeta.w > 0
       ? designInches(placement.scale, designMeta.h / designMeta.w, area, mockupW, mockupH)
@@ -577,18 +737,30 @@ export function PrintAreasTab({
           <Label htmlFor="area-design" className="text-[12px] text-ink-muted">
             Design
           </Label>
-          <Select value={designId ?? ""} onValueChange={(v) => setDesignId(v === "" ? null : v)}>
-            <SelectTrigger id="area-design" className="h-8 w-[220px]">
-              <SelectValue placeholder="Pick a design" />
-            </SelectTrigger>
-            <SelectContent>
-              {(designs ?? []).map((d) => (
-                <SelectItem key={d.id} value={d.id}>
-                  {d.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <DesignPicker
+            designs={designs ?? []}
+            value={designId}
+            onChange={setDesignId}
+            triggerId="area-design"
+            className="w-[220px]"
+          />
+          <div className="flex items-center gap-1">
+            <Label htmlFor="placement-scope" className="text-[11px] text-ink-subtle">
+              Placement
+            </Label>
+            <Select
+              value={placementScope}
+              onValueChange={(value) => setPlacementScope(value === "design" ? "design" : "all")}
+            >
+              <SelectTrigger id="placement-scope" className="h-8 w-[130px] text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All designs</SelectItem>
+                <SelectItem value="design">This design</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <Badge variant="outline">from Printify Studio</Badge>
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={fitToArea} disabled={!area || !design}>
@@ -599,7 +771,12 @@ export function PrintAreasTab({
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             ) : null}
-            <Button size="sm" onClick={saveArea} disabled={!area || !dirty} title="Save the print area">
+            <Button
+              size="sm"
+              onClick={saveArea}
+              disabled={!area}
+              title={`Save and apply to ${printAreaScopeLabel(areaScope).toLowerCase()}`}
+            >
               <Save className="h-3.5 w-3.5" /> Save
             </Button>
           </div>
@@ -617,7 +794,7 @@ export function PrintAreasTab({
                 cropMode={cropMode}
                 onAreaChange={(next) => {
                   setArea(next);
-                  setDirty(true);
+                  markAreaDirty();
                 }}
                 onCropChange={applyCrop}
                 onMeasure={(pixels) => {
@@ -656,6 +833,41 @@ export function PrintAreasTab({
                     <span className="text-ink-muted">From</span>
                     <span className="font-medium">{sourceLabel}</span>
                   </div>
+                </div>
+              ) : null}
+
+              {inheritNote ? (
+                <div className="mb-3 rounded-md bg-surface-muted px-2 py-1.5 text-[11px] leading-snug text-ink-muted">
+                  {inheritNote}
+                </div>
+              ) : null}
+
+              {area ? (
+                <div className="mb-3">
+                  <Label htmlFor="area-scope" className="text-[11px] text-ink-muted">
+                    Apply this area to
+                  </Label>
+                  <Select
+                    value={areaScope}
+                    onValueChange={(value) =>
+                      setAreaScope(value === "this" ? "this" : value === "all" ? "all" : "category")
+                    }
+                  >
+                    <SelectTrigger id="area-scope" className="mt-1 h-8 w-full text-[12px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="this">This mockup only</SelectItem>
+                      <SelectItem value="category">
+                        All {mockup ? CATEGORY_SINGULAR[mockup.category] : "same-type"} mockups
+                      </SelectItem>
+                      <SelectItem value="all">All mockups</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-[10.5px] text-ink-subtle">
+                    {scopeCount} mockup{scopeCount === 1 ? "" : "s"} · {printAreaScopeLabel(areaScope)}.
+                    Crop and reference stay per photo.
+                  </p>
                 </div>
               ) : null}
 
@@ -906,7 +1118,7 @@ export function PrintAreasTab({
                   onClick={() => {
                     if (!area) return;
                     setArea({ ...area, clipMode: "area" });
-                    setDirty(true);
+                    markAreaDirty();
                   }}
                 >
                   Clip to area
@@ -918,7 +1130,7 @@ export function PrintAreasTab({
                   onClick={() => {
                     if (!area) return;
                     setArea({ ...area, clipMode: "behind-garment" });
-                    setDirty(true);
+                    markAreaDirty();
                   }}
                 >
                   Behind garment

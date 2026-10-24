@@ -123,7 +123,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "create_mockup_render",
     description:
-      "Make a single mockup: composite one design onto one mockup photo using its saved placement (or a default). This prepares the render — nothing is created until the user confirms.",
+      "Make a single mockup: composite one design onto one mockup photo. Uses the mockup's print area and the Printify Studio placement when it has one; otherwise uses the saved placement (or a default). This prepares the render — nothing is created until the user confirms.",
     confirm: true,
     parameters: {
       type: "object",
@@ -146,7 +146,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "save_placement",
     description:
-      "Save where a design sits on a mockup (its transform), so future renders reuse it. Optionally also save it as a reusable placement template. Nothing is written until the user confirms.",
+      "Save where a design sits on a mockup. When the mockup has a print area this writes the Printify Studio placement inside that area (the same placement the Studio and every render use); otherwise it writes the mockup transform. Optionally also save it as a reusable placement template. Nothing is written until the user confirms.",
     confirm: true,
     parameters: {
       type: "object",

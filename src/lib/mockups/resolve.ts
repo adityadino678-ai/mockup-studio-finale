@@ -50,28 +50,53 @@ export async function transformFromPrintArea(params: {
   );
 }
 
+/** Which designs a placement write should affect. */
+export type PlacementScope = "auto" | "all" | "design";
+
 /**
- * Writes a placement back into the Studio session, for one design.
+ * Writes a placement back into the Studio session.
  *
- * It always lands as a PER-DESIGN override and turns the universal placement
- * off, because a universal placement is a different thing: it is the
- * placement for every design at once. Editing one design must not silently
- * move the rest.
+ * `auto` (the default) follows the session's own mode: when the Studio is in
+ * "one placement for every design" mode, the edit updates that placement; when
+ * it is in per-design mode, it writes an override. This is the same rule the
+ * Studio's Design panel uses, so editing from Mockups can no longer silently
+ * disable the universal placement.
+ */
+export async function writeStudioPlacement(
+  designId: string,
+  placement: StudioPlacement,
+  opts: { scope?: PlacementScope; session?: StudioSession } = {},
+): Promise<StudioSession> {
+  const active = opts.session ?? (await loadSession());
+  const scope = opts.scope ?? "auto";
+  const useUniversal = scope === "all" || (scope === "auto" && active.universal);
+  const next: StudioSession = useUniversal
+    ? {
+        ...active,
+        universal: true,
+        universalPlacement: { ...placement },
+        updatedAt: Date.now(),
+      }
+    : {
+        ...active,
+        universal: false,
+        placements: { ...active.placements, [designId]: { ...placement } },
+        updatedAt: Date.now(),
+      };
+  await saveSession(next);
+  return next;
+}
+
+/**
+ * Backwards-compatible wrapper. New code should call `writeStudioPlacement`
+ * with an explicit scope; this keeps the session's mode by default.
  */
 export async function writeBackStudioPlacement(
   designId: string,
   placement: StudioPlacement,
   session?: StudioSession,
 ): Promise<StudioSession> {
-  const active = session ?? (await loadSession());
-  const next: StudioSession = {
-    ...active,
-    universal: false,
-    placements: { ...active.placements, [designId]: placement },
-    updatedAt: Date.now(),
-  };
-  await saveSession(next);
-  return next;
+  return writeStudioPlacement(designId, placement, { session, scope: "auto" });
 }
 
 /**

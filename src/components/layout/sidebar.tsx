@@ -38,8 +38,8 @@ const NAV: NavGroup[] = [
   {
     label: "Create",
     items: [
-      { href: "/mockups", label: "Mockups", icon: <Shapes className="h-4 w-4" /> },
       { href: "/printify-studio", label: "Printify Studio", icon: <Shirt className="h-4 w-4" /> },
+      { href: "/mockups", label: "Mockups", icon: <Shapes className="h-4 w-4" /> },
     ],
   },
   {
