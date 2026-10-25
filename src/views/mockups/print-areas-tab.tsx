@@ -128,18 +128,28 @@ export function PrintAreasTab({
    */
   const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("category");
   const lastMockupId = React.useRef<string | null>(null);
+  /** The design the draft in `area` belongs to, so a tab switch reloads it. */
+  const lastDesignId = React.useRef<string | null>(null);
   /** Bumped on every user edit, so a slow save cannot clear a newer draft. */
   const draftVersion = React.useRef(0);
-  /** The debounced draft, so switching mockups cannot lose it. */
+  /** The debounced draft, so switching mockups or designs cannot lose it. */
   const pendingDraft = React.useRef<{
     mockupId: string;
+    designId: string | null;
     area: MockupPrintArea;
     scope: PrintAreaScope;
   } | null>(null);
-  const markAreaDirty = React.useCallback(() => {
-    draftVersion.current += 1;
-    setDirty(true);
-  }, []);
+  /**
+   * The mockup+design the user made the current draft on.
+   *
+   * A tab switch re-renders with the NEW mockup/design but the OLD `area` for
+   * one commit. Without this, the debounce effect would re-arm using the old
+   * draft under the new tab and a later flush would write it to the wrong
+   * design. Only a user edit (`markAreaDirty`) claims a draft.
+   */
+  const draftOwner = React.useRef<string | null>(null);
+  /** The live debounce handle, so an explicit remove can cancel it. */
+  const autoSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- session ---------------------------------------------------------------
   // Live, not one-shot: the Studio page and the Agent write the same blob, and
@@ -154,6 +164,20 @@ export function PrintAreasTab({
     () => mockups?.find((m) => m.id === selectedId) ?? null,
     [mockups, selectedId],
   );
+  const activeMockupId = mockup?.id ?? null;
+
+  /**
+   * Marks the draft dirty AND records which tab it belongs to.
+   *
+   * `draftOwner` is what stops the debounce from treating the previous tab's
+   * area as the new tab's draft on the commit where the tab changes but the
+   * `area` state has not been reloaded yet.
+   */
+  const markAreaDirty = React.useCallback(() => {
+    draftOwner.current = `${activeMockupId ?? ""}:${designId ?? ""}`;
+    draftVersion.current += 1;
+    setDirty(true);
+  }, [activeMockupId, designId]);
 
   // The tabs are numbered OLDEST FIRST: tab 1 is the first uploaded design,
   // so the numbering matches the Studio's design order and the loop that
@@ -209,44 +233,57 @@ export function PrintAreasTab({
     [designs, designId],
   );
 
-  // The mockup's saved area becomes the draft whenever the mockup changes.
-  // A photo with no area starts blank: a re-save on any sibling of its type
-  // is all it takes to bring it in line. The draft is auto-saved by the
-  // effect below, for the scope the user chose (same type by default).
+  // The ACTIVE design's saved area on this mockup becomes the draft whenever
+  // the mockup OR the design tab changes. Each design owns its own frame per
+  // mockup: a design with no override falls back to the shared default, so a
+  // fresh tab starts where every never-edited design starts. A photo with no
+  // area starts blank: a re-save on any sibling of its type is all it takes to
+  // bring it in line. The draft is auto-saved by the effect below, for the
+  // scope the user chose (same type by default).
   React.useEffect(() => {
     if (!mockup) {
       setArea(null);
       setDirty(false);
       lastMockupId.current = null;
+      lastDesignId.current = null;
       return;
     }
-    const changed = lastMockupId.current !== mockup.id;
-    if (changed) {
+    const mockupChanged = lastMockupId.current !== mockup.id;
+    const designChanged = lastDesignId.current !== designId;
+    if (mockupChanged || designChanged) {
       // Switching away from a draft that has not hit its debounce yet: write
-      // it against the OLD mockup before the new one replaces it.
+      // it against the OLD mockup AND the old design before the new tab
+      // replaces it, so a delayed flush can never land on the wrong tab.
       const pending = pendingDraft.current;
-      if (pending && pending.mockupId !== mockup.id) {
+      if (
+        pending &&
+        (pending.mockupId !== mockup.id || pending.designId !== designId)
+      ) {
         pendingDraft.current = null;
         void applyPrintAreaToMockups({
           sourceMockupId: pending.mockupId,
+          designId: pending.designId ?? undefined,
           area: pending.area,
           scope: pending.scope,
         });
       }
-      lastMockupId.current = mockup.id;
-      setMeasuredPixels(null);
-      setReferenceInches("");
-      setReferenceOpen(false);
-      setCropMode(false);
+      if (mockupChanged) {
+        lastMockupId.current = mockup.id;
+        setMeasuredPixels(null);
+        setReferenceInches("");
+        setReferenceOpen(false);
+        setCropMode(false);
+      }
+      lastDesignId.current = designId;
     } else if (dirty) {
       // The live query brought back the record this panel just saved. Do not
       // overwrite the draft the user is editing.
       return;
     }
 
-    setArea(printAreaOf(mockup) ?? null);
+    setArea(printAreaOf(mockup, designId) ?? null);
     setDirty(false);
-  }, [mockup, dirty]);
+  }, [mockup, dirty, designId]);
 
   // The Studio placement for the picked design. Each design owns its
   // placement; every mockup uses it inside that mockup's own frame.
@@ -344,14 +381,16 @@ export function PrintAreasTab({
   };
 
   /**
-   * Writes the draft to every mockup in the chosen scope, in one transaction.
+   * Writes the draft as the ACTIVE DESIGN's area on every mockup in the chosen
+   * scope, in one transaction.
    *
    * The frame is stored as fractions of the photo, so the same numbers are the
    * same relative spot on every mockup of the product type, and the crop
    * travels with the frame - the visible window is part of the staged pose.
    * The inches reference is deliberately kept per photo: a folded shirt and a
    * flat-lay are measured differently even when the design sits in the same
-   * place.
+   * place. Only this design's overrides are written: the shared default and
+   * the other designs' frames are left alone.
    */
   const persistArea = React.useCallback(
     async (
@@ -364,6 +403,7 @@ export function PrintAreasTab({
       try {
         const result = await applyPrintAreaToMockups({
           sourceMockupId: mockup.id,
+          designId: designId ?? undefined,
           area: next,
           scope,
         });
@@ -388,7 +428,7 @@ export function PrintAreasTab({
         return { updated: 0, mockupIds: [] };
       }
     },
-    [mockup, areaScope],
+    [mockup, areaScope, designId],
   );
 
   // Auto-save the draft. It is debounced (a drag writes once) and uses the
@@ -396,13 +436,27 @@ export function PrintAreasTab({
   // design is enough before moving to the next tab.
   React.useEffect(() => {
     if (!dirty || !mockup || !area) return;
-    pendingDraft.current = { mockupId: mockup.id, area, scope: areaScope };
+    // Only a draft the user actually made on THIS tab may be saved. On the
+    // commit where the tab changed, `area` is still the previous tab's draft,
+    // so arming a timeout here would write it to the wrong design.
+    if (draftOwner.current !== `${mockup.id}:${designId ?? ""}`) return;
+    pendingDraft.current = {
+      mockupId: mockup.id,
+      designId,
+      area,
+      scope: areaScope,
+    };
     const handle = setTimeout(() => {
       pendingDraft.current = null;
+      autoSaveTimer.current = null;
       void persistArea(area);
     }, 700);
-    return () => clearTimeout(handle);
-  }, [dirty, area, mockup, areaScope, persistArea]);
+    autoSaveTimer.current = handle;
+    return () => {
+      clearTimeout(handle);
+      if (autoSaveTimer.current === handle) autoSaveTimer.current = null;
+    };
+  }, [dirty, area, mockup, areaScope, persistArea, designId]);
 
   // A full navigation can unmount the panel before the debounce fires. Kick
   // the pending write so leaving the page does not discard the last drag.
@@ -413,12 +467,28 @@ export function PrintAreasTab({
       pendingDraft.current = null;
       void applyPrintAreaToMockups({
         sourceMockupId: pending.mockupId,
+        designId: pending.designId ?? undefined,
         area: pending.area,
         scope: pending.scope,
       });
     },
     [],
   );
+
+  /**
+   * Writes the pending draft for the ACTIVE design before a render.
+   *
+   * A render is fingerprinted from the area that is actually SAVED: hashing an
+   * unsaved draft would record a fingerprint the stored area does not produce,
+   * and the Listing images page would then adopt the wrong pixels. Returns
+   * false when the write failed, so the caller stops instead of rendering from
+   * a half-applied state.
+   */
+  const flushDraft = React.useCallback(async (): Promise<boolean> => {
+    if (!dirty || !area) return true;
+    const result = await persistArea(area);
+    return result.updated > 0;
+  }, [dirty, area, persistArea]);
 
   /** The exact print area of the product selected in the Printify Studio. */
   const useStudioArea = () => {
@@ -475,7 +545,20 @@ export function PrintAreasTab({
 
   const removeArea = async () => {
     if (!mockup) return;
-    await clearPrintArea(mockup.id);
+    // Cancel the pending debounce FIRST. Its closure still holds the area the
+    // user is removing, and firing after the clear would quietly write the
+    // override back (sometimes only on the next tab switch or page unload).
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = null;
+    }
+    pendingDraft.current = null;
+    draftOwner.current = null;
+    draftVersion.current += 1;
+    // Clears THIS design's area on this mockup (a null override), so the
+    // shared default cannot quietly take over and the other designs keep
+    // their own frames.
+    await clearPrintArea(mockup.id, designId ?? undefined);
     setArea(null);
     setDirty(false);
     toast.success("Print area removed");
@@ -590,7 +673,8 @@ export function PrintAreasTab({
     for (const id of applyTargets) {
       const target = await db.mockups.get(id);
       if (!target) continue;
-      await savePrintArea(id, printAreaFromTemplate(tpl.payload));
+      // The template becomes THIS design's area, never the shared default.
+      await savePrintArea(id, printAreaFromTemplate(tpl.payload), designId ?? undefined);
     }
     toast.success(`Applied "${tpl.name}" to ${applyTargets.length} mockup(s)`);
     setApplyTargets([]);
@@ -644,18 +728,22 @@ export function PrintAreasTab({
     }
     setRendering(true);
     try {
-      // Resolve transform AND clip from the same draft the canvas is showing.
-      // renderComposition receives both, so it cannot re-read a saved area that
-      // is one edit behind the preview. No explicit behindMockup: the plan
-      // resolves it from the area's clipMode (the listing path's rule), and the
-      // fingerprint hashes the listing convention — so the Listing images page
-      // can ADOPT this render instead of re-rendering the same pixels.
+      // Save the draft FIRST: the fingerprint and the pixels must come from
+      // the area that is actually stored, or an unsaved frame would record a
+      // fingerprint the saved area does not reproduce.
+      if (!(await flushDraft())) return;
+      const savedMockup = (await db.mockups.get(mockup.id)) ?? mockup;
+      // Resolve transform AND clip from the SAVED design-specific area.
+      // renderComposition receives both, so it cannot re-read a different
+      // area. No explicit behindMockup: the plan resolves it from the area's
+      // clipMode (the listing path's rule), and the fingerprint hashes the
+      // listing convention — so the Listing images page can ADOPT this render
+      // instead of re-rendering the same pixels.
       const { plan, fp } = await resolveRenderPlanWithFingerprint({
         designId: design.id,
         designAssetId: designMainAssetId(design),
-        mockup,
+        mockup: savedMockup,
         session,
-        areaOverride: area,
       });
       await renderComposition({
         designId: design.id,
@@ -676,25 +764,31 @@ export function PrintAreasTab({
   };
 
   /**
-   * Renders THIS design onto every mockup that has a print area.
+   * Renders THIS design onto every mockup that has a print area for it.
    *
    * This is the payoff of the per-design tabs: place the design once, save,
-   * and one click produces the whole set. Mockups without an area are skipped
-   * rather than failing the run — they simply have nothing to paint on yet.
-   * Each target resolves through the SAME render plan as the preview, so
-   * these renders are pixel-identical to what the panel shows.
+   * and one click produces the whole set. Mockups without an area for THIS
+   * design are skipped rather than failing the run — they simply have nothing
+   * to paint on yet. The draft is saved first, then every target is read back
+   * from storage and resolved through the SAME render plan as the preview, so
+   * these renders are pixel-identical to what the panel shows and the
+   * fingerprints describe the saved area.
    */
   const renderEverywhere = async () => {
-    if (!design || !mockups) return;
-    const targets = mockups.filter((m) => printAreaOf(m));
-    if (targets.length === 0) {
-      toast.info("No mockup has a print area yet. Set one first.");
-      return;
-    }
+    if (!design) return;
     setBulkRendering(true);
     let done = 0;
     let failed = 0;
     try {
+      // Save the active design's draft first, so neither the target set nor a
+      // fingerprint can be derived from an unsaved frame.
+      if (!(await flushDraft())) return;
+      const freshMockups = await db.mockups.toArray();
+      const targets = freshMockups.filter((m) => printAreaOf(m, design.id));
+      if (targets.length === 0) {
+        toast.info("No mockup has a print area yet. Set one first.");
+        return;
+      }
       for (const target of targets) {
         try {
           const { plan, fp } = await resolveRenderPlanWithFingerprint({
@@ -702,9 +796,6 @@ export function PrintAreasTab({
             designAssetId: designMainAssetId(design),
             mockup: target,
             session,
-            // The mockup on screen renders from its unsaved draft, exactly
-            // like the single Save render; the rest use their saved areas.
-            areaOverride: target.id === mockup?.id ? area : undefined,
           });
           await renderComposition({
             designId: design.id,
@@ -726,7 +817,7 @@ export function PrintAreasTab({
           `Rendered "${design.name}" on ${done} mockup${done === 1 ? "" : "s"}`,
         );
       }
-      const skipped = mockups.length - targets.length;
+      const skipped = freshMockups.length - targets.length;
       if (skipped > 0) {
         toast.success(
           `Rendered on ${done} mockup${done === 1 ? "" : "s"} · skipped ${skipped} without a print area`,
@@ -775,7 +866,10 @@ export function PrintAreasTab({
         <div className="max-h-[640px] overflow-auto p-2">
           {(mockups ?? []).map((m) => {
             const selected = m.id === selectedId;
-            const mArea = printAreaOf(m);
+            // The rail shows the ACTIVE design's area, because that is what
+            // the tab edits. Another design's frame on the same photo does not
+            // make this design's tab non-empty.
+            const mArea = printAreaOf(m, designId);
             return (
               <div
                 key={m.id}

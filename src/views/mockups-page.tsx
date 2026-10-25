@@ -14,6 +14,7 @@ import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { PrintAreasTab } from "@/views/mockups/print-areas-tab";
+import { printAreaOf } from "@/lib/mockups/print-area";
 import { CATEGORY_LABELS } from "@/lib/mockups/categories";
 import {
   Dialog,
@@ -146,7 +147,14 @@ export function MockupsPage() {
         >
           Print areas
           <span className="rounded-full bg-surface-muted px-1.5 py-px text-[11px] font-medium text-ink-subtle">
-            {mockups?.filter((m) => m.printArea).length ?? 0}
+            {/* A mockup has an area when the shared default exists OR any
+                design has a non-null override. A `null` override is a design
+                that deliberately has none, so it does not count on its own. */}
+            {mockups?.filter(
+              (m) =>
+                printAreaOf(m) !== undefined ||
+                Object.values(m.designAreas ?? {}).some((area) => area != null),
+            ).length ?? 0}
           </span>
         </button>
       </div>

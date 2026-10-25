@@ -38,7 +38,7 @@ export async function transformFromPrintArea(params: {
   mockup: Mockup;
   session?: StudioSession;
 }): Promise<Transform | null> {
-  const area = printAreaOf(params.mockup);
+  const area = printAreaOf(params.mockup, params.designId);
   if (!area) return null;
   const placement = await studioPlacementForDesign(params.designId, params.session);
   return mapStudioPlacement(

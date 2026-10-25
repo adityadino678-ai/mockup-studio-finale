@@ -18,6 +18,7 @@
 // local engines, so it needs no credential and never calls the server.
 
 import { serverEnv } from "@/lib/server/env";
+import { normalizeShopId } from "@/lib/server/printify";
 import {
   DEFAULT_BASE_URL,
   DEFAULT_MODEL,
@@ -30,6 +31,8 @@ export type CredentialSource = "browser" | "server";
 
 export interface PrintifyCredentials {
   apiKey: string;
+  /** The shop saved in Settings (`x-printify-shop`), when one is set. */
+  shopId?: number;
   source: CredentialSource;
 }
 
@@ -61,6 +64,7 @@ function clean(value: string | null | undefined): string | undefined {
  *
  * Headers (all optional):
  *   x-printify-key   Printify personal access token
+ *   x-printify-shop  the Printify shop id saved in Settings (positive integer)
  *   x-ai-provider    provider id (lib/ai/providers)
  *   x-ai-key         OpenAI-compatible API key
  *   x-ai-base-url    base URL override (used for the `custom` provider)
@@ -72,6 +76,7 @@ export function credentialsFromRequest(request: Request): Credentials {
   const browserPrintifyKey = clean(headers.get("x-printify-key"));
   const serverPrintifyKey = clean(serverEnv.printifyApiKey());
   const printifyKey = browserPrintifyKey ?? serverPrintifyKey;
+  const printifyShopId = normalizeShopId(clean(headers.get("x-printify-shop")));
 
   const browserAiKey = clean(headers.get("x-ai-key"));
   const serverAiKey = clean(serverEnv.aiApiKey()) ?? clean(serverEnv.openaiApiKey());
@@ -91,7 +96,11 @@ export function credentialsFromRequest(request: Request): Credentials {
 
   return {
     printify: printifyKey
-      ? { apiKey: printifyKey, source: browserPrintifyKey ? "browser" : "server" }
+      ? {
+          apiKey: printifyKey,
+          ...(printifyShopId !== undefined ? { shopId: printifyShopId } : {}),
+          source: browserPrintifyKey ? "browser" : "server",
+        }
       : undefined,
     ai: aiKey
       ? {

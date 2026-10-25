@@ -236,7 +236,7 @@ describe("the listing render fingerprint", () => {
     expect(behind).not.toBe(base);
   });
 
-  it("uses version 2 and ignores print-area fields that do not change pixels", () => {
+  it("uses version 3 and ignores print-area fields that do not change pixels", () => {
     const printArea = {
       areaWidth: 4500,
       areaHeight: 5400,
@@ -252,7 +252,7 @@ describe("the listing render fingerprint", () => {
       mockup: mockupWithArea,
       placement,
     });
-    expect(JSON.parse(base).version).toBe(2);
+    expect(JSON.parse(base).version).toBe(3);
 
     const cosmetic = listingRenderFingerprint({
       designAssetId: "art",

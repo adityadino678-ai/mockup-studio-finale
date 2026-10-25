@@ -86,6 +86,19 @@ export interface Mockup {
    * prints. See `src/lib/mockups/print-area.ts`.
    */
   printArea?: MockupPrintArea;
+  /**
+   * Per-design overrides of the print area, keyed by design id.
+   *
+   * `printArea` is the SHARED default: a design with no entry here uses it.
+   * A design whose frame has been edited gets its own entry, so adjusting
+   * design B can never move design A's frame. `null` is deliberate and means
+   * "this design has no area on this mockup", which is different from a
+   * missing key ("fall back to the shared area").
+   *
+   * It is a nested field on the mockup record, so no Dexie schema bump is
+   * needed.
+   */
+  designAreas?: Record<string, MockupPrintArea | null>;
   createdAt: number;
 }
 

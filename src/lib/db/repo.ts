@@ -331,11 +331,28 @@ export async function updateMockup(
  *
  * The area lives on the mockup record itself: one area per mockup, and a
  * Dexie record is schemaless, so no schema migration is needed for it.
+ *
+ * With `designId` the write is that design's override (`designAreas[designId]`)
+ * and the shared `printArea` is not touched, so the other designs keep their
+ * own frames. Without it the shared default is written, which is the old
+ * behaviour for any legacy caller.
  */
-export async function savePrintArea(mockupId: string, area: MockupPrintArea): Promise<void> {
+export async function savePrintArea(
+  mockupId: string,
+  area: MockupPrintArea,
+  designId?: string,
+): Promise<void> {
   const mockup = await db.mockups.get(mockupId);
   if (!mockup) return;
-  await db.mockups.put({ ...mockup, printArea: { ...area, updatedAt: Date.now() } });
+  const next = { ...area, updatedAt: Date.now() };
+  if (designId) {
+    await db.mockups.put({
+      ...mockup,
+      designAreas: { ...mockup.designAreas, [designId]: next },
+    });
+  } else {
+    await db.mockups.put({ ...mockup, printArea: next });
+  }
   await logActivity(
     "mockup.update",
     `Set the print area on "${mockup.name}" (${area.areaWidth}×${area.areaHeight})`,
@@ -343,12 +360,28 @@ export async function savePrintArea(mockupId: string, area: MockupPrintArea): Pr
   );
 }
 
-/** Removes a mockup's print area. The mockup itself is untouched. */
-export async function clearPrintArea(mockupId: string): Promise<void> {
+/**
+ * Removes a print area. The mockup itself is untouched.
+ *
+ * With `designId` it clears THIS design's area on this mockup by storing a
+ * `null` override - "deliberately no area" - so the shared default cannot
+ * quietly take over and the other designs are unaffected. Without it the
+ * shared default is removed, as before.
+ */
+export async function clearPrintArea(mockupId: string, designId?: string): Promise<void> {
   const mockup = await db.mockups.get(mockupId);
-  if (!mockup || !mockup.printArea) return;
-  const { printArea: _removed, ...rest } = mockup;
-  await db.mockups.put(rest);
+  if (!mockup) return;
+  if (designId) {
+    if (mockup.designAreas?.[designId] === null) return;
+    await db.mockups.put({
+      ...mockup,
+      designAreas: { ...mockup.designAreas, [designId]: null },
+    });
+  } else {
+    if (!mockup.printArea) return;
+    const { printArea: _removed, ...rest } = mockup;
+    await db.mockups.put(rest);
+  }
   await logActivity("mockup.update", `Removed the print area from "${mockup.name}"`, {
     mockupId,
   });

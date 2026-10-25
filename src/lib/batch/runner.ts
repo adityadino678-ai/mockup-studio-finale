@@ -79,8 +79,9 @@ export async function renderComposition(params: {
   try {
     const canvas = document.createElement("canvas");
     // A mockup with a print area clips the design to it: whatever falls
-    // outside the printable area is not on the product either.
-    const area = printAreaOf(mockup);
+    // outside the printable area is not on the product either. The area is
+    // the DESIGN's area: each design tab owns its own frame on this mockup.
+    const area = printAreaOf(mockup, params.designId);
     const clip =
       params.clip !== undefined
         ? (params.clip ?? undefined)
@@ -154,7 +155,7 @@ async function resolveTransform(
   // mockup and the product cannot disagree. It wins over a saved placement
   // for the same reason.
   const mockup = await db.mockups.get(mockupId);
-  if (mockup && printAreaOf(mockup)) {
+  if (mockup && printAreaOf(mockup, designId)) {
     const fromStudio = await transformFromPrintArea({ designId, mockup });
     if (fromStudio) return { transform: fromStudio };
   }

@@ -85,11 +85,15 @@ import {
   loadSession,
   saveSession,
 } from "@/lib/printify/studio-session";
+import { printAreaOf } from "@/lib/mockups/print-area";
 import { useListingCatalog } from "@/views/listings/listing-catalog";
 import {
   adoptedRenderEntry,
   buildAdoptionIndex,
+  buildSavedRenderIndex,
+  linkSavedRenderEntries,
   matchInAdoptionIndex,
+  type LinkableRenderTarget,
 } from "@/views/listings/render-adoption";
 import type {
   AssetMeta,
@@ -121,6 +125,8 @@ interface SelectedImage {
    * listing would render now", so there is nothing to re-render.
    */
   adopted: StudioListingRender | undefined;
+  /** What the listing would render right now for this tile. */
+  fingerprint: string;
 }
 
 interface UploadResponse {
@@ -167,6 +173,48 @@ async function zipFiles(files: Zippable, filename: string): Promise<number> {
     filename,
   );
   return Object.keys(files).length;
+}
+
+/**
+ * One step of the Send flow.
+ *
+ * The flow is three things the user has to do once, in order, and two of them
+ * already happened by the time the dialog opens. Showing that explicitly is
+ * the whole point: the upload is ours, the selection is Printify's, and the
+ * bookmarklet is the one click that bridges them.
+ */
+function SendStep({
+  step,
+  title,
+  detail,
+  done,
+}: {
+  step: number;
+  title: string;
+  detail: string;
+  done: boolean;
+}) {
+  return (
+    <li
+      className={`rounded-md border px-2.5 py-2 ${
+        done
+          ? "border-forest/40 bg-forest-soft/30"
+          : "border-border-subtle bg-surface-muted/40"
+      }`}
+    >
+      <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink">
+        <span
+          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] text-white ${
+            done ? "bg-forest" : "bg-ink-subtle"
+          }`}
+        >
+          {done ? <Check className="h-2.5 w-2.5" /> : step}
+        </span>
+        {title}
+      </p>
+      <p className="mt-0.5 pl-[22px] text-[10px] text-ink-muted">{detail}</p>
+    </li>
+  );
 }
 
 export function ListingImagesView() {
@@ -244,6 +292,8 @@ export function ListingImagesView() {
   });
   const [bridgeOpen, setBridgeOpen] = React.useState(false);
   const [bridgePayload, setBridgePayload] = React.useState("");
+  /** True once the payload is on the clipboard, so the dialog can say so. */
+  const [bridgeCopied, setBridgeCopied] = React.useState(false);
   const [bridgeSummary, setBridgeSummary] = React.useState<{
     products: number;
     images: number;
@@ -314,6 +364,16 @@ export function ListingImagesView() {
     () => buildAdoptionIndex((renderAssets ?? []) as AssetMeta[]),
     [renderAssets],
   );
+  /**
+   * Every saved render, fingerprint or not, newest first. This is what the
+   * manual "link saved renders" path reads: renders saved before fingerprints
+   * existed can never be adopted automatically, but they are still the user's
+   * own pixels.
+   */
+  const savedRenderIndex = React.useMemo(
+    () => buildSavedRenderIndex((renderAssets ?? []) as AssetMeta[]),
+    [renderAssets],
+  );
 
   /**
    * What this listing will actually send.
@@ -380,6 +440,7 @@ export function ListingImagesView() {
                   mockupId: mockup.id,
                 })
               : undefined,
+            fingerprint,
           };
         });
     },
@@ -410,6 +471,55 @@ export function ListingImagesView() {
     if (Object.keys(adopted).length === 0) return;
     update({ listingRenders: { ...(session.listingRenders ?? {}), ...adopted } });
   }, [rendering, sending, listings, selectionFor, session.listingRenders, update]);
+
+  /**
+   * Tiles with no current render whose pair nonetheless has a saved render.
+   *
+   * `linkSavedRenderEntries` decides both the count and what a click writes, so
+   * the banner can never offer a number the button would not deliver. Covered
+   * tiles - a fresh session entry or a fingerprint-matched adoption - are
+   * skipped: linking them would only replace fresher pixels.
+   */
+  const linkableTargets = React.useMemo<LinkableRenderTarget[]>(() => {
+    const targets: LinkableRenderTarget[] = [];
+    for (const listing of listings) {
+      for (const image of selectionFor(listing)) {
+        targets.push({
+          key: listingRenderKey(listing.listingId, image.mockup.id),
+          artworkAssetId: listing.artworkAssetId,
+          designId: listing.designId,
+          mockupId: image.mockup.id,
+          fingerprint: image.fingerprint,
+          covered: Boolean(currentEntry(image)),
+        });
+      }
+    }
+    return targets;
+  }, [listings, selectionFor, currentEntry]);
+  const linkableEntries = React.useMemo(
+    () => linkSavedRenderEntries(savedRenderIndex, linkableTargets),
+    [savedRenderIndex, linkableTargets],
+  );
+  const linkableCount = Object.keys(linkableEntries).length;
+
+  /**
+   * The explicit "link my saved renders" recovery.
+   *
+   * It writes each pairing under the CURRENT fingerprint, which is what makes
+   * the tile, the drafts engine and Send stop calling those pixels unrendered.
+   * It is deliberately a click: the app cannot prove an old render still
+   * matches the design or the print area, so the user is the one saying so.
+   */
+  const linkSavedRenders = React.useCallback(() => {
+    const count = Object.keys(linkableEntries).length;
+    if (count === 0) return;
+    update({
+      listingRenders: { ...(session.listingRenders ?? {}), ...linkableEntries },
+    });
+    toast.success(
+      `Linked ${count} saved render${count === 1 ? "" : "s"} from Mockups.`,
+    );
+  }, [linkableEntries, session.listingRenders, update]);
 
   const totalSelected = React.useMemo(
     () => listings.reduce((sum, listing) => sum + selectionFor(listing).length, 0),
@@ -1018,6 +1128,7 @@ export function ListingImagesView() {
       const payload = buildBridgePayload(prepared);
       const json = bridgePayloadJson(payload);
       setBridgePayload(json);
+      setBridgeCopied(false);
       setBridgeSummary({
         products: prepared.length,
         images: countBridgeImages(payload),
@@ -1028,6 +1139,7 @@ export function ListingImagesView() {
       setBridgeOpen(true);
       try {
         await navigator.clipboard.writeText(json);
+        setBridgeCopied(true);
         toast.success(
           `Prepared ${countBridgeImages(payload)} image${
             countBridgeImages(payload) === 1 ? "" : "s"
@@ -1064,6 +1176,7 @@ export function ListingImagesView() {
   const copyPayload = async () => {
     try {
       await navigator.clipboard.writeText(bridgePayload);
+      setBridgeCopied(true);
       toast.success("Payload copied.");
     } catch {
       toast.error("Could not copy. Select the text in the box instead.");
@@ -1229,6 +1342,9 @@ export function ListingImagesView() {
                   : 0;
                 const entry = image ? currentEntry(image) : undefined;
                 const marked = markedIds?.has(mockup.id) ?? false;
+                // The label is about THIS listing's design, not the shared
+                // default: a per-design frame is still a mapped area.
+                const area = printAreaOf(mockup, listing.designId);
                 return (
                   <div
                     key={mockup.id}
@@ -1299,7 +1415,7 @@ export function ListingImagesView() {
                           {mockup.name}
                         </p>
                         <p className="text-[10px] text-ink-subtle">
-                          {mockup.printArea ? "Print area mapped" : "No print area"}
+                          {area ? "Print area mapped" : "No print area"}
                         </p>
                       </div>
                     </button>
@@ -1344,8 +1460,9 @@ export function ListingImagesView() {
               <p className="text-[12px] text-ink-muted">
                 Every design in the batch gets its own row, and every mockup is a tile - nothing
                 to pick. Tiles show the render saved in the Mockups panel when it is still
-                current. Long-press a tile to start removing mockups from a listing; the numbers
-                are the image order and the first tile is the main image.
+                current; the banner can link older saved renders that predate fingerprints.
+                Long-press a tile to start removing mockups from a listing; the numbers are the
+                image order and the first tile is the main image.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1401,6 +1518,32 @@ export function ListingImagesView() {
                   ? `${progress.done}/${progress.total} · ${progress.label}`
                   : `${sendProgress.done}/${sendProgress.total} · ${sendProgress.label}`}
               </p>
+            </div>
+          )}
+
+          {linkableCount > 0 && (
+            <div
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-warning/60 bg-warning-soft/40 px-3 py-2"
+              role="status"
+            >
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium text-ink">
+                  {linkableCount} saved render{linkableCount === 1 ? "" : "s"} from Mockups can be
+                  linked
+                </p>
+                <p className="text-[11px] text-ink-muted">
+                  Linking pins the newest saved pixels to these tiles and assumes the design and
+                  print area have not changed since you saved them - check the tiles after.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={linkSavedRenders}
+                disabled={rendering || sending}
+              >
+                Link {linkableCount} saved render{linkableCount === 1 ? "" : "s"}
+              </Button>
             </div>
           )}
 
@@ -1484,7 +1627,7 @@ export function ListingImagesView() {
                     bridgeSummary.images === 1 ? "" : "s"
                   } uploaded for ${bridgeSummary.products} product${
                     bridgeSummary.products === 1 ? "" : "s"
-                  }. Printify only exposes the selection step to its own web session, so the last step runs in your browser.`
+                  }. Printify only exposes the mockup selection to its own web session, so the last step runs in your browser tab.`
                 : "The payload is ready."}
             </DialogDescription>
           </DialogHeader>
@@ -1497,46 +1640,88 @@ export function ListingImagesView() {
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <p className="text-[12px] font-medium text-ink">1. Copy the payload</p>
-              <Textarea
-                readOnly
-                value={bridgePayload}
-                className="h-24 font-mono text-[10px]"
-                onFocus={(event) => event.currentTarget.select()}
+            <ol className="grid list-none gap-2 p-0 sm:grid-cols-3">
+              <SendStep
+                step={1}
+                title="Images uploaded"
+                detail={`${bridgeSummary?.images ?? 0} custom mockup${
+                  (bridgeSummary?.images ?? 0) === 1 ? "" : "s"
+                } stored in Printify`}
+                done={(bridgeSummary?.images ?? 0) > 0}
               />
-              <Button size="sm" variant="outline" onClick={() => void copyPayload()}>
-                Copy payload
-              </Button>
-            </div>
+              <SendStep
+                step={2}
+                title={bridgeCopied ? "Payload copied" : "Copy the payload"}
+                detail={
+                  bridgeCopied
+                    ? "On your clipboard - the bookmarklet reads it"
+                    : "It lists the uploaded mockups for the product"
+                }
+                done={bridgeCopied}
+              />
+              <SendStep
+                step={3}
+                title="Run the bookmarklet once"
+                detail="On the product's Printify tab, in your signed-in session"
+                done={false}
+              />
+            </ol>
 
-            <div className="space-y-1.5">
-              <p className="text-[12px] font-medium text-ink">2. Run the bookmarklet on Printify</p>
+            <div className="space-y-1.5 rounded-md border border-border-subtle px-3 py-2">
+              <p className="text-[12px] font-medium text-ink">2. Copy the payload</p>
               <p className="text-[11px] text-ink-muted">
-                Save the bookmarklet once, open the product in Printify, then click it. It reads
-                this payload from the clipboard and uses your own signed-in session. No token
-                leaves printify.com.
+                Already done when step 2 is ticked. Copy it again if you have copied something
+                else since, or open the raw text.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant={bridgeCopied ? "outline" : "secondary"}
+                  onClick={() => void copyPayload()}
+                >
+                  {bridgeCopied ? "Copy again" : "Copy payload"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onClick={() =>
                     window.open("/printify-bookmarklet", "_blank", "noopener,noreferrer")
                   }
                 >
                   Install guide & copy bookmarklet
                 </Button>
-                <Button size="sm" onClick={openPrintify}>
-                  <ExternalLink className="h-3.5 w-3.5" /> Open Printify
-                </Button>
               </div>
+              <details className="text-[11px] text-ink-muted">
+                <summary className="cursor-pointer select-none">Show the payload text</summary>
+                <Textarea
+                  readOnly
+                  value={bridgePayload}
+                  className="mt-1.5 h-24 font-mono text-[10px]"
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+              </details>
+            </div>
+
+            <div className="space-y-1.5 rounded-md border border-border-subtle px-3 py-2">
+              <p className="text-[12px] font-medium text-ink">
+                3. Run the bookmarklet on the Printify product
+              </p>
+              <p className="text-[11px] text-ink-muted">
+                Save the bookmarklet once, open the product in Printify, then click it. It reads
+                this payload from the clipboard and uses your own signed-in session, so the images
+                become that product&apos;s mockups and the first one is the main image. No token
+                leaves printify.com.
+              </p>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button size="sm" variant="ghost" onClick={() => setBridgeOpen(false)}>
               Close
+            </Button>
+            <Button size="sm" onClick={openPrintify}>
+              <ExternalLink className="h-3.5 w-3.5" />
+              {bridgeSummary?.firstProductId ? "Open the Printify product" : "Open Printify"}
             </Button>
           </DialogFooter>
         </DialogContent>

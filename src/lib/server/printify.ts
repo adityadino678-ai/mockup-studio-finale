@@ -82,7 +82,74 @@ export interface PrintifyProvider {
 export interface PrintifyShop {
   id: number;
   title: string;
+  /** The connected sales channel (e.g. "etsy"); empty when there is none. */
   sales_channel?: string;
+}
+
+/** A product together with the shop that actually owns it. */
+export interface PrintifyOwnedProduct {
+  shopId: number;
+  shop: PrintifyShop;
+  product: PrintifyShopProduct;
+}
+
+/** Printify's "Manage my stores" screen, where a sales channel is connected. */
+export const PRINTIFY_MANAGE_STORES_URL = "https://printify.com/app/account/my-stores";
+
+/**
+ * Parses a shop id from a header or a JSON body. Only a positive integer is a
+ * shop id; everything else (blank, "0", "1.5", "abc") is rejected rather than
+ * quietly coerced.
+ */
+export function normalizeShopId(value: unknown): number | undefined {
+  let numeric: unknown = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    // Digits only: "1e3" and "+42" are not shop ids, even though Number()
+    // would accept them.
+    numeric = /^[0-9]+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+  }
+  return typeof numeric === "number" && Number.isInteger(numeric) && numeric > 0
+    ? numeric
+    : undefined;
+}
+
+/** `sales_channel` is a plain string in the API; normalize it once. */
+export function normalizeSalesChannel(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * A shop can publish a product only when Printify reports a sales channel for
+ * it. A shop without one is a "custom/manual" store, and publishing answers
+ * error 8254.
+ */
+export function isSalesChannelConnected(
+  shop: Pick<PrintifyShop, "sales_channel"> | null | undefined,
+): boolean {
+  return normalizeSalesChannel(shop?.sales_channel) !== "";
+}
+
+/** Normalizes the shop list: trimmed strings and usable numeric ids only. */
+export function normalizeShops(shops: PrintifyShop[]): PrintifyShop[] {
+  const out: PrintifyShop[] = [];
+  for (const shop of shops) {
+    const id = normalizeShopId(shop?.id);
+    if (!id) continue;
+    out.push({
+      ...shop,
+      id,
+      title: typeof shop.title === "string" ? shop.title.trim() : "",
+      sales_channel: normalizeSalesChannel(shop.sales_channel),
+    });
+  }
+  return out;
+}
+
+/** The actionable message for a shop that cannot receive an Etsy product. */
+export function salesChannelErrorMessage(shop: { id: number; title: string }): string {
+  const title = shop.title.trim() || `Shop ${shop.id}`;
+  return `Shop "${title}" (#${shop.id}) is not connected to Etsy. Connect it in Printify (Manage my stores), or create and publish this listing in the shop that is connected.`;
 }
 
 /** A product in the shop, as far as the list endpoint reports it. */
@@ -282,12 +349,62 @@ export function createPrintifyClient(explicitKey?: string) {
     return data as T;
   }
 
-  async function resolveShopId(): Promise<number> {
+  async function fetchShops(): Promise<PrintifyShop[]> {
     const shops = await request<PrintifyShop[]>("/shops.json");
-    if (!Array.isArray(shops) || shops.length === 0) {
+    return Array.isArray(shops) ? normalizeShops(shops) : [];
+  }
+
+  /**
+   * Resolves the shop to work in.
+   *
+   * A preferred shop wins when it exists on this account. Otherwise prefer the
+   * first shop that is connected to a sales channel: a product created in an
+   * unconnected shop can never be published (Printify error 8254), so silently
+   * choosing shops[0] is how a publish used to fail after the product existed.
+   */
+  async function resolveShopId(preferred?: number): Promise<number> {
+    const shops = await fetchShops();
+    if (shops.length === 0) {
       throw new PrintifyError("This Printify account has no shops connected", 404, shops);
     }
-    return shops[0].id;
+    const wanted = normalizeShopId(preferred);
+    if (wanted !== undefined) {
+      const match = shops.find((shop) => shop.id === wanted);
+      if (match) return match.id;
+    }
+    const connected = shops.find((shop) => isSalesChannelConnected(shop));
+    return (connected ?? shops[0]).id;
+  }
+
+  /**
+   * Finds the shop that OWNS a product by asking each shop for it, starting
+   * with the preferred one. Printify product ids are unique across the account
+   * but the product API is shop-scoped, so a request to the wrong shop is a
+   * 404 - never an excuse to use that shop anyway.
+   */
+  async function resolveProductShop(
+    preferred: number | undefined,
+    productId: string,
+  ): Promise<PrintifyOwnedProduct | null> {
+    const shops = await fetchShops();
+    const wanted = normalizeShopId(preferred);
+    const preferredShop = wanted === undefined ? undefined : shops.find((shop) => shop.id === wanted);
+    const ordered = preferredShop
+      ? [preferredShop, ...shops.filter((shop) => shop.id !== preferredShop.id)]
+      : shops;
+    for (const shop of ordered) {
+      try {
+        const product = await request<PrintifyShopProduct>(
+          `/shops/${shop.id}/products/${encodeURIComponent(productId)}.json`,
+        );
+        return { shopId: shop.id, shop, product };
+      } catch (error) {
+        // A 404 means "not in this shop" and is expected while searching.
+        if (error instanceof PrintifyError && error.status === 404) continue;
+        throw error;
+      }
+    }
+    return null;
   }
 
   return {
@@ -297,8 +414,7 @@ export function createPrintifyClient(explicitKey?: string) {
 
     /** GET /shops.json */
     async listShops(): Promise<PrintifyShop[]> {
-      const shops = await request<PrintifyShop[]>("/shops.json");
-      return Array.isArray(shops) ? shops : [];
+      return fetchShops();
     },
 
     /**
@@ -417,6 +533,9 @@ export function createPrintifyClient(explicitKey?: string) {
     },
 
     resolveShopId,
+
+    /** The shop that owns a product, searching every shop when needed. */
+    resolveProductShop,
 
     /**
      * POST /shops/{shop_id}/products.json. Builds the documented payload:

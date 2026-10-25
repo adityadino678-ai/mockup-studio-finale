@@ -1,13 +1,16 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
-import { createPrintifyClient, PrintifyError } from "@/lib/server/printify";
+import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/server/printify";
 
 interface MockupBridgeBody {
   /** Explicit confirmation: each image is uploaded twice on Printify's side. */
   confirm: boolean;
   productId: string;
-  /** Optional; resolved from the API key's first shop when omitted. */
+  /**
+   * Optional; the preferred shop. The endpoint searches all shops for the
+   * product, so a stale value cannot upload to the wrong shop.
+   */
   shopId?: number;
   /** The title the app believes this product has; a mismatch aborts. */
   expectedTitle?: string;
@@ -205,14 +208,30 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    const shopId =
-      typeof body.shopId === "number" && Number.isFinite(body.shopId) && body.shopId > 0
-        ? body.shopId
-        : await client.resolveShopId();
+    // --- the shop that owns this product -------------------------------------
+    // The body's shop wins, then the shop saved in Settings. The product API is
+    // shop-scoped, so this asks every shop (preferred first) instead of
+    // uploading mockups to a shop that does not own the product.
+    if (body.shopId != null && normalizeShopId(body.shopId) === undefined) {
+      return json({ error: "shopId must be a positive integer" }, 400);
+    }
+    const preferredShopId = normalizeShopId(body.shopId) ?? creds.printify?.shopId;
+    const owned = await client.resolveProductShop(preferredShopId, productId);
+    if (!owned) {
+      return json(
+        {
+          error: `Printify has no product ${productId} in any shop this key can reach. It may have been deleted, or it belongs to a different Printify account.`,
+          productId,
+          shopId: preferredShopId,
+        },
+        404,
+      );
+    }
+    const shopId = owned.shopId;
 
     // Verify the product id against the title the Studio knows. This is the
     // guard against a stale result pointing at a different product.
-    const product = await client.getProduct(shopId, productId);
+    const product = owned.product;
     const expectedTitle =
       typeof body.expectedTitle === "string" ? body.expectedTitle.trim() : "";
     if (expectedTitle) {

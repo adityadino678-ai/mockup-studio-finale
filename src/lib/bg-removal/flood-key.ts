@@ -3,7 +3,15 @@
 // flood-filling from the image borders with a color tolerance. 100% local,
 // deterministic, license-clean. Alpha is preserved on kept pixels; removed
 // pixels get alpha 0 with a soft tolerance ramp to avoid hard jaggies.
+//
+// After the fill, `refineEdges` repairs the anti-aliased ring the fill could
+// not reach: those pixels are kept, but their RGB is still a blend of the
+// subject and the background, which is what a dark fringe/halo on a dark
+// backdrop actually is. The local background estimate comes from the removed
+// neighbours, so it follows a gradient instead of assuming one colour.
 // ---------------------------------------------------------------------------
+
+import { refineEdges } from "./edge-refine";
 
 export interface FloodKeyOptions {
   /** Color distance (0..255 euclidean RGB) considered "background". */
@@ -33,11 +41,16 @@ export function floodKeyRemoveBackground(
 ): { removedPixels: number } {
   const tolerance = Math.max(0, options.tolerance);
   const softness = Math.max(0, options.softness ?? 32);
+
+  // Snapshot the input's alpha so `removedPixels` can mean exactly one thing:
+  // pixels whose alpha changed (the flood, the feather AND the edge pass).
+  const originalAlpha = new Uint8Array(width * height);
+  for (let i = 0; i < originalAlpha.length; i++) originalAlpha[i] = pixels[i * 4 + 3];
+
   const visited = new Uint8Array(width * height);
   const queue = new Int32Array(width * height);
   let head = 0;
   let tail = 0;
-  let removedPixels = 0;
 
   // Seed colors: the four corners. Each border pixel is compared to its
   // nearest corner's seed color to handle slight gradients.
@@ -84,15 +97,11 @@ export function floodKeyRemoveBackground(
     if (d <= softLimit) {
       if (d <= hardLimit) {
         pixels[p + 3] = 0;
-        removedPixels++;
       } else {
         // Soft ramp between tolerance and tolerance+softness.
         const t = (d - hardLimit) / (softLimit - hardLimit);
         const newAlpha = Math.min(pixels[p + 3], Math.round(255 * t));
-        if (newAlpha < pixels[p + 3]) {
-          pixels[p + 3] = newAlpha;
-          removedPixels++;
-        }
+        if (newAlpha < pixels[p + 3]) pixels[p + 3] = newAlpha;
       }
       // Continue the flood through this pixel's neighbors.
       const x = idx % width;
@@ -104,6 +113,15 @@ export function floodKeyRemoveBackground(
     }
   }
 
+  // Repair the anti-aliased ring the flood left behind. No explicit background
+  // estimate is passed: the helper averages the removed neighbours' colour,
+  // which follows a gradient and a vignette.
+  refineEdges(pixels, width, height);
+
+  let removedPixels = 0;
+  for (let i = 0; i < originalAlpha.length; i++) {
+    if (pixels[i * 4 + 3] !== originalAlpha[i]) removedPixels++;
+  }
   return { removedPixels };
 }
 

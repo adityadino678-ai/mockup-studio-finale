@@ -38,6 +38,8 @@ export interface AiProviderConfig {
  */
 export interface IntegrationConfig {
   printifyKey: string;
+  /** The Printify shop chosen in Settings, used for creation, Send and Publish. */
+  printifyShopId?: number;
   /** Provider id currently selected. */
   activeProvider: string;
   /** Model id currently selected (mirror of providers[activeProvider].model). */
@@ -47,6 +49,7 @@ export interface IntegrationConfig {
 
 export const EMPTY_INTEGRATIONS: IntegrationConfig = {
   printifyKey: "",
+  printifyShopId: undefined,
   activeProvider: DEFAULT_PROVIDER_ID,
   activeModel: "",
   providers: {},
@@ -68,10 +71,19 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * A shop id is only ever a positive integer. Anything else stored by an older
+ * build (a string, a nested object, NaN) is dropped instead of being sent on.
+ */
+function asShopId(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 /** Normalizes whatever is in IndexedDB (new shape or legacy) into the new shape. */
 export function migrateIntegrations(stored: Partial<IntegrationConfig> & LegacyIntegrations): IntegrationConfig {
   const config: IntegrationConfig = {
     printifyKey: asString(stored.printifyKey),
+    printifyShopId: asShopId(stored.printifyShopId),
     activeProvider: asString(stored.activeProvider) || DEFAULT_PROVIDER_ID,
     activeModel: asString(stored.activeModel),
     providers: {},
@@ -166,6 +178,8 @@ export function integrationHeaders(config: IntegrationConfig): Record<string, st
   const headers: Record<string, string> = {};
   const printifyKey = config.printifyKey.trim();
   if (printifyKey) headers["x-printify-key"] = printifyKey;
+  const printifyShopId = asShopId(config.printifyShopId);
+  if (printifyShopId !== undefined) headers["x-printify-shop"] = String(printifyShopId);
 
   const def = activeProvider(config);
   const providerConfig = activeProviderConfig(config);

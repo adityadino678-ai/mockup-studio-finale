@@ -45,6 +45,30 @@ describe("credentialsFromRequest", () => {
     expect(creds.printify).toEqual({ apiKey: "server-key", source: "server" });
   });
 
+  it("reads a positive shop id from x-printify-shop and ignores anything else", () => {
+    const creds = credentialsFromRequest(
+      req({ "x-printify-key": "browser-key", "x-printify-shop": " 42 " }),
+    );
+    expect(creds.printify).toEqual({
+      apiKey: "browser-key",
+      shopId: 42,
+      source: "browser",
+    });
+
+    for (const bad of ["0", "-3", "1.5", "abc", "   ", "1e3"]) {
+      const invalid = credentialsFromRequest(
+        req({ "x-printify-key": "browser-key", "x-printify-shop": bad }),
+      );
+      expect(invalid.printify?.shopId).toBeUndefined();
+    }
+  });
+
+  it("keeps the server key usable without a shop header", () => {
+    process.env.PRINTIFY_API_KEY = "server-key";
+    const creds = credentialsFromRequest(req({ "x-printify-shop": "7" }));
+    expect(creds.printify).toEqual({ apiKey: "server-key", shopId: 7, source: "server" });
+  });
+
   it("resolves the base URL from the provider registry", () => {
     const creds = credentialsFromRequest(
       req({ "x-ai-key": "k", "x-ai-provider": "groq", "x-ai-model": "llama-3.3-70b-versatile" }),
@@ -128,6 +152,31 @@ describe("integrationHeaders", () => {
     expect(headers["x-ai-base-url"]).toBeUndefined();
     expect(headers["x-ai-key"]).toBe("nvapi-x");
   });
+
+  it("sends the saved Printify shop as x-printify-shop", () => {
+    const headers = integrationHeaders({
+      printifyKey: "pp_live",
+      printifyShopId: 4242,
+      activeProvider: "custom",
+      activeModel: "",
+      providers: {},
+    });
+    expect(headers["x-printify-shop"]).toBe("4242");
+    expect(headers["x-printify-key"]).toBe("pp_live");
+  });
+
+  it("omits x-printify-shop when no usable shop is saved", () => {
+    for (const printifyShopId of [undefined, 0, -1, 1.5, Number.NaN]) {
+      const headers = integrationHeaders({
+        printifyKey: "pp",
+        printifyShopId,
+        activeProvider: "custom",
+        activeModel: "",
+        providers: {},
+      });
+      expect(headers["x-printify-shop"]).toBeUndefined();
+    }
+  });
 });
 
 describe("migrateIntegrations", () => {
@@ -157,6 +206,31 @@ describe("migrateIntegrations", () => {
     });
     expect(migrated.activeProvider).toBe("groq");
     expect(migrated.providers.openrouter.apiKey).toBe("o");
+  });
+
+  it("keeps a saved shop id that is a positive integer", () => {
+    expect(migrateIntegrations({ printifyKey: "pp", printifyShopId: 7 }).printifyShopId).toBe(7);
+  });
+
+  it("drops a shop id that is not a finite positive integer", () => {
+    for (const printifyShopId of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const migrated = migrateIntegrations({
+        printifyKey: "pp",
+        printifyShopId: printifyShopId as number,
+      });
+      expect(migrated.printifyShopId).toBeUndefined();
+    }
+    // A string from a hand-edited/legacy blob is not a number.
+    const asString = migrateIntegrations({
+      printifyKey: "pp",
+      printifyShopId: "7" as unknown as number,
+    });
+    expect(asString.printifyShopId).toBeUndefined();
+  });
+
+  it("has no shop selected in a fresh config", () => {
+    expect(EMPTY_INTEGRATIONS.printifyShopId).toBeUndefined();
+    expect(migrateIntegrations({}).printifyShopId).toBeUndefined();
   });
 });
 

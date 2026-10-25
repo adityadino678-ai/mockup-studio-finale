@@ -41,7 +41,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db, getSetting, setSetting } from "@/lib/db/schema";
 import { getAssetBlob, logActivity } from "@/lib/db/repo";
-import { authedFetch } from "@/lib/client/integrations";
+import { authedFetch, loadIntegrations } from "@/lib/client/integrations";
 import { mockupImageForUpload } from "@/lib/client/mockup-upload";
 import { confirmPrintifyProduct } from "@/lib/client/tools";
 import { fetchVariants } from "@/lib/printify/catalog-client";
@@ -182,6 +182,47 @@ interface UploadResponse {
   detail?: string;
 }
 
+/** One row of GET /api/printify/shops. */
+interface ShopOption {
+  id: number;
+  title: string;
+  salesChannel: string;
+  connected: boolean;
+}
+
+/** The publish endpoint's response, including its 8254 details. */
+interface PublishResponse {
+  published?: boolean;
+  productId?: string;
+  shopId?: number;
+  error?: string;
+  detail?: string;
+  code?: number;
+  shopTitle?: string;
+  connectUrl?: string;
+}
+
+/**
+ * A failed publish that carries the shop Printify blames, so the dialog can
+ * show the connect link instead of only a sentence.
+ */
+class PublishFailure extends Error {
+  readonly code?: number;
+  readonly shop?: { id: number; title: string };
+  readonly connectUrl?: string;
+
+  constructor(
+    message: string,
+    details: { code?: number; shop?: { id: number; title: string }; connectUrl?: string } = {},
+  ) {
+    super(message);
+    this.name = "PublishFailure";
+    this.code = details.code;
+    this.shop = details.shop;
+    this.connectUrl = details.connectUrl;
+  }
+}
+
 type StepKey = "create" | "images" | "mockups" | "publish";
 
 type StepStatus = "pending" | "running" | "done" | "failed" | "waiting" | "skipped";
@@ -206,6 +247,12 @@ interface PipelineState {
   phase: PipelinePhase;
   /** Printify's own message, verbatim, when the run stopped. */
   error?: string;
+  /** The upstream code (8254 = the shop is not connected to a sales channel). */
+  errorCode?: number;
+  /** The shop a failed publish points at, when there is one. */
+  errorShop?: { id: number; title: string };
+  /** Where to connect the shop's sales channel. */
+  errorConnectUrl?: string;
   /** The clipboard payload built in the mockup-selection step. */
   payload?: string;
 }
@@ -345,6 +392,90 @@ export function ListingPreviewView() {
       cancelled = true;
     };
   }, []);
+
+  // --- the saved Printify shop ----------------------------------------------
+  // The selection is browser-local (Settings), so it is read from IndexedDB;
+  // the shop list itself comes from the read-only endpoint. Publishing to the
+  // wrong shop is error 8254, so the preview checks this BEFORE the button.
+  const [shops, setShops] = React.useState<ShopOption[] | null>(null);
+  const [shopsError, setShopsError] = React.useState<string | null>(null);
+  const [savedShopId, setSavedShopId] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const config = await loadIntegrations();
+        const saved = config.printifyShopId;
+        if (!cancelled) {
+          setSavedShopId(
+            typeof saved === "number" && Number.isInteger(saved) && saved > 0 ? saved : null,
+          );
+        }
+        const response = await authedFetch("/api/printify/shops");
+        const data = (await response.json().catch(() => null)) as
+          | { shops?: ShopOption[]; error?: string }
+          | null;
+        if (cancelled) return;
+        if (!response.ok) {
+          setShops([]);
+          setShopsError(
+            data?.error ?? `Could not read the Printify shops (HTTP ${response.status}).`,
+          );
+          return;
+        }
+        setShops(Array.isArray(data?.shops) ? data.shops : []);
+        setShopsError(null);
+      } catch (error) {
+        if (!cancelled) {
+          setShops([]);
+          setShopsError(
+            error instanceof Error ? error.message : "Could not read the Printify shops",
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** The shop saved in Settings, when it still exists on the account. */
+  const selectedShop = React.useMemo(
+    () => (shops ?? []).find((shop) => shop.id === savedShopId),
+    [shops, savedShopId],
+  );
+
+  /**
+   * The shop this page would actually publish to.
+   *
+   * It is ONLY the saved selection. Falling back to the first connected shop
+   * here would make the UI name a store the user never chose, while the
+   * preflight correctly refuses to run without a selection.
+   */
+  const targetShop = React.useMemo(() => {
+    if (!shops || savedShopId == null) return undefined;
+    return selectedShop;
+  }, [shops, savedShopId, selectedShop]);
+
+  const shopBlockedReason = React.useMemo((): string | null => {
+    if (shopsError) {
+      return `The Printify shop list could not be read: ${shopsError}`;
+    }
+    // Do not let a run start before the target shop is verified: the check is
+    // the whole point of this page's preflight.
+    if (shops === null) return "Reading the Printify shop list…";
+    if (savedShopId == null) {
+      return "No Printify shop is selected. Choose the shop to publish to in Settings.";
+    }
+    if (!selectedShop) {
+      return `The saved Printify shop (#${savedShopId}) is not in this account's shop list. Refresh the list in Settings and choose a shop again.`;
+    }
+    if (!selectedShop.connected) {
+      return `Shop "${selectedShop.title}" (#${selectedShop.id}) is not connected to a sales channel (Etsy). Publishing to it fails with error 8254 — connect it in Printify, or choose a connected shop in Settings.`;
+    }
+    return null;
+  }, [shops, shopsError, savedShopId, selectedShop]);
 
   // Live, not one-shot: the Studio, the Mockups panel and the agent all write
   // the same blob, and a preview that contradicts them would be a lie.
@@ -630,6 +761,9 @@ export function ListingPreviewView() {
           }. Check the key in Settings.`,
         );
       }
+      if (printifyConfigured !== false && shopBlockedReason) {
+        blockers.push(shopBlockedReason);
+      }
       if (!copy.title.trim()) blockers.push("Add a title on Listing details.");
       if (!copy.description.trim()) blockers.push("Add a description on Listing details.");
       if (!copy.hasPrice) blockers.push("Set a price on Listing details.");
@@ -649,6 +783,14 @@ export function ListingPreviewView() {
           blockers.push(
             `This pair has no Printify product yet. Create it once on the Printify Studio's Design panel, which builds both halves' artwork, then publish it here.`,
           );
+        } else if (listing.row === "ink") {
+          // An unpaired ink design is the same problem with one artwork: it
+          // needs a print-area group for its main artwork and one for its ink
+          // artwork. This page's creation path takes a single artwork, so it
+          // would print the main artwork on the ink colours.
+          blockers.push(
+            `This design prints ink artwork on some colours. Create its Printify product once on the Printify Studio's Design panel, which builds the ink artwork groups, then publish it here.`,
+          );
         } else if (variantPlan.error) {
           blockers.push(variantPlan.error);
         } else if (variantPlan.ids.length === 0) {
@@ -663,7 +805,7 @@ export function ListingPreviewView() {
       }
       return blockers;
     },
-    [copyFor, selectionFor, currentEntry, productsByListing, catalog, printifyConfigured, variantPlan],
+    [copyFor, selectionFor, currentEntry, productsByListing, catalog, printifyConfigured, variantPlan, shopBlockedReason],
   );
 
   const checksFor = React.useCallback(
@@ -750,9 +892,37 @@ export function ListingPreviewView() {
           href: "/printify-studio",
           action: "Fix the variants",
         },
+        {
+          key: "shop",
+          label: "Shop",
+          ok: !shopBlockedReason && Boolean(targetShop?.connected),
+          detail: shopBlockedReason
+            ? shopBlockedReason
+            : targetShop
+              ? `${targetShop.title || "Untitled shop"} (#${targetShop.id}) — ${
+                  targetShop.connected
+                    ? targetShop.salesChannel
+                      ? `connected to ${targetShop.salesChannel}`
+                      : "connected to a sales channel"
+                    : "not connected"
+                }`
+              : "Reading the Printify shop list…",
+          href: "/settings",
+          action: "Choose the shop",
+        },
       ];
     },
-    [copyFor, selectionFor, currentEntry, productsByListing, variantPlan, colourCounts, session.sizes],
+    [
+      copyFor,
+      selectionFor,
+      currentEntry,
+      productsByListing,
+      variantPlan,
+      colourCounts,
+      session.sizes,
+      shopBlockedReason,
+      targetShop,
+    ],
   );
 
   // --- the publish run -------------------------------------------------------
@@ -776,12 +946,16 @@ export function ListingPreviewView() {
 
   const failRun = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
+    const failure = error instanceof PublishFailure ? error : null;
     setPipeline((prev) =>
       prev
         ? {
             ...prev,
             phase: "failed",
             error: message,
+            errorCode: failure?.code,
+            errorShop: failure?.shop,
+            errorConnectUrl: failure?.connectUrl,
             // The step that was running is the one that failed: the steps
             // before it stay done, and nothing after it ran.
             steps: prev.steps.map((step) =>
@@ -798,7 +972,12 @@ export function ListingPreviewView() {
    * Bookkeeping only: the product exists on Printify either way, so a failed
    * local write is reported as a note, never as a failed publish.
    */
-  const rememberProduct = async (listing: StudioListing, title: string, productId: string) => {
+  const rememberProduct = async (
+    listing: StudioListing,
+    title: string,
+    productId: string,
+    shopId?: number,
+  ) => {
     try {
       const stored = await getSetting<StudioProductResult[]>(RESULTS_KEY, []);
       const list = Array.isArray(stored) ? stored : [];
@@ -809,7 +988,7 @@ export function ListingPreviewView() {
         status: "created",
         remoteProductId: productId,
         createdAt: Date.now(),
-        shopId: undefined,
+        shopId,
       };
       await setSetting(
         RESULTS_KEY,
@@ -934,7 +1113,10 @@ export function ListingPreviewView() {
     setPipeline((prev) => (prev ? { ...prev, phase: "running" } : prev));
     try {
       let productId = linked?.productId;
-      let shopId = linked?.shopId;
+      // The selected shop is the preferred shop. `/api/printify/products` reads
+      // it from the same saved selection through `x-printify-shop`, so the
+      // creation path and this request address one shop.
+      let shopId = selectedShop?.id ?? linked?.shopId;
       let productTitle = linked?.title;
       let createdHere = false;
 
@@ -978,10 +1160,10 @@ export function ListingPreviewView() {
         // that already existed.
         productTitle = copy.title;
         createdHere = true;
-        await rememberProduct(listing, copy.title, productId);
+        await rememberProduct(listing, copy.title, productId, shopId);
         patchStep("create", {
           status: "done",
-          detail: `Created draft ${productId} — still unpublished.`,
+          detail: `Created draft ${productId} in shop ${shopId ?? "resolved by Printify"} — still unpublished.`,
         });
       } else {
         patchStep("create", {
@@ -1084,14 +1266,27 @@ export function ListingPreviewView() {
       const response = await authedFetch("/api/printify/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm: true, productId }),
+        body: JSON.stringify({
+          confirm: true,
+          productId,
+          ...(selectedShop ? { shopId: selectedShop.id } : {}),
+        }),
       });
-      const data = (await response.json().catch(() => null)) as {
-        published?: boolean;
-        error?: string;
-        detail?: string;
-      } | null;
+      const data = (await response.json().catch(() => null)) as PublishResponse | null;
       if (!response.ok || !data?.published) {
+        if (data?.code === 8254) {
+          // The shop is not connected to Etsy. The endpoint names the shop and
+          // where to connect it; carry that through to the dialog instead of
+          // flattening it into one sentence.
+          throw new PublishFailure(upstreamError(data, response.status), {
+            code: 8254,
+            shop:
+              typeof data.shopId === "number"
+                ? { id: data.shopId, title: data.shopTitle ?? "" }
+                : undefined,
+            connectUrl: data.connectUrl,
+          });
+        }
         throw new Error(upstreamError(data, response.status));
       }
 
@@ -1444,6 +1639,36 @@ export function ListingPreviewView() {
                           <span className="text-ink-muted">Not created yet</span>
                         )}
                       </dd>
+                      <dt className="text-ink-muted">Target shop</dt>
+                      <dd className="text-ink">
+                        {targetShop ? (
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            {targetShop.title || "Untitled shop"}
+                            <span className="font-mono text-[11px] text-ink-muted">
+                              #{targetShop.id}
+                            </span>
+                            {targetShop.connected ? (
+                              <Badge variant="muted">
+                                {targetShop.salesChannel || "connected"}
+                              </Badge>
+                            ) : (
+                              <Badge variant="warning">Not connected</Badge>
+                            )}
+                          </span>
+                        ) : shops === null ? (
+                          <span className="text-ink-muted">Reading the shop list…</span>
+                        ) : savedShopId != null ? (
+                          <span className="text-warning">
+                            Saved shop #{savedShopId} is missing from this account
+                          </span>
+                        ) : (
+                          <span className="text-warning">No shop selected</span>
+                        )}
+                        {" · "}
+                        <Link href="/settings" className="text-forest underline">
+                          Change
+                        </Link>
+                      </dd>
                     </dl>
                   </div>
                 </div>
@@ -1595,6 +1820,12 @@ export function ListingPreviewView() {
                     {pipelineCopy?.tags.length ?? 0} tag
                     {(pipelineCopy?.tags.length ?? 0) === 1 ? "" : "s"}
                   </p>
+                  <p className="text-ink-muted">
+                    Target shop:{" "}
+                    {targetShop
+                      ? `${targetShop.title || "Untitled shop"} (#${targetShop.id})`
+                      : "not resolved"}
+                  </p>
                   {!pipelineLinked &&
                     pipelineListing &&
                     Math.abs(placementFor(session, pipelineListing.designId).scale - 1) > 0.001 && (
@@ -1718,6 +1949,29 @@ export function ListingPreviewView() {
                     The run stopped. Nothing was retried and nothing after this step ran.
                   </p>
                   <p className="break-words font-mono text-[11px] text-danger">{pipeline.error}</p>
+                  {pipeline.errorCode === 8254 && (
+                    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-danger">
+                      {pipeline.errorShop && (
+                        <span>
+                          Shop {pipeline.errorShop.title ? `"${pipeline.errorShop.title}" ` : ""}
+                          (#{pipeline.errorShop.id}) has no sales channel.
+                        </span>
+                      )}
+                      {pipeline.errorConnectUrl && (
+                        <a
+                          href={pipeline.errorConnectUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 font-medium underline"
+                        >
+                          Connect it in Printify <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      <Link href="/settings" className="inline-flex items-center gap-1 font-medium underline">
+                        Choose a connected shop in Settings
+                      </Link>
+                    </p>
+                  )}
                 </div>
               )}
 

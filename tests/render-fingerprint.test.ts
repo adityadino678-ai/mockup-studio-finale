@@ -221,8 +221,73 @@ describe("computeRenderFingerprint", () => {
     extra: {
       fallbackTransform?: Transform | null;
       behindMockup?: boolean | null;
+      designId?: string | null;
     } = {},
   ) => computeRenderFingerprint({ designAssetId: "art", mockup: m, placement: place, ...extra });
+
+  it("is version 3", () => {
+    expect(JSON.parse(fpOf(areaMockup())).version).toBe(3);
+    expect(JSON.parse(fpOf(mockup("m1", "tshirt"))).version).toBe(3);
+  });
+
+  it("hashes the design's own area, so two designs on one mockup differ", () => {
+    const shared = area();
+    const withOverrides: Mockup = {
+      ...mockup("m1", "tshirt"),
+      printArea: shared,
+      designAreas: {
+        a: area({ frame: { ...FRAME, scale: 0.2 } }),
+        b: area({ frame: { ...FRAME, scale: 0.55 } }),
+      },
+    };
+
+    const designA = fpOf(withOverrides, placement(0.5), { designId: "a" });
+    const designB = fpOf(withOverrides, placement(0.5), { designId: "b" });
+    expect(designA).not.toBe(designB);
+    // The pixels differ, so the strings must differ - and each one names its
+    // own frame, not whichever area happened to be the shared default.
+    expect(JSON.parse(designA).mockup.printArea.frame.scale).toBe(0.2);
+    expect(JSON.parse(designB).mockup.printArea.frame.scale).toBe(0.55);
+
+    // A design with no entry falls back to the shared base area, exactly like
+    // `printAreaOf(mockup, designId)` says.
+    expect(fpOf(withOverrides, placement(0.5), { designId: "c" })).toBe(
+      fpOf(withOverrides, placement(0.5), { designId: null }),
+    );
+
+    // The listing path resolves the area from ITS OWN design too.
+    const listingFor = (designId: string): StudioListing => ({
+      ...listing,
+      listingId: `l-${designId}`,
+      designId,
+    });
+    expect(
+      listingImageFingerprint({
+        listing: listingFor("a"),
+        mockup: withOverrides,
+        placement: placement(0.5),
+      }),
+    ).not.toBe(
+      listingImageFingerprint({
+        listing: listingFor("b"),
+        mockup: withOverrides,
+        placement: placement(0.5),
+      }),
+    );
+  });
+
+  it("treats a null design override as 'no area', not as the shared area", () => {
+    const withNullOverride: Mockup = {
+      ...mockup("m1", "tshirt"),
+      printArea: area(),
+      designAreas: { a: null },
+    };
+    const bare: Mockup = { ...mockup("m1", "tshirt") };
+
+    expect(fpOf(withNullOverride, placement(0.5), { designId: "a" })).toBe(
+      fpOf(bare, placement(0.5), { designId: "a" }),
+    );
+  });
 
   it("changes when any pixel-affecting field changes", () => {
     const start = fpOf(areaMockup());
@@ -255,6 +320,101 @@ describe("computeRenderFingerprint", () => {
         placement: placement(0.5),
       }),
     ).not.toBe(start);
+  });
+
+  it("hashes the effective behind-garment mode, never a null override", () => {
+    // With an area the compositor follows `clipMode`, so the hash does too.
+    const plain = fpOf(areaMockup());
+    const behind = fpOf(areaMockup({ clipMode: "behind-garment" }));
+    expect(JSON.parse(plain).behindMockup).toBe(false);
+    expect(JSON.parse(behind).behindMockup).toBe(true);
+    // An explicit override is still the mode the pixels use.
+    expect(JSON.parse(fpOf(areaMockup(), placement(0.5), { behindMockup: true })).behindMockup).toBe(
+      true,
+    );
+    // Without an area the saved flag decides, and its absence means `false`.
+    expect(JSON.parse(fpOf(mockup("m1", "tshirt"))).behindMockup).toBe(false);
+    expect(
+      JSON.parse(fpOf(mockup("m1", "tshirt"), placement(0.5), { behindMockup: true }))
+        .behindMockup,
+    ).toBe(true);
+  });
+
+  it("agrees between a panel render from the SAVED area and the listing path", async () => {
+    const withArea = mockup("m1", "tshirt", area());
+    const place = placement(0.62, 4);
+
+    // The Mockups panel renders from the area on screen. When that area is the
+    // stored one (the draft was flushed), the fingerprint must equal the
+    // listing's, even though the listing also holds a saved placement row.
+    const panel = await resolveRenderPlanWithFingerprint({
+      designId: "d1",
+      designAssetId: listing.artworkAssetId,
+      mockup: withArea,
+      areaOverride: area(),
+      placementOverride: place,
+    });
+
+    expect(panel.fp).toBe(
+      listingImageFingerprint({
+        listing,
+        mockup: withArea,
+        placement: place,
+        saved: {
+          transform: { ...DEFAULT_TRANSFORM, x: 0.2, scale: 0.3 },
+          behindMockup: false,
+        },
+      }),
+    );
+
+    // And the same holds for a behind-garment area, where the saved row says
+    // the opposite: the area owns the mode on both sides.
+    const behindArea = mockup("m1", "tshirt", area({ clipMode: "behind-garment" }));
+    const behindPanel = await resolveRenderPlanWithFingerprint({
+      designId: "d1",
+      designAssetId: listing.artworkAssetId,
+      mockup: behindArea,
+      placementOverride: place,
+    });
+    expect(behindPanel.fp).toBe(
+      listingImageFingerprint({
+        listing,
+        mockup: behindArea,
+        placement: place,
+        saved: { transform: DEFAULT_TRANSFORM, behindMockup: false },
+      }),
+    );
+    expect(JSON.parse(behindPanel.fp).behindMockup).toBe(true);
+
+    // A per-design override is hashed by both sides, so a panel render from
+    // design A's own frame matches the listing for design A.
+    const ownArea = area({ frame: { ...FRAME, scale: 0.45 } });
+    const withOverride: Mockup = {
+      ...mockup("m1", "tshirt"),
+      printArea: area(),
+      designAreas: { d1: ownArea },
+    };
+    const ownPanel = await resolveRenderPlanWithFingerprint({
+      designId: "d1",
+      designAssetId: listing.artworkAssetId,
+      mockup: withOverride,
+      areaOverride: ownArea,
+      placementOverride: place,
+    });
+    expect(ownPanel.fp).toBe(
+      listingImageFingerprint({ listing, mockup: withOverride, placement: place }),
+    );
+
+    // A draft area that is genuinely different is NOT silently made equal: the
+    // pixels differ until the draft is saved, and the hash says so.
+    const draft = await resolveRenderPlanWithFingerprint({
+      designId: "d1",
+      designAssetId: listing.artworkAssetId,
+      mockup: withArea,
+      areaOverride: area({ frame: { ...FRAME, scale: 0.5 } }),
+      placementOverride: place,
+    });
+    expect(draft.fp).not.toBe(panel.fp);
   });
 
   it("hashes the fallback transform only when there is no print area", async () => {

@@ -20,7 +20,15 @@
 //     loop, which runs long enough that a fresh read is worth it.
 //
 // An asset without a recorded `renderFp` cannot prove what produced it, so it
-// is never adopted — the listing re-renders instead of guessing.
+// is never adopted automatically — the listing re-renders instead of guessing.
+//
+// Renders that PREDATE the fingerprint (saved before `renderFp` existed) can
+// never match, and that is not a reason to hide the user's library. The
+// second, deliberately manual path below finds the newest saved render of a
+// pair whatever fingerprint it carries (`buildSavedRenderIndex`,
+// `latestSavedRenderIn`, `findLatestSavedRender`) and turns it into a session
+// entry under the CURRENT fingerprint (`linkSavedRenderEntries`). Only an
+// explicit click calls that; nothing is ever linked silently.
 // ---------------------------------------------------------------------------
 
 import { db } from "@/lib/db/schema";
@@ -101,4 +109,104 @@ export function adoptedRenderEntry(params: {
     mockupId: params.mockupId,
     renderedAt: params.asset.createdAt,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Linking renders that predate the fingerprint.
+// ---------------------------------------------------------------------------
+
+/**
+ * Groups EVERY saved render by the pair it was rendered from, newest first.
+ *
+ * Unlike `buildAdoptionIndex` this keeps assets with no `renderFp`: the point
+ * is to find pixels the user already saved, not to prove what made them. The
+ * newest-first order is what makes "the latest saved render" deterministic.
+ */
+export function buildSavedRenderIndex(assets: AssetMeta[]): Map<string, AssetMeta[]> {
+  const index = new Map<string, AssetMeta[]>();
+  for (const asset of assets) {
+    if (asset.kind !== "mockup-render") continue;
+    if (!asset.parentId || !asset.sourceMockupId) continue;
+    const key = adoptionKey(asset.parentId, asset.sourceMockupId);
+    const bucket = index.get(key);
+    if (bucket) bucket.push(asset);
+    else index.set(key, [asset]);
+  }
+  for (const bucket of index.values()) {
+    bucket.sort((a, b) => b.createdAt - a.createdAt);
+  }
+  return index;
+}
+
+/** The newest saved render of the pair, whatever fingerprint it carries. */
+export function latestSavedRenderIn(
+  index: Map<string, AssetMeta[]>,
+  artworkAssetId: string,
+  mockupId: string,
+): AssetMeta | null {
+  return index.get(adoptionKey(artworkAssetId, mockupId))?.[0] ?? null;
+}
+
+/**
+ * The on-demand form of `latestSavedRenderIn`, for a caller that does not hold
+ * the live asset list.
+ */
+export async function findLatestSavedRender(params: {
+  artworkAssetId: string;
+  mockupId: string;
+}): Promise<AssetMeta | null> {
+  const candidates = await db.assets
+    .where("parentId")
+    .equals(params.artworkAssetId)
+    .filter(
+      (asset) =>
+        asset.kind === "mockup-render" &&
+        asset.sourceMockupId === params.mockupId,
+    )
+    .toArray();
+  return candidates.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+}
+
+/** One tile the "link saved renders" button can act on. */
+export interface LinkableRenderTarget {
+  /** The session key the entry is written under (`<listingId>:<mockupId>`). */
+  key: string;
+  artworkAssetId: string;
+  designId: string;
+  mockupId: string;
+  /** The fingerprint the listing would render NOW. */
+  fingerprint: string;
+  /**
+   * A current session render or a fingerprint-matched adopted asset already
+   * covers this tile, so linking would only overwrite something fresher.
+   */
+  covered: boolean;
+}
+
+/**
+ * The session entries an explicit "link saved renders" click writes.
+ *
+ * Each entry records the NEWEST saved asset of the pair under the CURRENT
+ * fingerprint. That is the deliberate trade: the pixels are pinned to what the
+ * user saved, and the listing stops asking for a re-render. It is only honest
+ * because the click is explicit and the dialog says the assumption out loud.
+ * Tiles that already have current pixels are skipped.
+ */
+export function linkSavedRenderEntries(
+  index: Map<string, AssetMeta[]>,
+  targets: LinkableRenderTarget[],
+): Record<string, StudioListingRender> {
+  const entries: Record<string, StudioListingRender> = {};
+  for (const target of targets) {
+    if (target.covered) continue;
+    const asset = latestSavedRenderIn(index, target.artworkAssetId, target.mockupId);
+    if (!asset) continue;
+    entries[target.key] = adoptedRenderEntry({
+      asset,
+      fingerprint: target.fingerprint,
+      designId: target.designId,
+      mockupId: target.mockupId,
+    });
+  }
+  return entries;
 }

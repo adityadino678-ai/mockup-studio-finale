@@ -50,13 +50,27 @@ function stableValue(value: unknown): unknown {
 /**
  * Everything that changes the pixels, and nothing that does not.
  *
- * This is the ONE source of the render fingerprint (version 2): the listing
+ * This is the ONE source of the render fingerprint (version 3): the listing
  * path calls it, `resolveRenderPlanWithFingerprint` calls it, and the value it
  * returns is what `renderComposition` stores as `renderFp` on the asset.
+ *
+ * Version 3 fixes the two ways the same pixels could hash differently:
+ *
+ *   * the print area is resolved for THIS design (`printAreaOf(mockup,
+ *     designId)`), so a per-design override is what gets hashed rather than
+ *     whichever area happened to be the shared default; and
+ *   * `behindMockup` is the EFFECTIVE compositing mode, not the raw override:
+ *     with an area it follows `clipMode`, without one it is the saved flag,
+ *     defaulting to `false`. The Mockups panel (which passes no override) and
+ *     the listing path (which has a saved placement row) therefore produce the
+ *     same string for the same pixels. A hash of `null` vs `false` is exactly
+ *     what stopped a panel render from ever being adopted.
  */
 export function computeRenderFingerprint(params: {
   designAssetId: string;
-  mockup: Pick<Mockup, "assetId" | "width" | "height" | "printArea">;
+  /** Resolves this design's own print-area override, when it has one. */
+  designId?: string | null;
+  mockup: Pick<Mockup, "assetId" | "width" | "height" | "printArea" | "designAreas">;
   placement: StudioPlacement;
   /**
    * The saved mockup placement, used only when the mockup has NO print area.
@@ -66,11 +80,24 @@ export function computeRenderFingerprint(params: {
   fallbackTransform?: Transform | null;
   /** Overrides the print area's behind-garment mode when the user set one. */
   behindMockup?: boolean | null;
+  /**
+   * The area the caller actually rendered from. Omitted, the mockup's own area
+   * for `designId` is resolved here; `null` means "this render had no area".
+   */
+  area?: MockupPrintArea | null;
 }): string {
-  const area = printAreaOf(params.mockup);
+  const area =
+    params.area !== undefined
+      ? (params.area ?? undefined)
+      : printAreaOf(params.mockup, params.designId);
+  // The value the compositor ends up using (see `resolveRenderPlan`), never an
+  // arbitrary null: an absent override means "the area's mode", and a mockup
+  // with no area draws the design on top unless the saved row says otherwise.
+  const behindMockup =
+    params.behindMockup ?? (area ? area.clipMode === "behind-garment" : false);
   return JSON.stringify(
     stableValue({
-      version: 2,
+      version: 3,
       designAssetId: params.designAssetId,
       mockup: {
         assetId: params.mockup.assetId,
@@ -95,7 +122,7 @@ export function computeRenderFingerprint(params: {
         angle: params.placement.angle,
       },
       fallbackTransform: params.fallbackTransform ?? null,
-      behindMockup: params.behindMockup ?? null,
+      behindMockup,
     }),
   );
 }
@@ -116,17 +143,21 @@ export function listingRenderFingerprint(
  */
 export function listingImageFingerprint(params: {
   listing: StudioListing;
-  mockup: Pick<Mockup, "assetId" | "width" | "height" | "printArea">;
+  mockup: Pick<Mockup, "assetId" | "width" | "height" | "printArea" | "designAreas">;
   placement: StudioPlacement;
   saved?: Pick<Placement, "transform" | "behindMockup"> | null;
 }): string {
-  const area = printAreaOf(params.mockup);
+  const area = printAreaOf(params.mockup, params.listing.designId);
   return computeRenderFingerprint({
     designAssetId: params.listing.artworkAssetId,
+    designId: params.listing.designId,
     mockup: params.mockup,
     placement: params.placement,
     fallbackTransform: area ? null : (params.saved?.transform ?? DEFAULT_TRANSFORM),
-    behindMockup: params.saved?.behindMockup ?? null,
+    // A print area owns the compositing mode. The per-placement flag is only
+    // meaningful when there is no area to read a clip mode from, so hashing it
+    // there is what makes this equal to the panel's fingerprint.
+    behindMockup: area ? null : (params.saved?.behindMockup ?? null),
   });
 }
 
@@ -146,9 +177,14 @@ export function isListingRenderFresh(
  *
  * The fingerprint is computed from the plan itself: the plan's area (an
  * `areaOverride` is what actually renders, so it is what gets hashed), the
- * plan's placement, and the RAW `behindMockup` override — the same value the
- * listing path hashes, not the plan's clip-mode default — so both paths agree
- * byte for byte on the same inputs.
+ * plan's placement, and the plan's EFFECTIVE `behindMockup` — never a raw
+ * `null`. Hashing the effective mode is what lets a panel render saved from an
+ * unsaved draft area match the listing once that draft is stored: the draft's
+ * pixel fields and the stored area's pixel fields are the same, and the
+ * compositing mode is derived the same way on both sides.
+ *
+ * The area is resolved here for THIS design and handed to the plan as its
+ * override, so the pixels and the hash can never read two different areas.
  */
 export async function resolveRenderPlanWithFingerprint(params: {
   designId: string;
@@ -163,11 +199,20 @@ export async function resolveRenderPlanWithFingerprint(params: {
   /** Overrides the print area's compositing mode. */
   behindMockup?: boolean | null;
 }): Promise<{ plan: RenderPlan; fp: string }> {
+  // `areaOverride: undefined` means "resolve the stored area" — which, for a
+  // design tab, is that design's override. `null` is an explicit "no area".
+  const area =
+    params.areaOverride !== undefined
+      ? (params.areaOverride ?? undefined)
+      : printAreaOf(params.mockup, params.designId);
+
   const plan = await resolveRenderPlan({
     designId: params.designId,
     mockup: params.mockup,
     session: params.session,
-    areaOverride: params.areaOverride,
+    // Always explicit, so the plan cannot re-read a different area than the
+    // one the fingerprint below describes.
+    areaOverride: area ?? null,
     placementOverride: params.placementOverride,
     fallbackTransform: params.fallbackTransform,
     behindMockup: params.behindMockup,
@@ -175,16 +220,20 @@ export async function resolveRenderPlanWithFingerprint(params: {
 
   const fp = computeRenderFingerprint({
     designAssetId: params.designAssetId,
+    designId: params.designId,
+    mockup: params.mockup,
+    placement: plan.placement,
     // The plan's area is the authoritative one: an override (or an explicit
     // `null`) is what the pixels were built from, so it is what is hashed.
-    mockup: { ...params.mockup, printArea: plan.area },
-    placement: plan.placement,
+    area: plan.area ?? null,
     // The saved transform is part of the hash ONLY when there is no print
     // area — the same rule `listingImageFingerprint` applies.
     fallbackTransform: plan.area
       ? null
       : (params.fallbackTransform ?? DEFAULT_TRANSFORM),
-    behindMockup: params.behindMockup ?? null,
+    // The plan already resolved the effective mode; hashing it (not the raw
+    // override) keeps this byte-identical to the listing path.
+    behindMockup: plan.behindMockup,
   });
 
   return { plan, fp };
@@ -207,13 +256,17 @@ export async function renderListingMockup(params: {
 }): Promise<{ assetId: string; fingerprint: string }> {
   const designAssetId = params.listing.artworkAssetId;
   const saved = await getPlacement(params.design.id, params.mockup.id);
+  const area = printAreaOf(params.mockup, params.design.id);
   const { plan, fp } = await resolveRenderPlanWithFingerprint({
     designId: params.design.id,
     designAssetId,
     mockup: params.mockup,
     placementOverride: params.placement,
     fallbackTransform: saved?.transform ?? DEFAULT_TRANSFORM,
-    behindMockup: saved?.behindMockup,
+    // A print area owns the compositing mode. The per-placement flag is the
+    // only source of the mode without one, and it is exactly what the
+    // fingerprint hashes, so the recorded string describes these pixels.
+    behindMockup: area ? null : (saved?.behindMockup ?? null),
   });
 
   const assetId = await renderComposition({

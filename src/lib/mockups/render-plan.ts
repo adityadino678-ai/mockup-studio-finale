@@ -44,9 +44,14 @@ export interface RenderPlan {
  * Resolves one design on one mockup from a single snapshot.
  *
  * `areaOverride` is what the Mockups panel passes: the unsaved draft the user
- * is looking at. `undefined` means "use the mockup's stored area"; `null` means
- * "pretend this mockup has no area". That distinction is deliberate - it lets
- * a caller render the exact frame on screen without saving it first.
+ * is looking at. `undefined` means "use the mockup's area for this design";
+ * `null` means "pretend this mockup has no area". That distinction is
+ * deliberate - it lets a caller render the exact frame on screen without
+ * saving it first.
+ *
+ * The stored area is resolved PER DESIGN: `printAreaOf(mockup, designId)`
+ * prefers the design's own override and falls back to the shared default, so
+ * two design tabs on the same mockup cannot move each other's frame.
  *
  * `placementOverride` is for the listing path, which already has the listing
  * owner's placement and must not re-read a possibly different design.
@@ -72,7 +77,7 @@ export async function resolveRenderPlan(params: {
   const area =
     params.areaOverride !== undefined
       ? (params.areaOverride ?? undefined)
-      : printAreaOf(params.mockup);
+      : printAreaOf(params.mockup, params.designId);
 
   if (!area) {
     return {

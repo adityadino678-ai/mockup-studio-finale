@@ -63,6 +63,14 @@ interface TestResult {
   at: number;
 }
 
+/** One row of GET /api/printify/shops. */
+interface ShopOption {
+  id: number;
+  title: string;
+  salesChannel: string;
+  connected: boolean;
+}
+
 type Provider = "printify" | "ai";
 
 export function SettingsPage() {
@@ -76,6 +84,10 @@ export function SettingsPage() {
   const [models, setModels] = React.useState<ModelInfo[] | null>(null);
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelQuery, setModelQuery] = React.useState("");
+  const [shops, setShops] = React.useState<ShopOption[] | null>(null);
+  const [shopsLoading, setShopsLoading] = React.useState(false);
+  const [shopsError, setShopsError] = React.useState<string | null>(null);
+  const [shopNotice, setShopNotice] = React.useState<string | null>(null);
 
   const counts = useLiveQuery(async () => {
     const [designs, mockups, assets, renders, templates] = await Promise.all([
@@ -118,6 +130,72 @@ export function SettingsPage() {
   const patchConfig = (patch: Partial<IntegrationConfig>) => {
     setConfig((c) => (c ? { ...c, ...patch } : c));
   };
+
+  /**
+   * Loads the shop list with the key CURRENTLY in the form.
+   *
+   * It deliberately uses `fetch` + `integrationHeaders(config)` rather than
+   * `authedFetch`: authedFetch reads the SAVED config, so a key the user just
+   * typed would be ignored and an old key would be sent instead.
+   */
+  const refreshShops = async (next: IntegrationConfig, opts: { silent?: boolean } = {}) => {
+    if (!next.printifyKey.trim()) {
+      setShops(null);
+      setShopsError(null);
+      setShopNotice(null);
+      return;
+    }
+    setShopsLoading(true);
+    setShopsError(null);
+    if (!opts.silent) setShopNotice(null);
+    try {
+      const response = await fetch("/api/printify/shops", {
+        headers: integrationHeaders(next),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { shops?: ShopOption[]; error?: string }
+        | null;
+      if (!response.ok) {
+        setShops([]);
+        setShopsError(data?.error ?? `Could not load Printify shops (HTTP ${response.status}).`);
+        return;
+      }
+      const list = Array.isArray(data?.shops) ? data.shops : [];
+      setShops(list);
+      const saved = next.printifyShopId;
+      if (saved != null && !list.some((shop) => shop.id === saved)) {
+        // A shop that disappeared must not stay selected: the next product
+        // would be created in a fallback shop the user never chose.
+        patchConfig({ printifyShopId: undefined });
+        setShopNotice(
+          `Shop #${saved} is not in this account's shop list any more. The form selection was cleared — choose a shop and press Save. Other pages keep the old value until you do.`,
+        );
+      }
+    } catch (e) {
+      setShops([]);
+      setShopsError(e instanceof Error ? e.message : "Could not load the Printify shop list");
+    } finally {
+      setShopsLoading(false);
+    }
+  };
+
+  // Load the list once the key settles. Typing a key re-arms a short timer, so
+  // a partially typed token never spends a request; "Refresh shops" is the
+  // explicit way to reload after anything else changes.
+  React.useEffect(() => {
+    if (!config) return;
+    const key = config.printifyKey.trim();
+    setShops(null);
+    setShopsError(null);
+    setShopNotice(null);
+    if (!key) return;
+    const timer = window.setTimeout(() => {
+      void refreshShops({ ...config, printifyKey: key }, { silent: true });
+    }, 600);
+    return () => window.clearTimeout(timer);
+    // Only the key's value triggers a load; selecting a shop must not refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config?.printifyKey]);
 
   const onSave = async () => {
     if (!config) return;
@@ -216,6 +294,7 @@ export function SettingsPage() {
 
   const printifyStatus = integrations?.printify;
   const aiStatus = integrations?.ai;
+  const selectedShop = (shops ?? []).find((shop) => shop.id === config?.printifyShopId);
   const def = config ? activeProvider(config) : undefined;
   const providerConf = config ? activeProviderConfig(config) : { apiKey: "" };
   const currentModel = config ? activeModel(config) : "";
@@ -330,6 +409,70 @@ export function SettingsPage() {
                     . Used to read the live catalog and to create products you explicitly confirm.
                   </p>
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="printify-shop">Printify shop</Label>
+                  <div className="flex items-start gap-2">
+                    <select
+                      id="printify-shop"
+                      value={config.printifyShopId != null ? String(config.printifyShopId) : ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setShopNotice(null);
+                        patchConfig({
+                          printifyShopId: value ? Number(value) : undefined,
+                        });
+                      }}
+                      disabled={!config.printifyKey.trim() || shopsLoading || !shops?.length}
+                      className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <option value="">
+                        {!config.printifyKey.trim()
+                          ? "Paste a Printify key first"
+                          : shopsLoading
+                            ? "Loading shops…"
+                            : shopsError
+                              ? "Shops unavailable — refresh"
+                              : shops?.length
+                                ? "Choose a shop…"
+                                : "No shops on this account"}
+                      </option>
+                      {(shops ?? []).map((shop) => (
+                        <option key={shop.id} value={String(shop.id)}>
+                          {`${shop.title || "Untitled shop"} (#${shop.id})`}
+                          {shop.connected
+                            ? shop.salesChannel
+                              ? ` — ${shop.salesChannel}`
+                              : " — connected"
+                            : " — Not connected"}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void refreshShops(config)}
+                      disabled={!config.printifyKey.trim() || shopsLoading}
+                      className="shrink-0"
+                    >
+                      {shopsLoading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      Refresh shops
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-ink-subtle">
+                    Used for product creation, Send and Publish.
+                    {selectedShop && !selectedShop.connected
+                      ? " This shop is not connected to a sales channel (Etsy), so publishing to it will fail — connect it in Printify or pick a connected shop."
+                      : ""}
+                  </p>
+                  {shopNotice && <p className="text-[11px] text-warning">{shopNotice}</p>}
+                  {shopsError && <p className="text-[11px] text-danger">{shopsError}</p>}
+                </div>
+
                 <div className="flex items-center gap-2 pt-0.5">
                   <Button
                     size="sm"
@@ -346,6 +489,47 @@ export function SettingsPage() {
                   </Button>
                 </div>
                 <ResultLine result={results.printify} testing={testing === "printify"} />
+              </section>
+
+              {/* Etsy research - deliberately inert until the autopilot ships. */}
+              <section className="space-y-2 rounded-md border border-dashed border-border-strong bg-surface-muted/30 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-[14px] font-medium text-ink-muted">
+                    <Search className="h-4 w-4 text-ink-subtle" /> Etsy research
+                  </div>
+                  <Badge variant="outline" className="shrink-0">
+                    Autopilot release
+                  </Badge>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="etsy-keystring" className="text-ink-muted">
+                    Etsy keystring
+                  </Label>
+                  <Input
+                    id="etsy-keystring"
+                    value=""
+                    readOnly
+                    disabled
+                    placeholder="Not active yet"
+                    aria-describedby="etsy-keystring-note"
+                    className="font-mono text-[12px]"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <p id="etsy-keystring-note" className="text-[11px] text-ink-subtle">
+                    Not active yet. The autopilot will use this to research live Etsy listings.
+                    Until then nothing is sent. Learn more at{" "}
+                    <a
+                      href="https://www.etsy.com/developers/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-forest underline"
+                    >
+                      etsy.com/developers
+                    </a>
+                    .
+                  </p>
+                </div>
               </section>
 
               <Separator />

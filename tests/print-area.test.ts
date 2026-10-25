@@ -20,6 +20,7 @@ import {
   normalisePrintArea,
   pixelsPerInch,
   printAreaFromTemplate,
+  printAreaOf,
   printAreaTemplateFrom,
   studioPlacementFromTransform,
 } from "@/lib/mockups/print-area";
@@ -393,6 +394,80 @@ describe("reading a stored area", () => {
     expect(restored?.crop?.y).toBeCloseTo(0.8);
     expect(restored!.crop!.width).toBeCloseTo(0.2);
     expect(restored!.crop!.height).toBeCloseTo(0.2);
+  });
+});
+
+describe("a design's print area", () => {
+  const base = area({ frame: { x: 0.5, y: 0.4, scale: 0.4, rotation: 0 } });
+  const designA = area({ frame: { x: 0.3, y: 0.3, scale: 0.2, rotation: 0 } });
+  const designB = area({ frame: { x: 0.7, y: 0.6, scale: 0.5, rotation: 10 } });
+
+  it("falls back to the shared area for a design that never edited it", () => {
+    const mockup = { printArea: base, designAreas: {} };
+    expect(printAreaOf(mockup)?.frame).toEqual(base.frame);
+    expect(printAreaOf(mockup, "design-a")?.frame).toEqual(base.frame);
+    expect(printAreaOf(mockup, null)?.frame).toEqual(base.frame);
+  });
+
+  it("uses the design's override instead of the shared area", () => {
+    const mockup = { printArea: base, designAreas: { "design-a": designA } };
+    expect(printAreaOf(mockup, "design-a")?.frame).toEqual(designA.frame);
+    // The shared area is still the default for everyone else.
+    expect(printAreaOf(mockup)?.frame).toEqual(base.frame);
+    expect(printAreaOf(mockup, "design-b")?.frame).toEqual(base.frame);
+  });
+
+  it("treats a null override as 'this design has no area'", () => {
+    const mockup = { printArea: base, designAreas: { "design-a": null } };
+    expect(printAreaOf(mockup, "design-a")).toBeUndefined();
+    // Different from a missing key: the shared area still exists.
+    expect(printAreaOf(mockup)?.frame).toEqual(base.frame);
+    expect(printAreaOf(mockup, "design-b")?.frame).toEqual(base.frame);
+  });
+
+  it("resolves two designs independently on the same mockup", () => {
+    const mockup = {
+      printArea: base,
+      designAreas: { "design-a": designA, "design-b": designB },
+    };
+    const a = printAreaOf(mockup, "design-a");
+    const b = printAreaOf(mockup, "design-b");
+    expect(a?.frame).toEqual(designA.frame);
+    expect(b?.frame).toEqual(designB.frame);
+    expect(a?.frame).not.toEqual(b?.frame);
+    // Editing one never moves the other.
+    expect(printAreaOf(mockup, "design-b")?.frame).toEqual(designB.frame);
+  });
+
+  it("normalises an override stored in the old shape", () => {
+    const restored = printAreaOf(
+      {
+        designAreas: {
+          "design-a": {
+            areaWidth: 4500,
+            areaHeight: 5400,
+            label: "Front",
+            source: {
+              kind: "printify",
+              blueprintId: 71,
+              printProviderId: 30,
+              position: "front",
+            },
+            box: { x: 0.5, y: 0.26, width: 0.4 },
+            clipMode: "area",
+            updatedAt: 1,
+          },
+        },
+      },
+      "design-a",
+    );
+    expect(restored?.frame).toEqual({ x: 0.5, y: 0.26, scale: 0.4, rotation: 0 });
+    expect(restored?.source).toEqual({
+      kind: "studio",
+      blueprintId: 71,
+      printProviderId: 30,
+      position: "front",
+    });
   });
 });
 

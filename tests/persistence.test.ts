@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db/schema";
-import { designAssetIdFor } from "@/lib/db/repo";
+import { clearPrintArea, designAssetIdFor, savePrintArea } from "@/lib/db/repo";
 import { createBatchJob, recoverStaleJobs } from "@/lib/batch/runner";
-import type { Design, Mockup } from "@/types/domain";
+import { applyPrintAreaToMockups } from "@/lib/mockups/propagate";
+import { printAreaOf } from "@/lib/mockups/print-area";
+import type { Design, Mockup, MockupPrintArea } from "@/types/domain";
 
 /**
  * These tests exercise the persistence layer (IndexedDB via fake-indexeddb).
@@ -38,6 +40,20 @@ async function seed() {
   await db.designs.put(design);
   await db.mockups.put(mockup);
   return { design, mockup };
+}
+
+/** A 4500 x 5400 DTG area, the one the mockups panel writes. */
+function printArea(patch: Partial<MockupPrintArea> = {}): MockupPrintArea {
+  return {
+    areaWidth: 4500,
+    areaHeight: 5400,
+    source: { kind: "manual" },
+    label: "Front",
+    frame: { x: 0.5, y: 0.4, scale: 0.4, rotation: 0 },
+    clipMode: "area",
+    updatedAt: 0,
+    ...patch,
+  };
 }
 
 describe("IndexedDB persistence", () => {
@@ -174,5 +190,117 @@ describe("IndexedDB persistence", () => {
     expect(job?.status).toBe("completed-with-errors");
     expect(item?.status).toBe("failed");
     expect(item?.error).toMatch(/Interrupted/);
+  });
+});
+
+describe("print areas are per design", () => {
+  const OTHER_FRAME = { x: 0.15, y: 0.15, scale: 0.15, rotation: 0 };
+
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  /** Three mockups: two tees and a mug, all with a shared base area. */
+  async function seedMockups(): Promise<MockupPrintArea> {
+    const now = Date.now();
+    const base = printArea();
+    const tee: Mockup = {
+      id: "m1",
+      name: "Tee front",
+      category: "tshirt",
+      tags: [],
+      favorite: false,
+      assetId: "img1",
+      width: 1200,
+      height: 1500,
+      source: "user",
+      printArea: base,
+      designAreas: { other: printArea({ frame: { ...OTHER_FRAME } }) },
+      createdAt: now,
+    };
+    await db.mockups.bulkPut([
+      tee,
+      { ...tee, id: "m2", name: "Tee back", assetId: "img2" },
+      { ...tee, id: "m3", name: "Mug", assetId: "img3", category: "mug" },
+    ]);
+    return base;
+  }
+
+  it("writes only that design's overrides across the scope", async () => {
+    const base = await seedMockups();
+    const next = printArea({ frame: { x: 0.7, y: 0.6, scale: 0.5, rotation: 5 } });
+
+    const result = await applyPrintAreaToMockups({
+      sourceMockupId: "m1",
+      area: next,
+      scope: "category",
+      designId: "design-a",
+    });
+
+    expect(result.updated).toBe(2);
+    for (const id of ["m1", "m2"]) {
+      const mockup = (await db.mockups.get(id))!;
+      // This design's override is the new frame.
+      expect(printAreaOf(mockup, "design-a")?.frame).toEqual(next.frame);
+      // The shared base never moved, so other designs keep their default.
+      expect(mockup.printArea?.frame).toEqual(base.frame);
+      // And the other design's own override is preserved.
+      expect(printAreaOf(mockup, "other")?.frame).toEqual(OTHER_FRAME);
+    }
+
+    // A mockup of another type is out of scope, so it is untouched.
+    const mug = (await db.mockups.get("m3"))!;
+    expect(mug.designAreas?.["design-a"]).toBeUndefined();
+    expect(printAreaOf(mug, "design-a")?.frame).toEqual(base.frame);
+  });
+
+  it("saves and clears one design's area without touching the base", async () => {
+    const base = await seedMockups();
+    const next = printArea({ frame: { x: 0.35, y: 0.25, scale: 0.3, rotation: 0 } });
+
+    await savePrintArea("m1", next, "design-a");
+    let mockup = (await db.mockups.get("m1"))!;
+    expect(printAreaOf(mockup, "design-a")?.frame).toEqual(next.frame);
+    expect(mockup.printArea?.frame).toEqual(base.frame);
+    expect(printAreaOf(mockup, "other")?.frame).toEqual(OTHER_FRAME);
+
+    // Clearing writes a deliberate `null`, not a missing key: the shared base
+    // must not quietly take over again.
+    await clearPrintArea("m1", "design-a");
+    mockup = (await db.mockups.get("m1"))!;
+    expect(mockup.designAreas?.["design-a"]).toBeNull();
+    expect(printAreaOf(mockup, "design-a")).toBeUndefined();
+    expect(printAreaOf(mockup)?.frame).toEqual(base.frame);
+    expect(printAreaOf(mockup, "other")?.frame).toEqual(OTHER_FRAME);
+  });
+
+  it("keeps the legacy no-design call writing the shared base", async () => {
+    await seedMockups();
+    const baseNext = printArea({ frame: { x: 0.2, y: 0.2, scale: 0.2, rotation: 0 } });
+
+    await savePrintArea("m1", baseNext);
+    let mockup = (await db.mockups.get("m1"))!;
+    expect(mockup.printArea?.frame).toEqual(baseNext.frame);
+    // The per-design override that was already there did not move.
+    expect(printAreaOf(mockup, "other")?.frame).toEqual(OTHER_FRAME);
+
+    const scopedNext = printArea({ frame: { x: 0.6, y: 0.3, scale: 0.25, rotation: 0 } });
+    await applyPrintAreaToMockups({
+      sourceMockupId: "m1",
+      area: scopedNext,
+      scope: "this",
+    });
+    mockup = (await db.mockups.get("m1"))!;
+    expect(mockup.printArea?.frame).toEqual(scopedNext.frame);
+    expect(mockup.designAreas?.other?.frame).toEqual(OTHER_FRAME);
+  });
+
+  it("clears the shared base only without a design id", async () => {
+    await seedMockups();
+    await clearPrintArea("m1");
+    const mockup = (await db.mockups.get("m1"))!;
+    expect(mockup.printArea).toBeUndefined();
+    expect(printAreaOf(mockup, "other")?.frame).toEqual(OTHER_FRAME);
   });
 });

@@ -1,7 +1,14 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
-import { createPrintifyClient, PrintifyError } from "@/lib/server/printify";
+import {
+  createPrintifyClient,
+  isSalesChannelConnected,
+  normalizeShopId,
+  PRINTIFY_MANAGE_STORES_URL,
+  PrintifyError,
+  salesChannelErrorMessage,
+} from "@/lib/server/printify";
 
 interface PublishProductBody {
   /**
@@ -12,6 +19,12 @@ interface PublishProductBody {
   confirm: boolean;
   /** The Printify product to publish. Must be a product THIS app created. */
   productId: string;
+  /**
+   * Optional; the preferred shop. The endpoint resolves the shop that actually
+   * OWNS the product, so a stale saved selection cannot publish to the wrong
+   * shop.
+   */
+  shopId?: number;
 }
 
 /**
@@ -20,6 +33,19 @@ interface PublishProductBody {
  */
 function validProductId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9]{6,64}$/.test(value);
+}
+
+/**
+ * Printify's "shop is not connected to a sales channel" failure. The code is
+ * carried in the error detail rather than a typed field, so look in both the
+ * message and the raw detail.
+ */
+function isSalesChannelFailure(error: PrintifyError): boolean {
+  const detail =
+    typeof error.detail === "string" ? error.detail : JSON.stringify(error.detail ?? "");
+  // Match the code as a standalone number. A plain `.includes("8254")` would
+  // also match four digits inside a product id or another upstream value.
+  return /\b8254\b/.test(`${error.message} ${detail}`);
 }
 
 /**
@@ -79,20 +105,84 @@ export const POST: APIRoute = async ({ request }) => {
   if (!validProductId(body.productId)) {
     return json({ error: "A valid Printify product id is required" }, 400);
   }
+  if (body.shopId != null && normalizeShopId(body.shopId) === undefined) {
+    return json({ error: "shopId must be a positive integer" }, 400);
+  }
+
+  const preferredShopId = normalizeShopId(body.shopId) ?? creds.printify?.shopId;
 
   try {
-    const shopId = await client.resolveShopId();
-    await client.publishProduct(shopId, body.productId);
+    // Read-only lookup first: a publish must never be attempted in a shop that
+    // does not own the product.
+    const owned = await client.resolveProductShop(preferredShopId, body.productId);
+    if (!owned) {
+      return json(
+        {
+          error: `Printify has no product ${body.productId} in any shop this key can reach, so there is nothing to publish. It may have been deleted, or it belongs to a different Printify account.`,
+          productId: body.productId,
+          shopId: preferredShopId,
+        },
+        404,
+      );
+    }
+
+    // Preflight the sales channel BEFORE the publish call. A custom/manual shop
+    // answers 8254 after the fact; saying so now, with the shop named, is the
+    // difference between a dead end and a fix.
+    if (!isSalesChannelConnected(owned.shop)) {
+      return json(
+        {
+          error: salesChannelErrorMessage(owned.shop),
+          code: 8254,
+          shopId: owned.shopId,
+          shopTitle: owned.shop.title,
+          connectUrl: PRINTIFY_MANAGE_STORES_URL,
+        },
+        409,
+      );
+    }
+
+    try {
+      await client.publishProduct(owned.shopId, body.productId);
+    } catch (error) {
+      // Printify can still answer 8254 if the shop changed between the lookup
+      // and the publish. Map it to the same actionable message, keeping the
+      // upstream status and detail verbatim.
+      if (error instanceof PrintifyError && isSalesChannelFailure(error)) {
+        const detail =
+          error.detail === undefined
+            ? undefined
+            : (typeof error.detail === "string"
+                ? error.detail
+                : JSON.stringify(error.detail)
+              ).slice(0, 400);
+        return json(
+          {
+            error: `${salesChannelErrorMessage(owned.shop)} Printify said: ${error.message}`,
+            code: 8254,
+            shopId: owned.shopId,
+            shopTitle: owned.shop.title,
+            connectUrl: PRINTIFY_MANAGE_STORES_URL,
+            detail,
+            status: error.status,
+          },
+          409,
+        );
+      }
+      throw error;
+    }
+
     // The publish endpoint answers with the product record; the client only
     // needs the id it already has. Reporting success without echoing upstream
     // data keeps the response shape stable across Printify changes.
-    return json({ published: true, productId: body.productId }, 200);
+    return json({ published: true, productId: body.productId, shopId: owned.shopId }, 200);
   } catch (error) {
     if (error instanceof PrintifyError) {
       const detail =
         error.detail === undefined
           ? undefined
           : (typeof error.detail === "string" ? error.detail : JSON.stringify(error.detail)).slice(0, 400);
+
       // Pass the upstream status through where it is meaningful, so a
       // validation failure is not reported to the browser as a gateway error.
       const status =

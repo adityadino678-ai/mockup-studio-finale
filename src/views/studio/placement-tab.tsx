@@ -28,7 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { buildPartition, resolveVariantIds } from "@/lib/printify/variants";
+import { buildCatalogueIndex, buildPartition, resolveVariantIds } from "@/lib/printify/variants";
 import {
   inkArtworkProblems,
   pairedColourGroups,
@@ -37,6 +37,7 @@ import {
   planDesignColours,
   planPairedDesignColours,
   setInkPairRole,
+  summariseColourGroups,
   withInkPair,
   withoutInkPair,
   type InkArtworkProblem,
@@ -330,7 +331,9 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
    */
   const plan = React.useMemo(() => {
     if (!designs || !session.blueprintId || !session.printProviderId) return null;
-    const colourIndex = buildIndexFromVariants(catalog.variants);
+    // ONE index builder for the whole app: the Studio used to duplicate this
+    // locally, which is how the two copies could drift apart.
+    const colourIndex = buildCatalogueIndex(catalog.variants);
     const groups = productColourGroups(session);
     const split = pairedColourGroups(groups);
     const byId = new Map(designs.map((d) => [d.id, d]));
@@ -417,6 +420,37 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
     }
     return { items, colourIndex };
   }, [designs, scope, session, catalog.variants, inkPairs]);
+
+  /**
+   * The colour counts behind the plan, for the informational summary.
+   *
+   * The selection belongs to the PRODUCT, so the counts are the same for every
+   * product row (a pair covers both halves, an ordinary design covers every
+   * colour). The overlap is named separately: the ink row wins that colour,
+   * and hiding the fact would be exactly the quiet loss this summary exists
+   * to rule out. These numbers never block creation.
+   */
+  const colourSummary = React.useMemo(
+    () => summariseColourGroups(productColourGroups(session)),
+    [session],
+  );
+
+  /** The enabled variant count for each product row, with the sizes applied. */
+  const itemVariantCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!plan) return counts;
+    for (const item of plan.items) {
+      counts.set(
+        item.designId,
+        resolveVariantIds(
+          plan.colourIndex,
+          item.groups.flatMap((g) => g.colors),
+          session.sizes,
+        ).length,
+      );
+    }
+    return counts;
+  }, [plan, session.sizes]);
 
   // --- the problems ----------------------------------------------------------
   /**
@@ -880,31 +914,51 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           </div>
 
           {plan && plan.items.length > 0 && (
-            <div className="scroll-thin max-h-[220px] space-y-1 overflow-y-auto">
+            <div className="scroll-thin max-h-[240px] space-y-1 overflow-y-auto">
               {plan.items.map((item) => {
                 const done = alreadyCreated.get(item.designId);
                 return (
                   <div
                     key={item.designId}
-                    className="flex items-center gap-2 rounded-md bg-surface-muted/60 px-3 py-1.5"
+                    className="rounded-md bg-surface-muted/60 px-3 py-1.5"
                   >
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
-                      {item.designName}
-                    </span>
-                    <span className="text-[11px] text-ink-subtle">
-                      {item.groups
-                        .filter((g) => g.colors.length > 0)
-                        .map((g) => g.label)
-                        .join(" + ")}
-                    </span>
-                    {done && !recreate && (
-                      <Badge variant="muted">already created</Badge>
-                    )}
-                    <Badge variant="muted">{item.row === "ink" ? "ink" : "plain"}</Badge>
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
+                        {item.designName}
+                      </span>
+                      <span className="text-[11px] text-ink-subtle">
+                        {item.groups
+                          .filter((g) => g.colors.length > 0)
+                          .map((g) => g.label)
+                          .join(" + ")}
+                      </span>
+                      {done && !recreate && (
+                        <Badge variant="muted">already created</Badge>
+                      )}
+                      <Badge variant="muted">{item.row === "ink" ? "ink" : "plain"}</Badge>
+                    </div>
+                    {/* Informational only: the counts say what the plan
+                        covers, and the variant count is the enabled set for
+                        THIS row with the chosen sizes applied. */}
+                    <p className="mt-0.5 text-[11px] text-ink-subtle" data-colour-summary="">
+                      {colourSummary.plain} plain · {colourSummary.black} black ink ·{" "}
+                      {colourSummary.white} white ink · {itemVariantCounts.get(item.designId) ?? 0}{" "}
+                      variants
+                    </p>
                   </div>
                 );
               })}
             </div>
+          )}
+
+          {plan && colourSummary.overlap.length > 0 && (
+            <p className="text-[11px] text-ink-muted" data-colour-overlap="">
+              {colourSummary.overlap.length} colour
+              {colourSummary.overlap.length === 1 ? "" : "s"}{" "}
+              {colourSummary.overlap.length === 1
+                ? "is in both rows; it will print with the ink artwork."
+                : "are in both rows; they will print with the ink artwork."}
+            </p>
           )}
 
           <Separator />
@@ -1053,27 +1107,6 @@ function joinNames(names: string[]): string {
   if (names.length === 0) return "the ink colours";
   if (names.length === 1) return names[0];
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-
-/** Builds the colour index from the catalogue variants. */
-function buildIndexFromVariants(variants: StudioCatalogState["variants"]) {
-  const valueIds = new Map<string, number>();
-  const hexes = new Map<string, string[]>();
-  const variantIds = new Map<string, number[]>();
-  const sizes = new Map<string, number[]>();
-  const allVariantIds: number[] = [];
-  for (const v of variants) {
-    allVariantIds.push(v.id);
-    const colour = v.options?.color ?? v.title?.split(" / ")[0] ?? "unknown";
-    const size = v.options?.size ?? v.title?.split(" / ")[1] ?? "";
-    if (!variantIds.has(colour)) variantIds.set(colour, []);
-    variantIds.get(colour)!.push(v.id);
-    if (size) {
-      if (!sizes.has(size)) sizes.set(size, []);
-      sizes.get(size)!.push(v.id);
-    }
-  }
-  return { valueIds, hexes, variantIds, sizes, allVariantIds };
 }
 
 function productName(catalog: StudioCatalogState, blueprintId?: number): string {

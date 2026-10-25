@@ -371,10 +371,23 @@ test.describe("core workflow", () => {
           areaWidth: number;
           areaHeight: number;
         };
+        designAreas?: Record<
+          string,
+          {
+            frame: { x: number; y: number; scale: number; rotation: number };
+            areaWidth: number;
+            areaHeight: number;
+          } | null
+        >;
       }> = await new Promise((res) => {
         const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
         rq.onsuccess = () => res(rq.result);
       });
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const designId = designs.find((d) => d.name === "design-a")!.id;
       const bmp = await createImageBitmap(blob);
       const c = document.createElement("canvas");
       c.width = bmp.width;
@@ -389,9 +402,9 @@ test.describe("core workflow", () => {
       // photo.
       const mockup =
         mockups.find((m) => m.id === metas[0].sourceMockupId) ??
-        mockups.find((m) => m.printArea);
-      if (!mockup) return { found: false as const, reason: "no print area" };
-      const area = mockup.printArea!;
+        mockups.find((m) => m.designAreas?.[designId] || m.printArea);
+      const area = mockup?.designAreas?.[designId] ?? mockup?.printArea;
+      if (!mockup || !area) return { found: false as const, reason: "no print area" };
       // The area's frame in photo pixels.
       const areaW = area.frame.scale * mockup.width;
       const areaH = areaW * (area.areaHeight / area.areaWidth);
@@ -626,6 +639,18 @@ test.describe("core workflow", () => {
     await expect(page.getByLabel("Printify API key")).toBeVisible();
     await expect(page.getByLabel("Provider")).toBeVisible();
     await expect(page.getByLabel("AI API key")).toBeVisible();
+
+    // The shop selector is the one saved choice product creation, Send and
+    // Publish share. It cannot load shops without a real key, so it starts
+    // disabled; the Etsy card is deliberately inert until the autopilot ships.
+    await expect(page.getByLabel("Printify shop")).toBeVisible();
+    await expect(page.getByLabel("Printify shop")).toBeDisabled();
+    await expect(page.getByLabel("Etsy keystring")).toBeDisabled();
+    await expect(page.getByLabel("Etsy keystring")).toHaveAttribute(
+      "placeholder",
+      "Not active yet",
+    );
+    await expect(page.getByText("Autopilot release")).toBeVisible();
 
     // Selecting a provider swaps the key placeholder to that provider's own.
     await page.getByLabel("Provider").selectOption("nvidia");
@@ -919,11 +944,21 @@ test.describe("core workflow", () => {
         });
         const mockups: Array<{
           printArea?: { frame: { x: number; y: number; scale: number; rotation: number } };
+          designAreas?: Record<
+            string,
+            { frame: { x: number; y: number; scale: number; rotation: number } } | null
+          >;
         }> = await new Promise((res) => {
           const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
           rq.onsuccess = () => res(rq.result);
         });
-        return mockups.find((m) => m.printArea)?.printArea?.frame;
+        const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+          const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+          rq.onsuccess = () => res(rq.result);
+        });
+        const designId = designs.find((d) => d.name === "design-a")!.id;
+        const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea);
+        return mockup?.designAreas?.[designId]?.frame ?? mockup?.printArea?.frame;
       });
 
     const before = await readFrame();
@@ -951,11 +986,29 @@ test.describe("core workflow", () => {
           areaWidth: number;
           areaHeight: number;
         };
+        designAreas?: Record<
+          string,
+          {
+            frame: { x: number; y: number; scale: number; rotation: number };
+            areaWidth: number;
+            areaHeight: number;
+          } | null
+        >;
       }> = await new Promise((res) => {
         const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
         rq.onsuccess = () => res(rq.result);
       });
-      return mockups.find((m) => m.printArea)!;
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const designId = designs.find((d) => d.name === "design-a")!.id;
+      const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea)!;
+      return {
+        width: mockup.width,
+        height: mockup.height,
+        printArea: (mockup.designAreas?.[designId] ?? mockup.printArea)!,
+      };
     });
 
     const stageScale = geometry.width / state.width;
@@ -1159,11 +1212,21 @@ test.describe("core workflow", () => {
       });
       const mockups: Array<{
         printArea?: { crop?: { x: number; y: number; width: number; height: number } };
+        designAreas?: Record<
+          string,
+          { crop?: { x: number; y: number; width: number; height: number } } | null
+        >;
       }> = await new Promise((res) => {
         const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
         rq.onsuccess = () => res(rq.result);
       });
-      return mockups.find((m) => m.printArea)?.printArea?.crop;
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const designId = designs.find((d) => d.name === "design-a")!.id;
+      const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea);
+      return mockup?.designAreas?.[designId]?.crop ?? mockup?.printArea?.crop;
     });
     expect(stored).toEqual({ x: 0, y: 0, width: 1, height: 0.5 });
 
@@ -1196,11 +1259,22 @@ test.describe("core workflow", () => {
         width: number;
         height: number;
         printArea?: { frame: { x: number; y: number } };
+        designAreas?: Record<string, { frame: { x: number; y: number } } | null>;
       }> = await new Promise((res) => {
         const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
         rq.onsuccess = () => res(rq.result);
       });
-      return mockups.find((m) => m.printArea)!;
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const designId = designs.find((d) => d.name === "design-a")!.id;
+      const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea)!;
+      return {
+        width: mockup.width,
+        height: mockup.height,
+        printArea: (mockup.designAreas?.[designId] ?? mockup.printArea)!,
+      };
     });
     const stageScale = geometry.width / state.width;
     const areaCx = geometry.left + state.printArea!.frame.x * state.width * stageScale;
@@ -1508,6 +1582,254 @@ test.describe("core workflow", () => {
     const publish = page.getByRole("button", { name: "Publish to Printify" });
     await expect(publish).toBeVisible();
     await expect(publish).toBeDisabled();
+  });
+
+  test("25. two design tabs keep independent print areas on the same mockup", async ({
+    page,
+  }) => {
+    await seedLibrary(page);
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+
+    // Design A gets a frame and a top-half window.
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: "Top half" }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Top 50% of the area", { exact: true })).toBeVisible();
+
+    // Design B did not inherit A's frame: it starts with no area, not with A's
+    // window. Giving B its own area must not change A.
+    await page.getByRole("button", { name: "design-b", exact: true }).click();
+    await expect(page.getByText("Top 50% of the area", { exact: true })).toBeHidden({
+      timeout: 10_000,
+    });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: "Top 60%" }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText("Top 60% of the area", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Back on A, A's own window is still the top half.
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
+    await expect(page.getByText("Top 50% of the area", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // The store proves the independence: both overrides exist on the same
+    // mockup, with different crops, and A did not overwrite the shared base.
+    const stored = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const mockups: Array<{
+        name: string;
+        printArea?: { crop?: { x: number; y: number; width: number; height: number } };
+        designAreas?: Record<
+          string,
+          { crop?: { x: number; y: number; width: number; height: number } } | null
+        >;
+      }> = await new Promise((res) => {
+        const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      const a = designs.find((d) => d.name === "design-a")!.id;
+      const b = designs.find((d) => d.name === "design-b")!.id;
+      return mockups.map((mockup) => ({
+        name: mockup.name,
+        base: mockup.printArea ?? null,
+        a: mockup.designAreas?.[a] ?? null,
+        b: mockup.designAreas?.[b] ?? null,
+      }));
+    });
+
+    const row = stored.find((entry) => entry.a && entry.b);
+    expect(row).toBeTruthy();
+    expect(row!.base).toBeNull();
+    expect(row!.a!.crop).toEqual({ x: 0, y: 0, width: 1, height: 0.5 });
+    expect(row!.b!.crop).toEqual({ x: 0, y: 0, width: 1, height: 0.6 });
+  });
+
+  test("26. settings saves the Printify shop used by creation, Send and Publish", async ({
+    page,
+  }) => {
+    // The shop list needs a real key, so serve it from a stub. The point of
+    // this test is the saved selection and the validation around it.
+    await page.route("**/api/printify/shops", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          configured: true,
+          shops: [
+            {
+              id: 111,
+              title: "Connected shop",
+              salesChannel: "etsy",
+              connected: true,
+            },
+            {
+              id: 222,
+              title: "Draft shop",
+              salesChannel: "",
+              connected: false,
+            },
+          ],
+        }),
+      });
+    });
+
+    await gotoApp(page, "/settings");
+    await page.getByLabel("Printify API key").fill("pp_test_key_not_real");
+
+    const shop = page.getByLabel("Printify shop");
+    await expect(shop).toBeEnabled({ timeout: 20_000 });
+    // The placeholder plus both shops.
+    await expect(shop.locator("option")).toHaveCount(3, { timeout: 20_000 });
+    await shop.selectOption("111");
+    await page.getByRole("button", { name: /Save keys/ }).click();
+    await expect(page.getByText("Keys saved in this browser")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const stored = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      return new Promise<{ printifyShopId?: number } | null>((res) => {
+        const rq = db.transaction(["settings"], "readonly").objectStore("settings").get("integrations");
+        rq.onsuccess = () => res(rq.result?.value ?? null);
+      });
+    });
+    expect(stored?.printifyShopId).toBe(111);
+  });
+
+  test("27. a render saved in Mockups is adopted by Listing images", async ({ page }) => {
+    await seedLibrary(page);
+
+    // One listing, so the tile count is unambiguous.
+    await gotoApp(page, "/printify-studio");
+    await page.getByRole("checkbox", { name: "Select design-a" }).click();
+    await expect(page.getByText("1 design selected")).toBeVisible();
+    // The session auto-saves on a short debounce; navigate after it lands.
+    await page.waitForTimeout(900);
+
+    // Give design A a real area, then render it onto every mockup through the
+    // same Save/render path the user takes.
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: /Render on every mockup/ }).click();
+    await expect(page.getByText(/Rendered on \d+ mockup/)).toBeVisible({
+      timeout: 60_000,
+    });
+
+    // Those renders carry the listing fingerprint, so the listing adopts them
+    // instead of asking for another render or showing a stand-in photo.
+    await gotoApp(page, "/listing-images");
+    await expect(page.locator("[data-listing-id]")).toHaveCount(1, { timeout: 30_000 });
+    const saved = page.locator('[data-tile]').getByText("Saved", { exact: true });
+    await expect(saved.first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/saved render.* can be linked/i)).toHaveCount(0);
+    // The per-design area is what the tile reports, not the shared default.
+    await expect(page.getByText("Print area mapped").first()).toBeVisible();
+  });
+
+  test("28. preview blocks a shop with no sales channel before publishing", async ({ page }) => {
+    await seedLibrary(page);
+    await gotoApp(page, "/printify-studio");
+    await page.getByRole("checkbox", { name: "Select design-a" }).click();
+    await expect(page.getByText("1 design selected")).toBeVisible();
+    await page.waitForTimeout(900);
+
+    // A saved, existing shop that Printify has not connected to Etsy. This is
+    // the exact state that used to fail at the very end with code 8254.
+    await page.route("**/api/printify/shops", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          configured: true,
+          shops: [
+            {
+              id: 222,
+              title: "Draft shop",
+              salesChannel: "",
+              connected: false,
+            },
+          ],
+        }),
+      });
+    });
+    await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction(["settings"], "readwrite");
+        tx.oncomplete = () => res();
+        tx.onerror = () => rej(tx.error);
+        tx.objectStore("settings").put({
+          key: "integrations",
+          value: {
+            printifyKey: "pp_test_key_not_real",
+            printifyShopId: 222,
+          },
+        });
+      });
+    });
+
+    await gotoApp(page, "/listing-preview");
+    await expect(page.getByText(/not connected to a sales channel/i).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByRole("button", { name: "Publish to Printify" })).toBeDisabled();
+    await expect(page.getByText(/error 8254/i).first()).toBeVisible();
+  });
+
+  test("29. preview sends an unpaired ink design to the Studio for creation", async ({
+    page,
+  }) => {
+    await seedLibrary(page);
+    await gotoApp(page, "/printify-studio");
+
+    // An ink asset puts design-a in the ink row. Its product needs a
+    // print-area group per artwork, which only the Studio's creation loop
+    // builds; the preview's one-artwork path would print the main artwork on
+    // the ink colours.
+    await page.getByRole("button", { name: "Actions for design-a", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Ink variants/ }).click();
+    await page.getByRole("button", { name: "Auto-generate" }).first().click();
+    await expect(page.getByText("White ink variant created")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Done" }).click();
+
+    await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+    await page.getByRole("checkbox", { name: "Select design-a" }).click();
+    await expect(page.getByText("1 design selected")).toBeVisible();
+    await page.waitForTimeout(900);
+
+    await gotoApp(page, "/listing-preview");
+    await expect(
+      page.getByText(/This design prints ink artwork on some colours/i),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Publish to Printify" })).toBeDisabled();
   });
 });
 

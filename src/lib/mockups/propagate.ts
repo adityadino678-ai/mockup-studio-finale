@@ -6,6 +6,12 @@
 // same-type or all mockups is an explicit choice; it is never automatic and a
 // new mockup never inherits a sibling's frame.
 //
+// The frame is stored PER DESIGN: the shared `printArea` is the default a
+// design starts from, and every design that edits it gets its own entry in
+// `designAreas`. A scoped save therefore copies THIS design's override to the
+// targets and leaves the shared default and the other designs' overrides
+// untouched. Without a `designId` the call keeps the old base behaviour.
+//
 // The frame travels when copying, and the CROP travels with it: the visible
 // window is part of the staged pose - what the frame shows is one decision
 // with where the frame sits, so a copy that kept the target's old window
@@ -42,20 +48,28 @@ export function printAreaScopeTargets(
 /**
  * Writes `area` to every mockup in `scope` in ONE transaction.
  *
+ * With `designId`, the write is this design's override: every target gets
+ * `designAreas[designId] = area` and its shared `printArea` is left alone.
+ * Other designs' overrides are preserved. Without it, the old behaviour
+ * writes the shared `printArea` (for any legacy caller).
+ *
  * `copyCrop` defaults to true: the crop follows the frame, so every target
  * receives the window the user just staged (and the whole area when the draft
  * has none). `copyReference` defaults to false: the inches measurement is a
- * property of the photo, not of the frame.
+ * property of the photo, not of the frame. Both use the DESIGN-specific
+ * previous area, so a copy never inherits another design's window.
  */
 export async function applyPrintAreaToMockups(params: {
   sourceMockupId: string;
   area: MockupPrintArea;
   scope: PrintAreaScope;
+  designId?: string;
   copyCrop?: boolean;
   copyReference?: boolean;
 }): Promise<{ updated: number; mockupIds: string[] }> {
   const copyCrop = params.copyCrop ?? true;
   const copyReference = params.copyReference ?? false;
+  const designId = params.designId;
   const source = await db.mockups.get(params.sourceMockupId);
   if (!source) return { updated: 0, mockupIds: [] };
   const all = await db.mockups.toArray();
@@ -67,7 +81,9 @@ export async function applyPrintAreaToMockups(params: {
     for (const target of targets) {
       const existing = await db.mockups.get(target.id);
       if (!existing) continue;
-      const previous = printAreaOf(existing);
+      // `previous` is the DESIGN's area, never another design's: the crop and
+      // reference rules below are about what this design had on this photo.
+      const previous = printAreaOf(existing, designId);
       const isSource = existing.id === params.sourceMockupId;
       const next: MockupPrintArea = {
         ...params.area,
@@ -90,7 +106,14 @@ export async function applyPrintAreaToMockups(params: {
             : previous?.reference,
         updatedAt: now,
       };
-      await db.mockups.put({ ...existing, printArea: next });
+      if (designId) {
+        await db.mockups.put({
+          ...existing,
+          designAreas: { ...existing.designAreas, [designId]: next },
+        });
+      } else {
+        await db.mockups.put({ ...existing, printArea: next });
+      }
       written.push(existing.id);
     }
   });

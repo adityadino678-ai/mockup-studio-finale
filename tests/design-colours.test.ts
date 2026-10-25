@@ -9,6 +9,7 @@ import {
   planPairedDesignColours,
   setInkPairRole,
   splitDesignsByInkPair,
+  summariseColourGroups,
   withInkPair,
   withoutInkPair,
 } from "@/lib/printify/design-colours";
@@ -87,20 +88,38 @@ function hasDuplicates(colors: string[]): boolean {
 }
 
 describe("normaliseColourGroups", () => {
-  it("keeps a colour that is in both groups in the plain group only", () => {
-    // "B" was put in both groups. It can only be printed once, and the plain
-    // group wins - the plain group is printed with the design's main file,
-    // which every design has.
+  it("keeps a colour that is in both groups in the INK group", () => {
+    // "B" was put in both rows. The ink row is authoritative: the user chose
+    // an ink artwork for it there, so it must not be quietly moved to the
+    // plain row and printed with the main artwork instead. It is counted
+    // once - in the ink group - so nothing is lost and nothing is printed
+    // twice.
     const normalised = normaliseColourGroups({
       plain: ["A", "B"],
       ink: ["B", "C"],
       blackInk: ["C"],
     });
 
-    expect(normalised.plain).toEqual(["A", "B"]);
-    expect(normalised.ink).toEqual(["C"]);
+    expect(normalised.plain).toEqual(["A"]);
+    expect(normalised.ink).toEqual(["B", "C"]);
     expect(normalised.black).toEqual(["C"]);
-    expect(normalised.white).toEqual([]);
+    expect(normalised.white).toEqual(["B"]);
+    // Together the groups still cover every colour exactly once.
+    expect([...normalised.plain, ...normalised.ink].sort()).toEqual(["A", "B", "C"]);
+  });
+
+  it("splits a colour that is in both rows by the ink it was marked with", () => {
+    // "B" is in both rows AND marked for the black ink. It moves to the black
+    // half - not dropped, and not left in plain.
+    const normalised = normaliseColourGroups({
+      plain: ["A", "B"],
+      ink: ["B", "C"],
+      blackInk: ["B"],
+    });
+
+    expect(normalised.plain).toEqual(["A"]);
+    expect(normalised.black).toEqual(["B"]);
+    expect(normalised.white).toEqual(["C"]);
   });
 
   it("ignores a black-ink colour that the product does not print with the ink artwork", () => {
@@ -141,6 +160,108 @@ describe("normaliseColourGroups", () => {
     expect([...normalised.black, ...normalised.white].sort()).toEqual(
       [...normalised.ink].sort(),
     );
+  });
+});
+
+/**
+ * The real case this fix is about: the user picks four colours for the black
+ * ink, four for the white ink and a few plain ones. Every one of them must
+ * appear in the plan exactly once.
+ */
+const FOUR_AND_FOUR: ProductColourGroups = {
+  plain: ["Solid White", "Natural", "Sand"],
+  ink: [
+    "Solid Black",
+    "Navy",
+    "Charcoal",
+    "Forest",
+    "Red",
+    "Burgundy",
+    "Maroon",
+    "Mustard",
+  ],
+  blackInk: ["Solid Black", "Navy", "Charcoal", "Forest"],
+};
+
+const FOUR_AND_FOUR_COLOURS = [
+  ...FOUR_AND_FOUR.plain,
+  ...FOUR_AND_FOUR.blackInk,
+  ...FOUR_AND_FOUR.ink.filter((c) => !FOUR_AND_FOUR.blackInk.includes(c)),
+];
+
+describe("planDesignColours - four black-ink and four white-ink colours", () => {
+  it("keeps all eight ink colours and puts each in the group that owns its artwork", () => {
+    const plan = planDesignColours(
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+      FOUR_AND_FOUR,
+    );
+
+    const black = plan.groups.find((group) => group.ink === "black");
+    const white = plan.groups.find((group) => group.ink === "white");
+    expect(black?.colors).toEqual(FOUR_AND_FOUR.blackInk);
+    expect(black?.colors).toHaveLength(4);
+    expect(white?.colors).toHaveLength(4);
+    expect([...(black?.colors ?? []), ...(white?.colors ?? [])].sort()).toEqual(
+      [...FOUR_AND_FOUR.ink].sort(),
+    );
+    // No ink colour was silently dropped from the plan.
+    for (const colour of FOUR_AND_FOUR.ink) expect(plan.colors).toContain(colour);
+    expect(plan.colors).toEqual(FOUR_AND_FOUR_COLOURS);
+    expect(hasDuplicates(plan.colors)).toBe(false);
+  });
+
+  it("never drops a colour that is in both rows - the ink group keeps it", () => {
+    const bothRows: ProductColourGroups = {
+      plain: ["Solid White", "Solid Black"],
+      ink: ["Solid Black", "Navy"],
+      blackInk: ["Solid Black"],
+    };
+    const plan = planDesignColours(
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+      bothRows,
+    );
+
+    expect(plan.groups).toEqual([
+      { ink: "main", colors: ["Solid White"] },
+      { ink: "black", colors: ["Solid Black"] },
+      { ink: "white", colors: ["Navy"] },
+    ]);
+    expect(plan.colors).toEqual(["Solid White", "Solid Black", "Navy"]);
+  });
+});
+
+describe("summariseColourGroups", () => {
+  it("counts every group once, with the ink row winning the overlap", () => {
+    expect(
+      summariseColourGroups({
+        plain: ["A", "B"],
+        ink: ["B", "C"],
+        blackInk: ["B"],
+      }),
+    ).toEqual({ plain: 1, black: 1, white: 1, total: 3, overlap: ["B"] });
+  });
+
+  it("reports the four-and-four case without an overlap", () => {
+    const summary = summariseColourGroups(FOUR_AND_FOUR);
+
+    expect(summary).toEqual({
+      plain: 3,
+      black: 4,
+      white: 4,
+      total: 11,
+      overlap: [],
+    });
+  });
+
+  it("names every colour that is in both rows, in plain-row order", () => {
+    const summary = summariseColourGroups({
+      plain: ["C", "A", "B"],
+      ink: ["B", "C"],
+      blackInk: [],
+    });
+
+    expect(summary.overlap).toEqual(["C", "B"]);
+    expect(summary.total).toBe(3);
   });
 });
 

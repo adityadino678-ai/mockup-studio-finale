@@ -13,7 +13,12 @@ import {
   suggestInk,
 } from "@/lib/printify/colors";
 import { MAX_UPSCALE, clampPlacement, computeFit } from "@/lib/printify/fit";
-import { planDesignColours } from "@/lib/printify/design-colours";
+import {
+  pairedColourGroups,
+  planDesignColours,
+  planPairedDesignColours,
+} from "@/lib/printify/design-colours";
+import type { ProductColourGroups } from "@/lib/printify/design-colours";
 import {
   buildCatalogueIndex,
   buildPartition,
@@ -429,5 +434,141 @@ describe("the print_areas payload", () => {
       [17391],
     );
     expect(problems.some((p) => p.kind === "empty-group")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The real case: four black-ink colours + four white-ink colours + a few
+// plain ones. Every selected colour must reach the product, in the group whose
+// artwork will print on it. This is the end-to-end half of the fix: the plan,
+// the catalogue index and the partition have to agree.
+// ---------------------------------------------------------------------------
+
+describe("a four-and-four colour selection", () => {
+  const SIZES = ["S", "M", "L"];
+  const PLAIN = ["Solid White", "Natural", "Sand"];
+  const BLACK_INK = ["Solid Black", "Navy", "Charcoal", "Forest"];
+  const WHITE_INK = ["Red", "Burgundy", "Maroon", "Mustard"];
+  const COLOURS = [...PLAIN, ...BLACK_INK, ...WHITE_INK];
+  const GROUPS: ProductColourGroups = {
+    plain: PLAIN,
+    ink: [...BLACK_INK, ...WHITE_INK],
+    blackInk: BLACK_INK,
+  };
+  const CATALOGUE: CatalogVariant[] = COLOURS.flatMap((colour, colourIndex) =>
+    SIZES.map((size, sizeIndex) => ({
+      id: 20000 + colourIndex * 10 + sizeIndex,
+      title: `${colour} / ${size}`,
+      options: { color: colour, size },
+    })),
+  );
+  const index = buildCatalogueIndex(CATALOGUE);
+  const PLAN = planDesignColours(
+    { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+    GROUPS,
+  );
+
+  it("keeps the eight ink colours, in the group that carries their artwork", () => {
+    expect(PLAN.colors).toEqual(COLOURS);
+    expect(new Set(PLAN.colors).size).toBe(COLOURS.length);
+
+    const partition = buildPartition(
+      index,
+      PLAN.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+    );
+    const groupFor = (ink: "main" | "black" | "white") =>
+      partition.groups[PLAN.groups.findIndex((group) => group.ink === ink)];
+
+    // The four black-ink colours and the four white-ink colours are not
+    // merged, dropped or swapped.
+    expect(groupFor("black").colors).toEqual(BLACK_INK);
+    expect(groupFor("white").colors).toEqual(WHITE_INK);
+    expect(groupFor("main").colors).toEqual(PLAIN);
+    expect(new Set(groupFor("black").variantIds)).toEqual(
+      new Set(BLACK_INK.flatMap((colour) => index.variantIds.get(colour) ?? [])),
+    );
+    expect(new Set(groupFor("white").variantIds)).toEqual(
+      new Set(WHITE_INK.flatMap((colour) => index.variantIds.get(colour) ?? [])),
+    );
+    expect(partition.complete).toBe(true);
+    expect(partition.covered).toHaveLength(COLOURS.length * SIZES.length);
+  });
+
+  it("enables every selected colour's variants, with the sizes applied", () => {
+    const enabled = resolveVariantIds(index, PLAN.colors, ["S", "M"]);
+
+    expect(enabled).toHaveLength(COLOURS.length * 2);
+    expect(enabled).toEqual(
+      [...enabled].sort((a, b) => a - b),
+    );
+    for (const colour of COLOURS) {
+      for (const id of index.variantIds.get(colour) ?? []) {
+        const size = CATALOGUE.find((variant) => variant.id === id)?.options?.size;
+        expect(enabled.includes(id)).toBe(size === "S" || size === "M");
+      }
+    }
+    // With no sizes ticked, every variant of every colour is enabled.
+    expect(resolveVariantIds(index, PLAN.colors, [])).toHaveLength(
+      COLOURS.length * SIZES.length,
+    );
+  });
+
+  it("puts a colour selected in BOTH rows in the ink group, never in plain", () => {
+    const bothRows: ProductColourGroups = {
+      ...GROUPS,
+      // "Solid Black" and "Navy" are ticked in the plain row too.
+      plain: [...PLAIN, "Solid Black", "Navy"],
+    };
+    const plan = planDesignColours(
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+      bothRows,
+    );
+
+    const main = plan.groups.find((group) => group.ink === "main");
+    const black = plan.groups.find((group) => group.ink === "black");
+    expect(main?.colors).toEqual(PLAIN);
+    expect(black?.colors).toEqual(BLACK_INK);
+    expect(plan.colors).toEqual(COLOURS);
+
+    const partition = buildPartition(
+      index,
+      plan.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+    );
+    const blackGroup = partition.groups[plan.groups.findIndex((group) => group.ink === "black")];
+    expect(blackGroup.colors).toEqual(BLACK_INK);
+    expect(new Set(blackGroup.variantIds)).toEqual(
+      new Set(BLACK_INK.flatMap((colour) => index.variantIds.get(colour) ?? [])),
+    );
+    expect(partition.complete).toBe(true);
+  });
+
+  it("splits a four-and-four pair between the halves, as ONE product", () => {
+    const split = pairedColourGroups(GROUPS);
+
+    // The black-ink design prints the plain colours and the black-ink ones;
+    // its partner prints only the remaining (white-ink) colours.
+    expect(split.black).toEqual([...PLAIN, ...BLACK_INK]);
+    expect(split.white).toEqual(WHITE_INK);
+    expect(planPairedDesignColours("black", GROUPS).colors).toEqual([
+      ...PLAIN,
+      ...BLACK_INK,
+    ]);
+    expect(planPairedDesignColours("white", GROUPS).colors).toEqual(WHITE_INK);
+
+    // One pair = one product: the two halves' groups form one complete
+    // partition, exactly as the Studio builds it.
+    const partition = buildPartition(index, [
+      { ink: "main", colors: split.black },
+      { ink: "white", colors: split.white },
+    ]);
+    expect(partition.complete).toBe(true);
+    expect(partition.groups[0].colors).toEqual([...PLAIN, ...BLACK_INK]);
+    expect(partition.groups[1].colors).toEqual(WHITE_INK);
+    expect(new Set(partition.covered)).toEqual(new Set(CATALOGUE.map((v) => v.id)));
+
+    // ...and the enabled set covers every colour exactly once.
+    const enabled = resolveVariantIds(index, [...split.black, ...split.white], []);
+    expect(enabled).toEqual([...CATALOGUE.map((v) => v.id)].sort((a, b) => a - b));
+    expect(new Set([...split.black, ...split.white]).size).toBe(COLOURS.length);
   });
 });

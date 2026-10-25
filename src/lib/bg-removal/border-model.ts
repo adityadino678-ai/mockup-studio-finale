@@ -28,7 +28,15 @@
 //
 // It is instant, deterministic, needs no network and no model, so it is the
 // engine that still works when the AI model cannot be downloaded.
+//
+// After the mask, `refineEdges` repairs the anti-aliased ring: the kept edge
+// pixels are still RGB blends of the subject and the backdrop, which reads as
+// a halo. The per-pixel estimate this engine already computed (the nearest of
+// the four column/row border colours) is handed to the helper, so the edge is
+// decontaminated against the LOCAL backdrop and not one global colour.
 // ---------------------------------------------------------------------------
+
+import { refineEdges } from "./edge-refine";
 
 export interface BorderModelOptions {
   /** Colour distance (0..255 euclidean RGB) considered "background". */
@@ -84,6 +92,11 @@ export function borderModelRemoveBackground(
   if (width < 3 || height < 3) return { removedPixels: 0 };
 
   const at = (x: number, y: number) => (y * width + x) * 4;
+
+  // Pixels whose alpha changed: the mask, the feather and the edge pass all
+  // count, measured against the input alpha.
+  const originalAlpha = new Uint8Array(width * height);
+  for (let i = 0; i < originalAlpha.length; i++) originalAlpha[i] = pixels[i * 4 + 3];
 
   // The border estimates. Each column has a top and a bottom estimate; each
   // row has a left and a right one. The 3-tap median smooths the noise a
@@ -167,6 +180,40 @@ export function borderModelRemoveBackground(
     }
   }
 
+  // The same estimate, exposed per pixel for the edge pass: the nearest of the
+  // four border colours (the one the distance above already picked).
+  const backgroundAt = (x: number, y: number): [number, number, number] => {
+    const p = at(x, y);
+    const r = pixels[p];
+    const g = pixels[p + 1];
+    const b = pixels[p + 2];
+    let best = colorDist(r, g, b, colTop[x], colTopG[x], colTopB[x]);
+    let br = colTop[x];
+    let bg = colTopG[x];
+    let bb = colTopB[x];
+    const dBot = colorDist(r, g, b, colBot[x], colBotG[x], colBotB[x]);
+    if (dBot < best) {
+      best = dBot;
+      br = colBot[x];
+      bg = colBotG[x];
+      bb = colBotB[x];
+    }
+    const dLeft = colorDist(r, g, b, rowLeft[y], rowLeftG[y], rowLeftB[y]);
+    if (dLeft < best) {
+      best = dLeft;
+      br = rowLeft[y];
+      bg = rowLeftG[y];
+      bb = rowLeftB[y];
+    }
+    const dRight = colorDist(r, g, b, rowRight[y], rowRightG[y], rowRightB[y]);
+    if (dRight < best) {
+      br = rowRight[y];
+      bg = rowRightG[y];
+      bb = rowRightB[y];
+    }
+    return [br, bg, bb];
+  };
+
   // Only the background CONNECTED to the border is removed. A white shape in
   // the middle of the artwork is not connected to the border, so it stays.
   const connected = new Uint8Array(width * height);
@@ -244,13 +291,18 @@ export function borderModelRemoveBackground(
     }
   }
 
-  let removedPixels = 0;
   for (let idx = 0; idx < width * height; idx++) {
     const p = idx * 4;
-    if (newAlpha[idx] < pixels[p + 3]) {
-      pixels[p + 3] = newAlpha[idx];
-      removedPixels++;
-    }
+    if (newAlpha[idx] < pixels[p + 3]) pixels[p + 3] = newAlpha[idx];
+  }
+
+  // Repair the anti-aliased ring with the engine's own background estimate, so
+  // the decontamination is against the local backdrop the mask was built on.
+  refineEdges(pixels, width, height, { backgroundAt });
+
+  let removedPixels = 0;
+  for (let idx = 0; idx < width * height; idx++) {
+    if (pixels[idx * 4 + 3] !== originalAlpha[idx]) removedPixels++;
   }
 
   return { removedPixels };

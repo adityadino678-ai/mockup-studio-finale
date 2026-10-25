@@ -210,7 +210,14 @@ async function summarizeWorkspace(): Promise<ToolExecResult> {
       db.mockups.toArray(),
       loadSession(),
     ]);
-  const withAreas = mockupRows.filter((m) => printAreaOf(m)).length;
+  // A mockup has an area when the shared default OR any design's override is
+  // valid. Counting only `printArea` would report 0 after a per-design save.
+  const hasAnyArea = (mockup: (typeof mockupRows)[number]) =>
+    printAreaOf(mockup) !== undefined ||
+    Object.values(mockup.designAreas ?? {}).some(
+      (area) => area != null && printAreaOf({ printArea: area }) !== undefined,
+    );
+  const withAreas = mockupRows.filter(hasAnyArea).length;
   const counts = {
     designs,
     mockups,
@@ -234,25 +241,31 @@ async function listLibrary(args: Record<string, unknown>): Promise<ToolExecResul
   const match = (name: string) => !query || name.toLowerCase().includes(query);
   if (wantsMockups) {
     const all = await db.mockups.orderBy("name").toArray();
+    const describeArea = (area: ReturnType<typeof printAreaOf>) =>
+      area
+        ? {
+            width: area.areaWidth,
+            height: area.areaHeight,
+            position: area.source.kind === "studio" ? area.source.position : null,
+            clipMode: area.clipMode,
+          }
+        : null;
     const items = all
       .filter((m) => match(m.name))
       .slice(0, 50)
-      .map((m) => {
-        const area = printAreaOf(m);
-        return {
-          id: m.id,
-          name: m.name,
-          category: m.category,
-          printArea: area
-            ? {
-                width: area.areaWidth,
-                height: area.areaHeight,
-                position: area.source.kind === "studio" ? area.source.position : null,
-                clipMode: area.clipMode,
-              }
-            : null,
-        };
-      });
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        category: m.category,
+        /** The shared fallback; per-design frames are in `designAreas`. */
+        printArea: describeArea(printAreaOf(m)),
+        designAreas: Object.fromEntries(
+          Object.entries(m.designAreas ?? {}).map(([designId, raw]) => [
+            designId,
+            describeArea(printAreaOf({ printArea: raw })),
+          ]),
+        ),
+      }));
     return {
       summary: `${items.length} mockup${items.length === 1 ? "" : "s"}${query ? ` matching “${query}”` : ""}`,
       result: { kind: "mockups", items },
@@ -471,7 +484,8 @@ async function proposeMockupRender(args: Record<string, unknown>): Promise<ToolE
     ? (args.ink as InkVariant)
     : "main";
   const behindMockup = args.behindMockup === true;
-  const area = printAreaOf(mockup);
+  // This design's area on the mockup, falling back to the shared default.
+  const area = printAreaOf(mockup, design.id);
   return {
     summary: `Ready to place “${design.name}” on “${mockup.name}” (${ink} ink)`,
     confirmation: {
@@ -554,7 +568,8 @@ async function proposeSavePlacement(args: Record<string, unknown>): Promise<Tool
   const transform = clampTransform(args.transform);
   const asTemplate = args.asTemplate === true;
   const templateName = String(args.templateName ?? "").trim() || `${design.name} placement`;
-  const area = printAreaOf(mockup);
+  // This design's area on the mockup, falling back to the shared default.
+  const area = printAreaOf(mockup, design.id);
   return {
     summary: `Ready to save where “${design.name}” sits on “${mockup.name}”`,
     confirmation: {
@@ -592,7 +607,8 @@ export async function confirmSavePlacement(payload: Record<string, unknown>): Pr
     // A print-area mockup ignores the `placements` table: its render reads the
     // Studio placement. Writing the old row would look saved and change
     // nothing, so convert the transform back into area space and write THAT.
-    const area = printAreaOf(mockup);
+    // The area is this design's own override, falling back to the default.
+    const area = printAreaOf(mockup, design.id);
     const studioPlacement = area
       ? studioPlacementFromTransform(
           transform,

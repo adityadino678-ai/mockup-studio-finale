@@ -503,8 +503,29 @@ export function describePrintAreaTemplate(payload: PrintAreaTemplatePayload): st
  *
  * Every read of a mockup's area goes through this, so an area stored in the
  * old shape is upgraded on the way in.
+ *
+ * A design tab is independent: when `designId` is given and that design has an
+ * entry in `designAreas`, that entry wins. A `null` entry means "this design
+ * deliberately has no area on this mockup", so it resolves to `undefined`
+ * instead of falling back to the shared area. A missing entry (or no
+ * `designId`) falls back to `mockup.printArea`, which is the shared default
+ * for designs that have never been edited.
  */
-export function printAreaOf(mockup: { printArea?: unknown }): MockupPrintArea | undefined {
+export function printAreaOf(
+  mockup: {
+    printArea?: unknown;
+    designAreas?: Record<string, unknown> | null;
+  },
+  designId?: string | null,
+): MockupPrintArea | undefined {
+  const overrides = mockup.designAreas;
+  if (
+    designId &&
+    overrides &&
+    Object.prototype.hasOwnProperty.call(overrides, designId)
+  ) {
+    return normalisePrintArea(overrides[designId]);
+  }
   return normalisePrintArea(mockup.printArea);
 }
 

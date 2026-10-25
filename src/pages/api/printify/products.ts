@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
-import { createPrintifyClient, PrintifyError } from "@/lib/server/printify";
+import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/server/printify";
 import { clampPlacement } from "@/lib/printify/fit";
 
 interface CreateProductBody {
@@ -19,6 +19,11 @@ interface CreateProductBody {
   price?: number;
   /** Optional per-variant price overrides, in cents. */
   prices?: Record<string, number>;
+  /**
+   * The shop to create the product in. Defaults to the shop saved in Settings,
+   * then to the first sales-channel-connected shop on the account.
+   */
+  shopId?: number;
   printAreas?: Record<string, string>;
   /** Base64 artwork to upload and attach to the print area. */
   artwork?: { base64: string; filename: string; printAreaId: string };
@@ -168,6 +173,33 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
+    // --- shop ----------------------------------------------------------------
+    // Resolve the shop BEFORE uploading any artwork. A saved shop that is no
+    // longer on this account must stop the request loudly; falling back to
+    // shops[0] puts the product (and its images) in a store the user did not
+    // choose.
+    if (body.shopId != null && normalizeShopId(body.shopId) === undefined) {
+      return json({ error: "shopId must be a positive integer" }, 400);
+    }
+    const preferredShopId = normalizeShopId(body.shopId) ?? creds.printify?.shopId;
+    let shopId: number;
+    if (preferredShopId !== undefined) {
+      const shops = await client.listShops();
+      if (!shops.some((shop) => shop.id === preferredShopId)) {
+        return json(
+          {
+            error: `Printify shop #${preferredShopId} is not in this account's shop list. Refresh the shop list in Settings and choose a shop again.`,
+            shopId: preferredShopId,
+            code: "shop-missing",
+          },
+          409,
+        );
+      }
+      shopId = preferredShopId;
+    } else {
+      shopId = await client.resolveShopId();
+    }
+
     // --- artwork -------------------------------------------------------------
     // `artworks` is the multi-group form: one upload per artwork group, each
     // with the variants it prints on. The legacy single `artwork` form is
@@ -241,7 +273,6 @@ export const POST: APIRoute = async ({ request }) => {
 
     // Resolve the shop once per request: the response carries it so the
     // mockup bridge can address the same product without guessing.
-    const shopId = await client.resolveShopId();
     const product = await client.createProduct({
       title: body.title.trim(),
       description: body.description ?? "",

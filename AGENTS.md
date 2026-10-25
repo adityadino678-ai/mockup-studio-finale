@@ -54,8 +54,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 383 unit tests
-npm run test:e2e      # 26 acceptance tests (local dev server)
+npm run test          # 443 unit tests
+npm run test:e2e      # 31 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -72,7 +72,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **11 static pages + 11 on-demand endpoints.** No page depends on request state,
+- **11 static pages + 12 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker. `/` is a static redirect (meta refresh plus
@@ -272,6 +272,18 @@ place the artwork, create one Printify product per design.
   panel and the agent all write it, so the Studio's auto-save merges the
   latest stored blob and only overrides the fields this tab actually edited;
   saving the whole local copy used to put a stale placement back.
+- **One saved Printify shop is the account-wide default.** Settings →
+  **Printify shop** stores `printifyShopId` in the browser-local integrations
+  record; `integrationHeaders()` sends it as `x-printify-shop`, and
+  `credentialsFromRequest()` parses it into `creds.printify.shopId`. Product
+  creation, mockup uploads, Send and Publish all use the same choice. The
+  server never silently falls back to `shops[0]` when a shop id was supplied
+  but is missing: `/api/printify/products` answers 409 `shop-missing`. Publish
+  and mockup uploads are stricter still — they resolve the shop that actually
+  OWNS the product (`resolveProductShop`) before writing, so a stale selection
+  cannot address another shop's product. `GET /api/printify/shops` is the
+  read-only list (connected first) that drives the dropdown and the preview's
+  target-shop row.
 
 Four things that are easy to get wrong, and were:
 
@@ -337,6 +349,12 @@ mockups and finally a live product.
     local listing drafts. The long render loop reads the latest session from a
     ref before saving, so edits made on another page mid-render are not
     overwritten.
+  - **Renders saved before the fingerprint can be linked explicitly.** A
+    `mockup-render` with no `renderFp` cannot be adopted automatically, so the
+    page offers "N saved render(s) from Mockups can be linked"; one click pins
+    the newest saved pixels for each uncovered tile to the CURRENT fingerprint.
+    It is deliberately not automatic: linking assumes the design and area have
+    not changed since that render was saved.
   - Designs that are in the library but not ticked for the batch appear in a
     "Not in this batch" card with an explicit **Add to batch** button. They are
     never added automatically: an empty tick list means NO products.
@@ -351,10 +369,13 @@ mockups and finally a live product.
   asset/dimensions, the pixel-affecting print-area fields (`areaWidth`,
   `areaHeight`, `frame`, `crop`, `clipMode`), the Studio placement, the saved
   fallback transform **only when there is no print area**, and the
-  behind-garment override. `label`, `source`, `reference` and `updatedAt` are
-  deliberately excluded. The fingerprint is `version: 2`; changing it
-  invalidates existing renders once, which is the intended cost of fixing the
-  old over-broad hash.
+  behind-garment override. The area is resolved for THAT listing's design
+  (`printAreaOf(mockup, designId)`), and the hashed `behindMockup` is the
+  EFFECTIVE compositing mode: the area's `clipMode` when an area exists, the
+  saved placement flag otherwise. `label`, `source`, `reference` and
+  `updatedAt` are deliberately excluded. The fingerprint is `version: 3`;
+  changing it invalidates existing renders once, which is the intended cost of
+  fixing the old over-broad hash.
 - **Downloads** build a ZIP of the current renders only, in click order. The
   Export Center uses `listing.imageAssetIds` in order when
   `imageSelectionLocked` is true, and falls back to every render when it is
@@ -394,15 +415,28 @@ mockups and finally a live product.
     `confirmPrintifyProduct` uses), upload the listing's selected renders
     through `/api/printify/mockups`, hand the mockup SELECTION step to the
     clipboard/bookmarklet bridge (only a printify.com tab can write it), then
-    `POST /api/printify/publish` with `{confirm:true, productId}`. Any failure
-    stops the pipeline and shows the upstream message verbatim; a publish is
-    never retried automatically, because publishing an already-published
-    product errors upstream. The page never publishes a product this app did
-    not create or link for that listing.
-  - A **pair** is created in the Studio, not here: `confirmPrintifyProduct`
-    takes one artwork, while a pair's product needs both halves' print-area
-    groups from the Studio's own loop. The preview says so and links to
-    `/printify-studio`; once the pair's product exists it links and publishes
+    `POST /api/printify/publish` with `{confirm:true, productId, shopId}`. Any
+    failure stops the pipeline and shows the upstream message verbatim; a
+    publish is never retried automatically, because publishing an
+    already-published product errors upstream. The page never publishes a
+    product this app did not create or link for that listing.
+  - **The saved shop is checked BEFORE the button.** The page reads
+    `printifyShopId`, lists shops through `/api/printify/shops`, and blocks a
+    run while the list is still loading or when no shop is selected, the saved
+    shop is no longer on the account, the list cannot be read, or the shop has
+    no sales channel (the original `8254` failure). The message names the shop
+    and links to Printify → My stores. `/api/printify/publish` repeats the
+    check server-side against the shop that actually OWNS the product, answers
+    `409 {code:8254, shopId, shopTitle, connectUrl}` without calling Printify
+    when it is disconnected, and maps an upstream 8254 to the same shape.
+    `POST /api/printify/products` uses the saved shop before uploading any
+    artwork and returns `409 shop-missing` rather than silently using another
+    store.
+  - A **pair, or an unpaired ink design, is created in the Studio, not here.**
+    `confirmPrintifyProduct` takes one artwork, while a pair needs both
+    halves' print-area groups and an ink design needs its main and ink groups.
+    The preview blocks creation with the reason and points at
+    `/printify-studio`; once the product exists it links and publishes
     normally. Placement is not forwarded by that creation path either, so a
     non-default scale warns before creating a centred draft.
 - **Draft locking is deliberate.** `src/lib/printify/listing-drafts.ts` writes
@@ -433,6 +467,11 @@ mockups and finally a live product.
   shorter set changes which image becomes the main one. The render is the
   listing's image, not the product's print file; the print file still comes
   from the print areas.
+  The Send dialog is **one press plus the final bookmarklet step**: it uploads,
+  copies the payload automatically, shows a 3-step indicator (images uploaded →
+  payload copied → run the bookmarklet), and offers one primary "Open the
+  Printify product" action. The copy-again/text fallback stays available, and
+  the bookmarklet still uses only the user's printify.com session.
 - **`/printify-bookmarklet`** is the install page. It is intentionally outside
   the sidebar: it is a utility page opened from the Send dialog, not another
   work surface.
@@ -463,6 +502,17 @@ The two engines are different methods:
   one colour. The removal is restricted to the pixels CONNECTED to the
   border, which is what keeps a white shape inside the artwork from being
   erased. Instant, offline, no model.
+
+**Both engines finish through `src/lib/bg-removal/edge-refine.ts`.** After the
+mask, the kept anti-aliased ring is still a blend of subject and backdrop - the
+dark fringe/halo a dedicated remover would clean up. `refineEdges` projects each
+band pixel onto the local background→foreground line (the caller supplies the
+background estimate: removed-neighbour colour for flood-key, its per-pixel
+border estimate for border-model), sets alpha from the coverage, and
+decontaminates RGB when the pixel lies on the line. A one-pixel morphology pass
+removes isolated opaque specks and fills pinholes; fully transparent pixels are
+never recoloured and opaque interior detail is never treated as edge. It adds
+no model, key, upload or network call.
 
 **There is deliberately no AI engine and no hosted service.** This was the
 user's decision: one remover that works, unlimited, with no key, no account
@@ -607,6 +657,18 @@ the canvas — the only place it is visible. The searchable `DesignPicker`
 dropdown these replaced was deleted. Everything in the tab — canvas, frame,
 controls, renders — is that design only:
 
+- **The area itself is per design too.** `Mockup.designAreas?: Record<string,
+  MockupPrintArea | null>` is the override model. `printAreaOf(mockup,
+  designId?)` is the single resolver: an existing key wins (`null` means
+  "this design deliberately has no area"), a missing key falls back to the
+  shared `printArea`. Saving in a design tab writes only that design's
+  override and never touches the shared base or another design's entry.
+  Every path that renders must thread the design id - the tab preview, Save
+  render, Render on every mockup, the batch runner and the agent tools - and
+  Save render / Render everywhere persist the draft first, then recompute the
+  fingerprint from the SAVED design-aware area. A mockup counts as mapped when
+  the shared base exists OR any override is non-null; the Listing images tile
+  label asks `printAreaOf(mockup, listing.designId)` for the same reason.
 - A design owns ONE placement in the Studio (`placements[designId]`, falling
   back to `universalPlacement` until it is first edited). Every mockup with a
   print area uses that same placement inside its own frame, so the design
@@ -629,9 +691,14 @@ controls, renders — is that design only:
   overrides. "Fit to area" writes only the picked design.
 
 Saves are debounced; leaving the panel or switching mockups flushes a pending
-draft. The session is read with a LIVE query, so a placement written in the
-Studio or by the agent appears here without a reload. Repeated saves reuse one
-toast id instead of stacking identical notifications.
+draft. Every pending draft carries its own `mockupId` + `designId`, and a
+`draftOwner` guard refuses to arm the previous tab's area under a newly selected
+one. **Remove area cancels the live debounce before writing the `null`
+override** - otherwise the timer's closure could silently save the removed area
+back on the next tab switch or page unload. The session is read with a LIVE
+query, so a placement written in the Studio or by the agent appears here without
+a reload. Repeated saves reuse one toast id instead of stacking identical
+notifications.
 
 **The print area is a FRAME that carries the design.**
 That is the whole design, and it is deliberate:
@@ -816,16 +883,19 @@ position pickers here:
   print-area templates; Product Builder → the Studio's Design panel; Listings
   and AI SEO → the agent's `draft_listing`. Their engines
   (`lib/batch/runner.ts`, `lib/canvas/compose.ts`, `lib/printify/*`,
-  `lib/client/tools.ts`, all eleven `/api/*` endpoints) are untouched, because the
+  `lib/client/tools.ts`, all twelve `/api/*` endpoints) are untouched, because the
   UI and the agent still call them. Accepted losses: there is no batch-job list
   screen (the renders land in the Export Center, and a batch row in the artifact
   rail is inert) and no free-form canvas editor.
 - **API keys are optional and user-supplied.** A visitor can paste their own
   Printify / AI keys in **Settings → API connections**; they are stored in that
   browser's IndexedDB (`settings` table, key `integrations`) and sent per-request
-  as `x-printify-key` / `x-ai-provider` / `x-ai-key` / `x-ai-base-url` /
-  `x-ai-model` headers. `src/lib/server/creds.ts` prefers the browser value and
-  falls back to a server secret, so nothing breaks when neither is set. The
+  as `x-printify-key` / `x-printify-shop` / `x-ai-provider` / `x-ai-key` /
+  `x-ai-base-url` / `x-ai-model` headers. `src/lib/server/creds.ts` prefers the
+  browser value and falls back to a server secret, so nothing breaks when
+  neither is set. **The saved `printifyShopId` is part of that record** and is
+  what the Settings dropdown, creation, Send and Publish share; it is validated
+  as a positive integer on load and when it arrives on the wire. The
   server never stores a user's key. Preview deployments can also set secrets with
   `npx wrangler secret put PRINTIFY_API_KEY` (and/or `AI_API_KEY`). With no keys
   anywhere, every integration endpoint returns 503 before doing work, and a key
@@ -1016,9 +1086,14 @@ position pickers here:
   `workers.dev`. Export a ZIP from the local app first if the data matters.
 - **Cloudflare calls `workers.dev` "not business-critical"** — a custom domain is
   the next step if this ever matters commercially.
-- **Etsy listing *submission* is deliberately not implemented** (the agent
+- **Etsy listing *submission* is deliberately not implemented yet** (the agent
   drafts copy to paste; the old validation module went with the Listings page)
-  because v3 OAuth needs app registration.
+  because v3 OAuth needs app registration. Settings shows the Etsy keystring
+  card **disabled**, with placeholder "Not active yet" and an "Autopilot
+  release" badge, so it cannot imply research works before the autopilot and a
+  real developer keystring exist. Release 2 (the review-gated listing
+  autopilot) is not built; Etsy research will use API v3, never silent
+  scraping.
 - **Background removal is local and deliberately limited.** It handles a
   solid or faded backdrop; a busy photographic background has to be cut out
   before upload. There is no AI model and no hosted service, so there is

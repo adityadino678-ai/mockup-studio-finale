@@ -99,9 +99,20 @@ function unique(values: string[]): string[] {
 /**
  * The product's colour groups, cleaned up.
  *
- * A colour cannot be in both groups, and only a colour that IS in the ink
- * group can carry an ink. Anything else in `blackInk` is ignored: it names a
- * colour the product does not print with the ink artwork at all.
+ * A colour cannot be in both groups, and the INK row wins: when the user
+ * selects the same colour in both rows, it stays in the ink group and is
+ * removed from the plain group. That is deliberate - the ink row is where the
+ * user chose the artwork that colour prints with, so dropping it from the ink
+ * group would silently print the MAIN artwork on a colour that has a chosen
+ * ink. The colour still becomes a product variant either way; this only
+ * decides WHICH artwork lands on it.
+ *
+ * Plain designs are unaffected: an unpaired design prints its main artwork on
+ * every colour, so a colour moving out of `plain` does not lose anything.
+ *
+ * Only a colour that IS in the ink group can carry an ink. Anything else in
+ * `blackInk` is ignored: it names a colour the product does not print with
+ * the ink artwork at all.
  */
 export function normaliseColourGroups(groups: ProductColourGroups): {
   plain: string[];
@@ -109,11 +120,50 @@ export function normaliseColourGroups(groups: ProductColourGroups): {
   black: string[];
   white: string[];
 } {
-  const plain = unique(groups.plain);
-  const ink = unique(groups.ink).filter((c) => !plain.includes(c));
+  // The ink row is authoritative for the overlap: every colour the user put
+  // there is kept, and the plain row only holds what the ink row does not.
+  const ink = unique(groups.ink);
+  const inkSet = new Set(ink);
+  const plain = unique(groups.plain).filter((c) => !inkSet.has(c));
   const black = ink.filter((c) => groups.blackInk.includes(c));
   const white = ink.filter((c) => !groups.blackInk.includes(c));
   return { plain, ink, black, white };
+}
+
+/** The counts the Design panel reports for a listing's colour plan. */
+export interface ColourGroupSummary {
+  /** Colours printed with the main artwork only. */
+  plain: number;
+  /** Ink colours printed with the black-ink artwork. */
+  black: number;
+  /** Ink colours printed with the white-ink artwork. */
+  white: number;
+  /** Every colour of the product, counted exactly once. */
+  total: number;
+  /**
+   * Colours the user put in BOTH rows. They are kept in the ink group; this
+   * list exists so the panel can say so instead of hiding the overlap.
+   */
+  overlap: string[];
+}
+
+/**
+ * The colour counts for the Design panel's summary line.
+ *
+ * It uses the same normalisation as the plan, so the numbers cannot disagree
+ * with what will actually be created: plain + black + white is the whole
+ * product, and a colour in both rows is counted once - in the ink group.
+ */
+export function summariseColourGroups(groups: ProductColourGroups): ColourGroupSummary {
+  const { plain, ink, black, white } = normaliseColourGroups(groups);
+  const inkSet = new Set(ink);
+  return {
+    plain: plain.length,
+    black: black.length,
+    white: white.length,
+    total: plain.length + black.length + white.length,
+    overlap: unique(groups.plain).filter((c) => inkSet.has(c)),
+  };
 }
 
 /**
