@@ -7,7 +7,7 @@ import os from "node:os";
  * End-to-end acceptance coverage for the core workflow:
  *   upload â†’ place â†’ render â†’ export
  *
- * The app has eleven pages. The Designs library, the mockup editor, the batch
+ * The app has twelve pages. The Designs library, the mockup editor, the batch
  * runner, templates, the Product Builder, listings and the AI SEO studio were
  * folded into these pages or removed, so their screens no longer exist and the
  * tests that drove them are gone. What is left probes the paths that still
@@ -549,6 +549,7 @@ test.describe("core workflow", () => {
       "/listing-images",
       "/listing-details",
       "/listing-preview",
+      "/autopilot",
       "/printify-bookmarklet",
     ];
     for (const route of routes) {
@@ -600,6 +601,11 @@ test.describe("core workflow", () => {
         path: "/listing-preview",
         copy: /Each tab is one listing in the batch/,
       },
+      {
+        link: /^Autopilot$/,
+        path: "/autopilot",
+        copy: /Start a run/,
+      },
       { link: /^Agent$/, path: "/agent", copy: /How can I help\?/ },
       { link: /^Export Center$/, path: "/export", copy: /organized ZIP archive with a manifest/ },
       { link: /^Activity$/, path: "/activity", copy: /No activity yet/ },
@@ -642,15 +648,17 @@ test.describe("core workflow", () => {
 
     // The shop selector is the one saved choice product creation, Send and
     // Publish share. It cannot load shops without a real key, so it starts
-    // disabled; the Etsy card is deliberately inert until the autopilot ships.
+    // disabled. The Etsy card is the read-only research surface the autopilot
+    // uses; it needs a developer keystring before its test can run.
     await expect(page.getByLabel("Printify shop")).toBeVisible();
     await expect(page.getByLabel("Printify shop")).toBeDisabled();
-    await expect(page.getByLabel("Etsy keystring")).toBeDisabled();
+    await expect(page.getByLabel("Etsy keystring")).toBeEnabled();
     await expect(page.getByLabel("Etsy keystring")).toHaveAttribute(
       "placeholder",
-      "Not active yet",
+      "Paste your Etsy developer keystring",
     );
-    await expect(page.getByText("Autopilot release")).toBeVisible();
+    await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Test research/ })).toBeDisabled();
 
     // Selecting a provider swaps the key placeholder to that provider's own.
     await page.getByLabel("Provider").selectOption("nvidia");
@@ -1831,6 +1839,153 @@ test.describe("core workflow", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Publish to Printify" })).toBeDisabled();
   });
+
+  test("30. autopilot blocks publishing until the bookmarklet and the final approval", async ({
+    page,
+  }) => {
+    let publishCalls = 0;
+    await page.route("**/api/printify/publish", async (route) => {
+      publishCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
+    });
+
+    const now = Date.now();
+    const upload = {
+      libraryId: "library-1",
+      mockupId: "mockup-1",
+      src: "https://example.com/mockup.jpg",
+      filename: "mockup.jpg",
+    };
+    const run = {
+      id: "run-publish-gates",
+      createdAt: now,
+      updatedAt: now,
+      status: "needs-review",
+      stage: "mockup-review",
+      query: "personalized cat shirt",
+      niche: "cat lovers",
+      productName: "T-Shirt",
+      shopId: 123,
+      priceCents: 1999,
+      listings: [
+        {
+          id: "design-1",
+          designId: "design-1",
+          memberIds: ["design-1"],
+          designName: "Cat",
+          status: "uploaded",
+          reviewApprovedAt: now,
+          productId: "product-1",
+          shopId: 123,
+          imageAssetIds: ["asset-1"],
+          uploadedMockupIds: ["mockup-1"],
+          uploadedUploads: [upload],
+          copy: {
+            title: "Personalized Cat Shirt",
+            description: "A cat shirt printed to order.",
+            tags: ["cat shirt"],
+            priceCents: 1999,
+            quantity: 1,
+            groundedOnEtsy: true,
+          },
+          updatedAt: now,
+        },
+      ],
+      session: autopilotSession(),
+      bridgePayload: JSON.stringify({
+        source: "mockup-studio",
+        version: 1,
+        createdAt: new Date(now).toISOString(),
+        products: [
+          {
+            shopId: 123,
+            productId: "product-1",
+            productTitle: "Cat Tee",
+            uploads: [upload],
+          },
+        ],
+      }),
+      bridgeProducts: [
+        { shopId: 123, productId: "product-1", productTitle: "Cat Tee", uploadCount: 1 },
+      ],
+      log: [{ id: "log-1", at: now, level: "info", message: "Mockups uploaded." }],
+    };
+
+    await seedAutopilotRun(page, run);
+
+    // Stage one: the bookmarklet step. Publishing is not offered yet, and no
+    // publish request can have been made.
+    await expect(page.getByText("One manual step: the bookmarklet")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByRole("button", { name: "I ran the bookmarklet" })).toBeVisible();
+    await expect(page.getByText("Final publish approval")).toHaveCount(0);
+    expect(publishCalls).toBe(0);
+
+    await page.getByRole("button", { name: "I ran the bookmarklet" }).click();
+
+    // Stage two: the final approval. Opening the confirmation must not publish;
+    // only the explicit "Yes, publish" click does.
+    await expect(page.getByText("Final publish approval")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/Nothing has been published yet/)).toBeVisible();
+    expect(publishCalls).toBe(0);
+
+    await page.getByRole("button", { name: /Publish 1 listing/ }).click();
+    await expect(page.getByText(/Publishing is not retried automatically/)).toBeVisible();
+    expect(publishCalls).toBe(0);
+
+    await page.getByRole("button", { name: "Yes, publish" }).click();
+    await expect(page.getByText(/1\/1 published/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+    expect(publishCalls).toBe(1);
+  });
+
+  test("31. autopilot refuses to build while a listing is unapproved", async ({ page }) => {
+    const now = Date.now();
+    const run = {
+      id: "run-build-gate",
+      createdAt: now,
+      updatedAt: now,
+      status: "needs-review",
+      stage: "copy-review",
+      query: "personalized cat shirt",
+      niche: "cat lovers",
+      productName: "T-Shirt",
+      shopId: 123,
+      priceCents: 1999,
+      listings: [
+        {
+          id: "design-1",
+          designId: "design-1",
+          memberIds: ["design-1"],
+          designName: "Cat",
+          status: "drafted",
+          copy: {
+            title: "Personalized Cat Shirt",
+            description: "A cat shirt printed to order.",
+            tags: ["cat shirt"],
+            priceCents: 1999,
+            quantity: 1,
+            groundedOnEtsy: true,
+          },
+          updatedAt: now,
+        },
+      ],
+      session: autopilotSession(),
+      log: [{ id: "log-1", at: now, level: "success", message: "Copy is ready." }],
+    };
+
+    await seedAutopilotRun(page, run);
+
+    await expect(page.getByText("Human review")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("1 listing(s) still need approval.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Build products & upload mockups" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Approve all" })).toBeDisabled();
+  });
 });
 
 /**
@@ -1876,6 +2031,62 @@ async function setStudioSession(page: Page, patch: Record<string, unknown>) {
   await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
     timeout: 30_000,
   });
+}
+
+/** The browser-local Studio snapshot a seeded autopilot run carries. */
+function autopilotSession(): Record<string, unknown> {
+  return {
+    sizes: [],
+    rows: {
+      plain: { colors: [], blackInkColors: [] },
+      ink: { colors: [], blackInkColors: [] },
+    },
+    designIds: [],
+    inkPairIds: [],
+    inkPairs: [],
+    universalPlacement: { position: "front", x: 0.5, y: 0.5, scale: 1, angle: 0 },
+    placements: {},
+    priceCents: 1999,
+    titleTemplate: "{design} — {product}",
+    descriptionTemplate: "",
+    tags: [],
+    priceMode: "fixed",
+    listingPrices: {},
+    category: "",
+    quantity: 1,
+    listingImages: {},
+    listingImageCleared: {},
+    listingRenders: {},
+    updatedAt: Date.now(),
+  };
+}
+
+/**
+ * Writes a run straight into the `autopilotRuns` table, then opens it.
+ *
+ * The autopilot's research/build steps need live Etsy and Printify keys, but
+ * the human gates are pure state. Seeding the run at a gate lets the test
+ * prove that a publish cannot happen without both confirmations, without
+ * spending a real key or creating a product.
+ */
+async function seedAutopilotRun(page: Page, run: Record<string, unknown>) {
+  await gotoApp(page, "/autopilot");
+  await expect(page.getByRole("heading", { name: "Listing autopilot" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.evaluate(async (value) => {
+    const db: IDBDatabase = await new Promise((res) => {
+      const r = indexedDB.open("mockup-studio");
+      r.onsuccess = () => res(r.result);
+    });
+    await new Promise<void>((res, rej) => {
+      const tx = db.transaction(["autopilotRuns"], "readwrite");
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+      tx.objectStore("autopilotRuns").put(value);
+    });
+  }, run);
+  await gotoApp(page, `/autopilot?run=${String(run.id)}`);
 }
 
 /** Uploads fixture assets into the library (waits for each upload to land)

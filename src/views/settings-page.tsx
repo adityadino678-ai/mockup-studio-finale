@@ -88,6 +88,9 @@ export function SettingsPage() {
   const [shopsLoading, setShopsLoading] = React.useState(false);
   const [shopsError, setShopsError] = React.useState<string | null>(null);
   const [shopNotice, setShopNotice] = React.useState<string | null>(null);
+  const [etsyQuery, setEtsyQuery] = React.useState("personalized t-shirt");
+  const [etsyTesting, setEtsyTesting] = React.useState(false);
+  const [etsyResult, setEtsyResult] = React.useState<TestResult | null>(null);
 
   const counts = useLiveQuery(async () => {
     const [designs, mockups, assets, renders, templates] = await Promise.all([
@@ -247,6 +250,49 @@ export function SettingsPage() {
     }
   };
 
+  /**
+   * Etsy has no "connection" to test: the keystring either lets the public
+   * listing search answer or it does not. A real query is the honest probe,
+   * and it also shows the user what the autopilot will receive.
+   */
+  const runEtsyTest = async () => {
+    if (!config) return;
+    const query = etsyQuery.trim();
+    if (query.length < 2) {
+      toast.error("Enter a search query first");
+      return;
+    }
+    setEtsyTesting(true);
+    try {
+      const res = await fetch("/api/etsy/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...integrationHeaders(config) },
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json().catch(() => null);
+      const research = data?.research;
+      const ok = res.ok && !!research;
+      const result: TestResult = {
+        ok,
+        message: ok
+          ? `${Number(research.activeListings ?? 0).toLocaleString()} active listing(s) · ${Number(
+              research.sampled ?? 0,
+            )} sampled · ${(research.topTags ?? []).length} recurring tag(s)`
+          : (data?.error ?? `HTTP ${res.status}`),
+        at: Date.now(),
+      };
+      setEtsyResult(result);
+      if (ok) toast.success("Etsy research is working");
+      else toast.error(result.message);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Etsy research failed";
+      setEtsyResult({ ok: false, message, at: Date.now() });
+      toast.error(message);
+    } finally {
+      setEtsyTesting(false);
+    }
+  };
+
   const onProviderChange = (id: string) => {
     if (!config) return;
     setConfig(selectProvider(config, id));
@@ -362,9 +408,9 @@ export function SettingsPage() {
             <KeyRound className="h-4 w-4 text-forest" /> API connections
           </CardTitle>
           <CardDescription>
-            Paste your own keys to connect Printify and any AI provider. Keys are stored only in this
-            browser (IndexedDB), sent to the provider through the server on each request, and never
-            written to the server. Clear them any time.
+            Paste your own keys to connect Printify, Etsy research and any AI provider. Keys are
+            stored only in this browser (IndexedDB), sent to the provider through the server on each
+            request, and never written to the server. Clear them any time.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -491,34 +537,30 @@ export function SettingsPage() {
                 <ResultLine result={results.printify} testing={testing === "printify"} />
               </section>
 
-              {/* Etsy research - deliberately inert until the autopilot ships. */}
-              <section className="space-y-2 rounded-md border border-dashed border-border-strong bg-surface-muted/30 p-3">
+              {/* Etsy research - read-only Open API v3. */}
+              <section className="space-y-2 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-[14px] font-medium text-ink-muted">
+                  <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
                     <Search className="h-4 w-4 text-ink-subtle" /> Etsy research
                   </div>
                   <Badge variant="outline" className="shrink-0">
-                    Autopilot release
+                    Read-only
                   </Badge>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="etsy-keystring" className="text-ink-muted">
-                    Etsy keystring
-                  </Label>
-                  <Input
+                  <Label htmlFor="etsy-keystring">Etsy keystring</Label>
+                  <SecretInput
                     id="etsy-keystring"
-                    value=""
-                    readOnly
-                    disabled
-                    placeholder="Not active yet"
-                    aria-describedby="etsy-keystring-note"
-                    className="font-mono text-[12px]"
-                    autoComplete="off"
-                    spellCheck={false}
+                    value={config.etsyKeystring ?? ""}
+                    reveal={!!reveal.etsyKeystring}
+                    onToggleReveal={() =>
+                      setReveal((r) => ({ ...r, etsyKeystring: !r.etsyKeystring }))
+                    }
+                    onChange={(v) => patchConfig({ etsyKeystring: v })}
+                    placeholder="Paste your Etsy developer keystring"
                   />
                   <p id="etsy-keystring-note" className="text-[11px] text-ink-subtle">
-                    Not active yet. The autopilot will use this to research live Etsy listings.
-                    Until then nothing is sent. Learn more at{" "}
+                    From{" "}
                     <a
                       href="https://www.etsy.com/developers/"
                       target="_blank"
@@ -527,9 +569,40 @@ export function SettingsPage() {
                     >
                       etsy.com/developers
                     </a>
-                    .
+                    . Used only for the public active-listing search: the autopilot reads tags,
+                    titles and prices. Nothing is written to Etsy, and this app never scrapes the
+                    site.
                   </p>
                 </div>
+                <div className="flex flex-wrap items-end gap-2 pt-1">
+                  <div className="min-w-[180px] flex-1 space-y-1.5">
+                    <Label htmlFor="etsy-test-query" className="text-ink-muted">
+                      Test with a search
+                    </Label>
+                    <Input
+                      id="etsy-test-query"
+                      value={etsyQuery}
+                      onChange={(e) => setEtsyQuery(e.target.value)}
+                      placeholder="personalized t-shirt"
+                      className="text-[12px]"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={runEtsyTest}
+                    disabled={etsyTesting || !config.etsyKeystring?.trim()}
+                  >
+                    {etsyTesting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Search className="h-3.5 w-3.5" />
+                    )}
+                    Test research
+                  </Button>
+                </div>
+                <ResultLine result={etsyResult ?? undefined} testing={etsyTesting} />
               </section>
 
               <Separator />

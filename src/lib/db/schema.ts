@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from "dexie";
+import type { AutopilotRun } from "@/types/autopilot";
 import type {
   ActivityRecord,
   AssetMeta,
@@ -54,6 +55,7 @@ export class MockupStudioDB extends Dexie {
   settings!: EntityTable<SettingRecord, "key">;
   conversations!: EntityTable<Conversation, "id">;
   messages!: EntityTable<ChatMessage, "id">;
+  autopilotRuns!: EntityTable<AutopilotRun, "id">;
 
   constructor() {
     super("mockup-studio");
@@ -82,6 +84,11 @@ export class MockupStudioDB extends Dexie {
     this.version(3).stores({
       conversations: "id, updatedAt, createdAt, pinned",
       messages: "id, conversationId, createdAt, [conversationId+createdAt]",
+    });
+    // v4: review-gated listing autopilot runs. They hold the review state,
+    // not the products: a run can be resumed after a reload.
+    this.version(4).stores({
+      autopilotRuns: "id, status, stage, updatedAt",
     });
   }
 }

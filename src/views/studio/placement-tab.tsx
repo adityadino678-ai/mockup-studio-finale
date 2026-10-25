@@ -4,9 +4,7 @@ import * as React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db, getSetting, setSetting } from "@/lib/db/schema";
-import { designMainAssetId, getAssetBlob, logActivity, uid } from "@/lib/db/repo";
-import { authedFetch } from "@/lib/client/integrations";
-import { artworkToBase64Sized } from "@/lib/client/artwork";
+import { createStudioProducts } from "@/lib/client/studio-create";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, Separator } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -28,10 +26,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { buildCatalogueIndex, buildPartition, resolveVariantIds } from "@/lib/printify/variants";
+
 import {
   inkArtworkProblems,
-  pairedColourGroups,
   pairedDesignIds,
   pairForDesign,
   planDesignColours,
@@ -40,11 +37,14 @@ import {
   summariseColourGroups,
   withInkPair,
   withoutInkPair,
-  type InkArtworkProblem,
 } from "@/lib/printify/design-colours";
-import { assertCompletePartition } from "@/lib/printify/print-areas";
-import { clampPlacement } from "@/lib/printify/fit";
-import { inkProblems, placementFor, priceForListing, remapListingState, renderTemplate, renderTitle, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
+import {
+  buildStudioPlan,
+  describeMissingInk,
+  planVariantCounts,
+  studioPartitionProblems,
+} from "@/lib/printify/studio-plan";
+import { inkProblems, placementFor, remapListingState, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
 import { buildStudioListings } from "@/lib/printify/listing-plan";
 import { remapListingDraftOwner } from "@/lib/printify/listing-drafts";
 import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
@@ -59,26 +59,6 @@ interface PlacementTabProps {
   catalog: StudioCatalogState;
   hexFor: (name: string) => string;
   onGoToColors: () => void;
-}
-
-/** Printify's own limit on enabled variants per product. */
-const MAX_VARIANTS = 100;
-
-/** One artwork group of a design: which ink, which file, which colours. */
-interface DesignGroup {
-  ink: "main" | "black" | "white";
-  assetId: string;
-  colors: string[];
-  label: string;
-  /** True when the design has no ink file and the main design is used. */
-  fallback: boolean;
-}
-
-interface DesignPlan {
-  designId: string;
-  designName: string;
-  row: "plain" | "ink";
-  groups: DesignGroup[];
 }
 
 /** One design in the gallery, with the size of its artwork. */
@@ -329,97 +309,10 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
    * the product: the plain ones with the main artwork, the ink ones with the
    * ink artwork the design actually has.
    */
-  const plan = React.useMemo(() => {
-    if (!designs || !session.blueprintId || !session.printProviderId) return null;
-    // ONE index builder for the whole app: the Studio used to duplicate this
-    // locally, which is how the two copies could drift apart.
-    const colourIndex = buildCatalogueIndex(catalog.variants);
-    const groups = productColourGroups(session);
-    const split = pairedColourGroups(groups);
-    const byId = new Map(designs.map((d) => [d.id, d]));
-    const scoped = new Set(scope.map((d) => d.id));
-    const items: DesignPlan[] = [];
-    const handled = new Set<string>();
-
-    for (const pair of inkPairs) {
-      if (handled.has(pair.blackInkDesignId) || handled.has(pair.whiteInkDesignId)) continue;
-      if (!scoped.has(pair.blackInkDesignId) || !scoped.has(pair.whiteInkDesignId)) continue;
-      const black = byId.get(pair.blackInkDesignId);
-      const white = byId.get(pair.whiteInkDesignId);
-      if (!black || !white) continue;
-      handled.add(black.id);
-      handled.add(white.id);
-      const pairedGroups: DesignGroup[] = [];
-      // The absorber is the last group that holds variants, so the group that
-      // can safely swallow the catalogue's hidden extras is the last non-empty
-      // one. Both groups are complete by construction here.
-      if (split.black.length > 0) {
-        pairedGroups.push({
-          ink: "main",
-          assetId: designMainAssetId(black),
-          colors: split.black,
-          label: `Black ink · ${black.name}`,
-          fallback: false,
-        });
-      }
-      if (split.white.length > 0) {
-        pairedGroups.push({
-          ink: "white",
-          assetId: designMainAssetId(white),
-          colors: split.white,
-          label: `White ink · ${white.name}`,
-          fallback: false,
-        });
-      }
-      items.push({
-        designId: black.id,
-        designName: black.name,
-        row: "ink",
-        groups: pairedGroups,
-      });
-    }
-
-    for (const design of scope) {
-      if (handled.has(design.id)) continue;
-      const colourPlan = planDesignColours(
-        {
-          hasInkPair: (session.inkPairIds ?? []).includes(design.id),
-          hasBlackInk: Boolean(design.blackInkAssetId),
-          hasWhiteInk: Boolean(design.whiteInkAssetId),
-        },
-        groups,
-      );
-      items.push({
-        designId: design.id,
-        designName: design.name,
-        row: colourPlan.usesInkArtwork ? "ink" : "plain",
-        groups: colourPlan.groups.map((g) => {
-          if (g.ink === "main") {
-            return {
-              ink: g.ink,
-              assetId: designMainAssetId(design),
-              colors: g.colors,
-              label: "Main design",
-              fallback: false,
-            };
-          }
-          const own = g.ink === "black" ? design.blackInkAssetId : design.whiteInkAssetId;
-          return {
-            ink: g.ink,
-            assetId: own ?? designMainAssetId(design),
-            colors: g.colors,
-            label: own
-              ? g.ink === "black"
-                ? "Black ink"
-                : "White ink"
-              : `${g.ink === "black" ? "Black" : "White"} ink (using the main design)`,
-            fallback: !own,
-          };
-        }),
-      });
-    }
-    return { items, colourIndex };
-  }, [designs, scope, session, catalog.variants, inkPairs]);
+  const plan = React.useMemo(
+    () => buildStudioPlan(designs, session, catalog.variants),
+    [designs, session, catalog.variants],
+  );
 
   /**
    * The colour counts behind the plan, for the informational summary.
@@ -436,21 +329,10 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   );
 
   /** The enabled variant count for each product row, with the sizes applied. */
-  const itemVariantCounts = React.useMemo(() => {
-    const counts = new Map<string, number>();
-    if (!plan) return counts;
-    for (const item of plan.items) {
-      counts.set(
-        item.designId,
-        resolveVariantIds(
-          plan.colourIndex,
-          item.groups.flatMap((g) => g.colors),
-          session.sizes,
-        ).length,
-      );
-    }
-    return counts;
-  }, [plan, session.sizes]);
+  const itemVariantCounts = React.useMemo(
+    () => (plan ? planVariantCounts(plan, session.sizes) : new Map<string, number>()),
+    [plan, session.sizes],
+  );
 
   // --- the problems ----------------------------------------------------------
   /**
@@ -489,41 +371,10 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
    * These are the safety net. The ink artwork problems above are the ones
    * that say WHY a design cannot serve a colour.
    */
-  const partitionProblems = React.useMemo(() => {
-    if (!plan) return [];
-    const found: string[] = [];
-    for (const item of plan.items) {
-      const partition = buildPartition(
-        plan.colourIndex,
-        item.groups.map((g) => ({ ink: g.ink, colors: g.colors })),
-      );
-      const issues = assertCompletePartition(
-        partition.groups.map((g, i) => ({
-          imageId: item.groups[i]?.assetId ?? "",
-          variantIds: g.variantIds,
-          colors: g.colors,
-        })),
-        plan.colourIndex.allVariantIds,
-      );
-      for (const issue of issues) found.push(`${item.designName}: ${issue.detail}`);
-
-      // The cap applies to the ENABLED variants of each product.
-      const enabled = resolveVariantIds(
-        plan.colourIndex,
-        item.groups.flatMap((g) => g.colors),
-        session.sizes,
-      );
-      if (enabled.length > MAX_VARIANTS) {
-        found.push(
-          `${item.designName}: ${enabled.length} variants - Printify allows at most ${MAX_VARIANTS} per product.`,
-        );
-      }
-      if (enabled.length === 0) {
-        found.push(`${item.designName}: no variants match the selected colours and sizes.`);
-      }
-    }
-    return found;
-  }, [plan, session.sizes]);
+  const partitionProblems = React.useMemo(
+    () => (plan ? studioPartitionProblems(plan, session) : []),
+    [plan, session],
+  );
 
   /**
    * Everything that stops the batch from being created.
@@ -585,190 +436,25 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
     }
     setCreating(true);
     const next: StudioProductResult[] = [];
-    const created: StudioProductResult[] = [];
-    let failed = 0;
     try {
-      for (const item of toCreate) {
-        setProgress(item.designName);
-        const partition = buildPartition(
-          plan.colourIndex,
-          item.groups.map((g) => ({ ink: g.ink, colors: g.colors })),
-        );
-        const enabled = resolveVariantIds(
-          plan.colourIndex,
-          item.groups.flatMap((g) => g.colors),
-          session.sizes,
-        );
-        if (enabled.length === 0) {
-          next.push({
-            designId: item.designId,
-            title: item.designName,
-            designName: item.designName,
-            status: "skipped",
-            error: "No variants selected for this design's colours.",
-            createdAt: Date.now(),
-          });
-          continue;
-        }
-
-        // One upload per ink group, sized to the print area so the print is
-        // sharp and Printify's resolution check passes.
-        const artworks: Array<{
-          printAreaId: string;
-          variantIds: number[];
-          base64: string;
-          filename: string;
-          placement: { x: number; y: number; scale: number; angle: number };
-        }> = [];
-        for (let i = 0; i < partition.groups.length; i++) {
-          const group = partition.groups[i];
-          const artwork = item.groups[i];
-          if (!artwork || group.variantIds.length === 0) continue;
-          const blob = await getAssetBlob(artwork.assetId);
-          if (!blob) throw new Error(`Could not read "${item.designName}" from storage`);
-          const longEdge = Math.max(area?.width ?? 3000, area?.height ?? 3000);
-          const base64 = await artworkToBase64Sized(blob, longEdge);
-          const p = placementFor(session, item.designId);
-          const clamped = clampPlacement(p);
-          artworks.push({
-            printAreaId: p.position,
-            variantIds: group.variantIds,
-            base64,
-            filename: `${item.designName}-${artwork.ink}.png`,
-            placement: clamped,
-          });
-        }
-
-        const title = renderTitle(
-          session.titleTemplate,
-          item.designName,
-          productName(catalog, session.blueprintId),
-        );
-        const description = renderTemplate(
-          session.descriptionTemplate,
-          item.designName,
-          productName(catalog, session.blueprintId),
-          "",
-          5000,
-        );
-        const res = await authedFetch("/api/printify/products", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirm: true,
-            title,
-            description,
-            tags: session.tags ?? [],
-            blueprintId: session.blueprintId,
-            printProviderId: session.printProviderId,
-            variants: { [String(session.blueprintId)]: enabled },
-            price: priceForListing(session, item.designId),
-            artworks,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          failed++;
-          next.push({
-            designId: item.designId,
-            title,
-            designName: item.designName,
-            status: "failed",
-            error: data.error ?? `HTTP ${res.status}`,
-            createdAt: Date.now(),
-          });
-          await persistResults([...next, ...results]);
-          continue;
-        }
-
-        // Verify the product Printify actually built: every enabled variant
-        // must sit in the group whose artwork we uploaded for it. The create
-        // response carries the whole product, so this costs no extra calls.
-        const product = data.product ?? {};
-        const shopId = typeof data.shopId === "number" ? data.shopId : undefined;
-        // Printify's product carries the image id it stored for each print
-        // area, not our local asset id. Compare like with like: the server
-        // echoes the uploaded image ids back in `artworks`.
-        const uploadedImageByVariant = new Map<number, string>();
-        for (const a of data.artworks ?? []) {
-          const ids = Array.isArray(a.variantIds) ? a.variantIds : [];
-          for (const variantId of ids) {
-            uploadedImageByVariant.set(Number(variantId), String(a.imageId));
-          }
-        }
-        const imageByVariant = new Map<number, string>();
-        for (const areaEntry of product.print_areas ?? []) {
-          for (const ph of areaEntry.placeholders ?? []) {
-            for (const img of ph.images ?? []) {
-              for (const vid of areaEntry.variant_ids ?? []) {
-                if (!imageByVariant.has(vid)) imageByVariant.set(vid, img.id);
-              }
-            }
-          }
-        }
-        const expectedImageFor = (variantId: number): string | undefined =>
-          uploadedImageByVariant.get(variantId);
-        const wrongArtwork: string[] = [];
-        for (const v of product.variants ?? []) {
-          if (!v.is_enabled) continue;
-          const got = imageByVariant.get(v.id);
-          const want = expectedImageFor(v.id);
-          if (got && want && got !== want) wrongArtwork.push(String(v.id));
-        }
-        if (wrongArtwork.length > 0) {
-          failed++;
-          next.push({
-            designId: item.designId,
-            title,
-            designName: item.designName,
-            status: "failed",
-            remoteProductId: product.id,
-            shopId,
-            error: `Printify attached the wrong artwork to ${wrongArtwork.length} variant(s). Check the print areas before publishing.`,
-            createdAt: Date.now(),
-          });
-          await persistResults([...next, ...results]);
-          continue;
-        }
-
-        // Record the product in the app's own draft table, so the artifact
-        // rail and the export can see it even after Printify drops the page.
-        const mainAsset = item.groups[0]?.assetId ?? "";
-        await db.productDrafts.put({
-          id: uid(),
-          name: title,
-          designId: item.designId,
-          designAssetId: mainAsset,
-          blueprintId: session.blueprintId,
-          printProviderId: session.printProviderId,
-          description,
-          priceCents: priceForListing(session, item.designId),
-          variantSelection: {},
-          printAreaConfig: {},
-          status: "created-remote",
-          remoteProductId: product.id,
-          remoteShopId: shopId,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        });
-
-        const record: StudioProductResult = {
-          designId: item.designId,
-          title,
-          designName: item.designName,
-          status: "created",
-          remoteProductId: product.id,
-          shopId,
-          createdAt: Date.now(),
-        };
-        next.push(record);
-        created.push(record);
-        await persistResults([...next, ...results]);
-        await logActivity("product.create", `Created Printify product "${title}" (${product.id})`, {
-          productId: product.id,
-          designId: item.designId,
-        });
-      }
+      const outcome = await createStudioProducts(
+        {
+          session,
+          plan,
+          productName: productName(catalog, session.blueprintId),
+          areaWidth: area?.width,
+          areaHeight: area?.height,
+        },
+        toCreate,
+        {
+          onProgress: (item) => setProgress(item.designName),
+          onResult: async (result) => {
+            next.push(result);
+            await persistResults([...next, ...results]);
+          },
+        },
+      );
+      const { created, failed } = outcome;
       toast.success(
         failed === 0
           ? `Created ${created.length} draft product${created.length === 1 ? "" : "s"} on Printify`
@@ -1085,28 +771,6 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
       </Dialog>
     </div>
   );
-}
-
-/**
- * What is actually wrong with one design and one ink.
- *
- * The wording names the colour, the artwork that is missing and the
- * consequence, because the partition check that used to catch this said
- * none of that - it only said that the product could not be built.
- */
-function describeMissingInk(problem: InkArtworkProblem): string {
-  const colours = joinNames(problem.colors);
-  if (problem.ink === "white") {
-    return `this design has no white-ink artwork, so on ${colours} it would print with the main artwork - invisible on a dark garment.`;
-  }
-  return `this design has no black-ink artwork, so on ${colours} it would print with the main artwork - it was not prepared for the black ink.`;
-}
-
-/** "Black", "Black and Navy", "Black, Navy and White". */
-function joinNames(names: string[]): string {
-  if (names.length === 0) return "the ink colours";
-  if (names.length === 1) return names[0];
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 function productName(catalog: StudioCatalogState, blueprintId?: number): string {

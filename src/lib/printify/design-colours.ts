@@ -31,6 +31,8 @@
 // browser, a catalogue or a Printify account.
 // ---------------------------------------------------------------------------
 
+import type { StudioSession } from "@/types/domain";
+
 /** Which artwork a group prints. */
 export type DesignInk = "main" | "black" | "white";
 
@@ -42,6 +44,22 @@ export interface ProductColourGroups {
   ink: string[];
   /** The ink colours printed with the BLACK ink; the rest use the white ink. */
   blackInk: string[];
+}
+
+/**
+ * The colour groups of the ONE product in the session.
+ *
+ * The colours are split into two groups ONCE, in the Colors tab, and every
+ * other view reads them from here. Keeping this function in the pure module
+ * means the Studio plan, the autopilot and the listing views cannot disagree
+ * about which colours print with which artwork.
+ */
+export function productColourGroups(session: StudioSession): ProductColourGroups {
+  return {
+    plain: session.rows.plain?.colors ?? [],
+    ink: session.rows.ink?.colors ?? [],
+    blackInk: session.rows.ink?.blackInkColors ?? [],
+  };
 }
 
 /** The ink artwork a design actually has. */

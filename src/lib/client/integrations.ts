@@ -40,6 +40,13 @@ export interface IntegrationConfig {
   printifyKey: string;
   /** The Printify shop chosen in Settings, used for creation, Send and Publish. */
   printifyShopId?: number;
+  /**
+   * Etsy developer keystring (the public Open API v3 key).
+   *
+   * It is read-only research, never a listing credential: the app calls Etsy's
+   * public active-listing search with it and never writes to Etsy.
+   */
+  etsyKeystring?: string;
   /** Provider id currently selected. */
   activeProvider: string;
   /** Model id currently selected (mirror of providers[activeProvider].model). */
@@ -50,6 +57,7 @@ export interface IntegrationConfig {
 export const EMPTY_INTEGRATIONS: IntegrationConfig = {
   printifyKey: "",
   printifyShopId: undefined,
+  etsyKeystring: "",
   activeProvider: DEFAULT_PROVIDER_ID,
   activeModel: "",
   providers: {},
@@ -84,6 +92,7 @@ export function migrateIntegrations(stored: Partial<IntegrationConfig> & LegacyI
   const config: IntegrationConfig = {
     printifyKey: asString(stored.printifyKey),
     printifyShopId: asShopId(stored.printifyShopId),
+    etsyKeystring: asString(stored.etsyKeystring),
     activeProvider: asString(stored.activeProvider) || DEFAULT_PROVIDER_ID,
     activeModel: asString(stored.activeModel),
     providers: {},
@@ -180,6 +189,8 @@ export function integrationHeaders(config: IntegrationConfig): Record<string, st
   if (printifyKey) headers["x-printify-key"] = printifyKey;
   const printifyShopId = asShopId(config.printifyShopId);
   if (printifyShopId !== undefined) headers["x-printify-shop"] = String(printifyShopId);
+  const etsyKeystring = config.etsyKeystring?.trim();
+  if (etsyKeystring) headers["x-etsy-key"] = etsyKeystring;
 
   const def = activeProvider(config);
   const providerConfig = activeProviderConfig(config);
@@ -209,7 +220,7 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
 
 export function hasAnyKey(config: IntegrationConfig): boolean {
   const hasProviderKey = Object.values(config.providers).some((p) => p.apiKey.trim());
-  return !!(config.printifyKey.trim() || hasProviderKey);
+  return !!(config.printifyKey.trim() || config.etsyKeystring?.trim() || hasProviderKey);
 }
 
 // ---------------------------------------------------------------------------

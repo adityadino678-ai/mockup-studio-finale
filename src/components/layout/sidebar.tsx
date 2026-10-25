@@ -12,6 +12,7 @@ import {
   FileArchive,
   History,
   Images,
+  ListChecks,
   Settings as SettingsIcon,
   Shapes,
   Shirt,
@@ -47,6 +48,7 @@ const NAV: NavGroup[] = [
       { href: "/listing-images", label: "Listing images", icon: <Images className="h-4 w-4" /> },
       { href: "/listing-details", label: "Listing details", icon: <ClipboardList className="h-4 w-4" /> },
       { href: "/listing-preview", label: "Listing preview", icon: <Eye className="h-4 w-4" /> },
+      { href: "/autopilot", label: "Autopilot", icon: <ListChecks className="h-4 w-4" /> },
     ],
   },
   {

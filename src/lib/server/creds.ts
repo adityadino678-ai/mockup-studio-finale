@@ -45,9 +45,19 @@ export interface AiCredentials {
   source: CredentialSource;
 }
 
+export interface EtsyCredentials {
+  /**
+   * The Etsy Open API v3 keystring. It is a public read-only key, not an
+   * OAuth token: the app only searches active listings and never writes.
+   */
+  apiKey: string;
+  source: CredentialSource;
+}
+
 export interface Credentials {
   printify?: PrintifyCredentials;
   ai?: AiCredentials;
+  etsy?: EtsyCredentials;
 }
 
 // Re-exported for callers/tests that predate the provider registry.
@@ -65,6 +75,7 @@ function clean(value: string | null | undefined): string | undefined {
  * Headers (all optional):
  *   x-printify-key   Printify personal access token
  *   x-printify-shop  the Printify shop id saved in Settings (positive integer)
+ *   x-etsy-key       Etsy Open API v3 keystring (public, read-only)
  *   x-ai-provider    provider id (lib/ai/providers)
  *   x-ai-key         OpenAI-compatible API key
  *   x-ai-base-url    base URL override (used for the `custom` provider)
@@ -77,6 +88,10 @@ export function credentialsFromRequest(request: Request): Credentials {
   const serverPrintifyKey = clean(serverEnv.printifyApiKey());
   const printifyKey = browserPrintifyKey ?? serverPrintifyKey;
   const printifyShopId = normalizeShopId(clean(headers.get("x-printify-shop")));
+
+  const browserEtsyKey = clean(headers.get("x-etsy-key"));
+  const serverEtsyKey = clean(serverEnv.etsyApiKey());
+  const etsyKey = browserEtsyKey ?? serverEtsyKey;
 
   const browserAiKey = clean(headers.get("x-ai-key"));
   const serverAiKey = clean(serverEnv.aiApiKey()) ?? clean(serverEnv.openaiApiKey());
@@ -109,6 +124,12 @@ export function credentialsFromRequest(request: Request): Credentials {
           model,
           provider: def?.id ?? "custom",
           source: browserAiKey ? "browser" : "server",
+        }
+      : undefined,
+    etsy: etsyKey
+      ? {
+          apiKey: etsyKey,
+          source: browserEtsyKey ? "browser" : "server",
         }
       : undefined,
   };

@@ -33,6 +33,50 @@ export interface ListingImageState {
   imageSelectionLocked?: boolean;
 }
 
+/** One selected mockup whose cached render still matches the current plan. */
+export interface FreshListingRender {
+  mockupId: string;
+  assetId: string;
+  fingerprint: string;
+}
+
+/**
+ * The listing's selected images that are CURRENT, in click order.
+ *
+ * "Current" means a stored render whose fingerprint equals the one recomputed
+ * from the saved design, mockup, print area and placement. This is the one
+ * definition the Export Center, the Send pipeline and the autopilot use, so a
+ * stale render can never be uploaded or locked.
+ */
+export async function freshListingRenders(
+  session: StudioSession,
+  listing: StudioListing,
+): Promise<FreshListingRender[]> {
+  const selected = listingMockupIds(session, listing.listingId);
+  const mockupRows = await db.mockups.bulkGet(selected);
+  const savedPlacements = await Promise.all(
+    selected.map((mockupId) => getPlacement(listing.designId, mockupId)),
+  );
+  const placement = placementFor(session, listing.designId);
+  const fresh: FreshListingRender[] = [];
+  for (let index = 0; index < selected.length; index++) {
+    const mockupId = selected[index];
+    const mockup = mockupRows[index];
+    const entry = listingRenderFor(session, listing.listingId, mockupId);
+    if (!mockup || !entry) continue;
+    const fingerprint = listingImageFingerprint({
+      listing,
+      mockup,
+      placement,
+      saved: savedPlacements[index],
+    });
+    if (entry.fingerprint !== fingerprint) continue;
+    fresh.push({ mockupId, assetId: entry.assetId, fingerprint });
+  }
+  const metas = await db.assets.bulkGet(fresh.map((render) => render.assetId));
+  return fresh.filter((_, index) => Boolean(metas[index]));
+}
+
 /**
  * Decides what an image selection means for the Export Center.
  *
@@ -111,33 +155,11 @@ export async function saveStudioListingDrafts(params: {
 
   for (const listing of listings) {
     const selected = listingMockupIds(session, listing.listingId);
-    const mockupRows = await db.mockups.bulkGet(selected);
-    const savedPlacements = await Promise.all(
-      selected.map((mockupId) => getPlacement(listing.designId, mockupId)),
-    );
-    const placement = placementFor(session, listing.designId);
-
     // Recompute the fingerprint rather than trusting the stored entry. A
     // placement/artwork/mockup change between render and save must not lock
     // obsolete pixels into the Export Center.
-    const freshRenders = selected
-      .map((mockupId, index) => {
-        const entry = listingRenderFor(session, listing.listingId, mockupId);
-        const mockup = mockupRows[index];
-        if (!entry || !mockup) return null;
-        const fingerprint = listingImageFingerprint({
-          listing,
-          mockup,
-          placement,
-          saved: savedPlacements[index],
-        });
-        return entry.fingerprint === fingerprint ? entry : null;
-      })
-      .filter((render): render is NonNullable<typeof render> => !!render);
-    const metas = await db.assets.bulkGet(freshRenders.map((render) => render.assetId));
-    const renderedIds = freshRenders
-      .filter((_, index) => Boolean(metas[index]))
-      .map((render) => render.assetId);
+    const freshRenders = await freshListingRenders(session, listing);
+    const renderedIds = freshRenders.map((render) => render.assetId);
 
     const draftRows = await db.listingDrafts
       .where("designId")

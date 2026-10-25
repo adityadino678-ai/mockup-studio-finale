@@ -9,15 +9,17 @@ A local-first print-on-demand workspace for sellers: upload artwork, place it on
 real Printify print area, map that area onto mockup photos, generate renders,
 create ink variants, remove backgrounds, and export verified ZIP archives.
 
-There are **eleven pages** — `/` (a static redirect to the Studio), Printify
-Studio, Mockups, Listing images, Listing details, Listing preview, Export
-Center, Agent, Activity, Settings, and the Printify bookmarklet install page.
-The Designs, editor, Batch Studio, Templates, Product Builder, Listings and AI
-SEO screens were folded into those pages or removed; their engines (batch
-runner, compositor, Printify core, agent tools) are still here and still what
-the UI and the agent call. The two listing tabs that used to live inside the
-Studio were promoted to their own pages (below), and the Studio went back to
-three tabs: Designs, Colors, Design panel.
+There are **twelve pages** — `/` (a static redirect to the Studio), Printify
+Studio, Mockups, Listing images, Listing details, Listing preview, Autopilot,
+Export Center, Agent, Activity, Settings, and the Printify bookmarklet install
+page. The Designs, editor, Batch Studio, Templates, Product Builder, Listings
+and AI SEO screens were folded into those pages or removed; their engines
+(batch runner, compositor, Printify core, agent tools) are still here and still
+what the UI and the agent call. The two listing tabs that used to live inside
+the Studio were promoted to their own pages (below), and the Studio went back
+to three tabs: Designs, Colors, Design panel. The Autopilot is the
+review-gated bulk listing runner; a persistent task dock on every other page
+shows its live progress.
 
 **The defining constraint: all user data lives in the visitor's own IndexedDB.**
 Nothing is synced, there is no account, and the server holds no user data. This
@@ -54,8 +56,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 443 unit tests
-npm run test:e2e      # 31 acceptance tests (local dev server)
+npm run test          # 470 unit tests
+npm run test:e2e      # 33 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -72,7 +74,7 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **11 static pages + 12 on-demand endpoints.** No page depends on request state,
+- **12 static pages + 13 on-demand endpoints.** No page depends on request state,
   so all pages prerender. Each endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
   only API calls reach the Worker. `/` is a static redirect (meta refresh plus
@@ -475,6 +477,114 @@ mockups and finally a live product.
 - **`/printify-bookmarklet`** is the install page. It is intentionally outside
   the sidebar: it is a utility page opened from the Send dialog, not another
   work surface.
+
+## The listing autopilot (`/autopilot`)
+
+The autopilot turns one ticked Studio batch into reviewed listings, but it is
+deliberately **not** a "publish everything" button. It runs a persisted state
+machine with three separate human gates:
+
+```
+research + draft  ->  HUMAN copy & image review
+build + upload    ->  HUMAN bookmarklet step on printify.com
+publish review    ->  HUMAN final publish approval  ->  published
+```
+
+Nothing advances past a gate until the user acts. A run is one row in
+IndexedDB (`autopilotRuns`, schema v4), so a reload resumes it and the task
+dock can show it on any page. A short tab lease (`sessionStorage` tab id +
+`lease.expiresAt`) stops two tabs from running the same job; the second tab
+skips the job rather than racing it, and a later resume picks it up once the
+lease expires.
+
+### Research and copy
+
+- **One Etsy query per run, shared by every listing.** Etsy's Open API v3 has
+  usage limits, and one market view is enough to ground the whole batch.
+  `src/lib/server/etsy.ts` calls
+  `GET https://openapi.etsy.com/v3/application/listings/active?keywords=...`
+  with `x-api-key`, normalises the active-listing results, and reports
+  **observed** title terms, tag counts, a median price, samples and an empty
+  `currency` when the data is missing. It never invents search volume, sales,
+  rankings or revenue.
+- `POST /api/etsy/research` (`src/pages/api/etsy/research.ts`) is the only
+  network path. It is same-origin, JSON-only, caps the body at 8 KB, caches
+  successful results for 10 minutes per isolate, answers `503` without a
+  keystring (or with a rejected one), and maps Etsy's own rate limit to `429`
+  with a wait instruction.
+- **The keystring is user-supplied**, stored in the browser-local integrations
+  record (`etsyKeystring`), sent as `x-etsy-key`, with `ETSY_API_KEY` as the
+  server fallback. Settings has an enabled Etsy card, a query box, a
+  **Test research** button and an honest result line. It is read-only: it does
+  not connect an Etsy shop or submit listings.
+- AI copy is optional. `src/lib/autopilot/plan.ts` shapes it into Etsy's strict
+  limits (140-character title, 13 tags of 20 characters, 5000-character
+  description). With no AI key, or when the AI call fails, a deterministic
+  fallback still produces a complete listing from the Studio templates and the
+  observed Etsy terms. The copy is grounded on the research, and
+  `groundedOnEtsy` says so.
+- **Editing copy clears that listing's approval.** The review is of the exact
+  title, description, tags, price and image selection that will be built.
+
+### Build, mockups and the two publish gates
+
+- **Every listing must be approved before a product is created.**
+  `startAutopilotBuild` refuses outside `copy-review` and checks every
+  listing's selected images against a current render. It does this **before the
+  first product exists**, so a missing render cannot leave a half-created
+  batch. The page disables **Approve all** until every listing is image-ready,
+  and each listing card links straight to Listing images.
+- **The run freezes the mockup SELECTION, not the render state.**
+  `withCurrentRenderState` in `plan.ts` merges the CURRENT session's
+  `universalPlacement`, `placements` and `listingRenders` into the run snapshot
+  while keeping the snapshot's `listingImages`. That is what lets a user start
+  a run, then go to Listing images and press **Save & render** during copy
+  review: the run sees the new render instead of repeating "0 of 4 rendered".
+  Changing the selection in Listing images does not affect an existing run; it
+  keeps the start-time selection, and the warning says so.
+- The build uses the same `buildStudioPlan` and `createStudioProduct` as the
+  Studio, so pairs and ink colours keep their one-product semantics. A retry
+  after a failed mockup upload **reuses the product already created**
+  (`listing.productId`), never creates a duplicate. If an older run has a
+  product id but no shop id, it falls back to the run's saved shop, and the
+  server still resolves the product's real owner before writing.
+- **A build with any failed listing fails the whole run at `build`.** The
+  successful products and their uploaded mockups stay on the listing rows, so
+  **Retry build** resumes from there instead of uploading everything again.
+  Uploaded mockups are persisted (`uploadedUploads`) precisely so the
+  bookmarklet payload can be rebuilt without re-uploading pixels.
+- The bookmarklet step is the same clipboard bridge as Send. The run stores
+  `bridgePayload` and `bridgeProducts`; the page shows the payload, a Copy
+  button and the Printify product links. Only the user's printify.com tab can
+  write the product's mockup selection, so the run waits here. Pressing
+  **I ran the bookmarklet** records `mockupsAppliedAt` and moves to
+  `publish-review`; it does not publish.
+- **Publishing is only allowed for listings with `status === "uploaded"`, a
+  product and a shop.** `publishAutopilotRun` refuses without
+  `mockupsAppliedAt`, and `runPublish` skips already-published rows. The first
+  upstream publish failure stops the run at `publishing` with Printify's message
+  verbatim; **Retry publish** resets only failed rows that actually have
+  `uploadedUploads`, so a row that was never prepared cannot be published by
+  accident. There is no automatic publish retry.
+- **Retry research is only offered while no product exists.** Once Printify has
+  a product for the run, re-running research would orphan it, so the button is
+  gone.
+
+### The persistent task dock
+
+`src/components/layout/task-dock.tsx` is mounted in the app shell on every page
+except `/autopilot`. It reads the newest run live, is collapsed by default
+(showing status and published count), expands to the listing chips, the last
+three log lines, Pause/Resume and an **Open** link to
+`/autopilot?run=<id>`. On mount it calls `resumeActiveRuns()`, which is what
+makes a real document navigation safe: the new page continues a run that was
+mid-research, mid-build or mid-publish. The run page owns the run itself and is
+excluded so the dock cannot duplicate the controls.
+
+E2E tests 30 and 31 cover the gates without keys: they seed a persisted run at
+`mockup-review`/`copy-review`, assert that no publish request is made before
+both confirmations, and assert that an unapproved listing cannot start a
+build.
 
 ## Background removal: two engines, both local, no key and no limit
 
@@ -883,8 +993,8 @@ position pickers here:
   print-area templates; Product Builder → the Studio's Design panel; Listings
   and AI SEO → the agent's `draft_listing`. Their engines
   (`lib/batch/runner.ts`, `lib/canvas/compose.ts`, `lib/printify/*`,
-  `lib/client/tools.ts`, all twelve `/api/*` endpoints) are untouched, because the
-  UI and the agent still call them. Accepted losses: there is no batch-job list
+  `lib/client/tools.ts`, all thirteen `/api/*` endpoints) are untouched, because
+  the UI and the agent still call them. Accepted losses: there is no batch-job list
   screen (the renders land in the Export Center, and a batch row in the artifact
   rail is inert) and no free-form canvas editor.
 - **API keys are optional and user-supplied.** A visitor can paste their own
@@ -1086,14 +1196,13 @@ position pickers here:
   `workers.dev`. Export a ZIP from the local app first if the data matters.
 - **Cloudflare calls `workers.dev` "not business-critical"** — a custom domain is
   the next step if this ever matters commercially.
-- **Etsy listing *submission* is deliberately not implemented yet** (the agent
-  drafts copy to paste; the old validation module went with the Listings page)
-  because v3 OAuth needs app registration. Settings shows the Etsy keystring
-  card **disabled**, with placeholder "Not active yet" and an "Autopilot
-  release" badge, so it cannot imply research works before the autopilot and a
-  real developer keystring exist. Release 2 (the review-gated listing
-  autopilot) is not built; Etsy research will use API v3, never silent
-  scraping.
+- **Etsy *research* is built; Etsy listing *submission* is still deliberately
+  not implemented.** The autopilot reads active-listing data with a developer
+  keystring (API v3, no OAuth, no scraping) and uses it to ground copy. It does
+  not create an Etsy listing or connect an Etsy shop, because v3 submission
+  needs OAuth app registration. Settings shows the keystring card **enabled**
+  with a Test research button; the card says read-only and never implies that
+  research is a search-volume or sales report.
 - **Background removal is local and deliberately limited.** It handles a
   solid or faded backdrop; a busy photographic background has to be cut out
   before upload. There is no AI model and no hosted service, so there is

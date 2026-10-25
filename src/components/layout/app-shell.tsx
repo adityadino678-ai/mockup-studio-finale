@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/primitives";
 import { AssistantPanel } from "@/components/assistant-panel";
+import { TaskDock } from "@/components/layout/task-dock";
 
 /**
  * The app chrome. It lives here as a plain React component rather than in
@@ -19,6 +20,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar />
         <main className="scroll-thin flex-1 overflow-y-auto">{children}</main>
       </div>
+      <TaskDock />
       <AssistantPanel />
       <Toaster />
     </TooltipProvider>

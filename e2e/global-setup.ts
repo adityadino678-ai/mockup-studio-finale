@@ -35,6 +35,7 @@ const ROUTES = [
   "/listing-images",
   "/listing-details",
   "/listing-preview",
+  "/autopilot",
 ];
 
 /** Utility pages that render outside the sidebar shell. */

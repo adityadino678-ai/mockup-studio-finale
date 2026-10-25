@@ -34,11 +34,7 @@ import {
   type DesignColourPlan,
 } from "@/lib/printify/design-colours";
 import { ROW_HINTS, ROW_LABELS } from "@/lib/printify/studio-session";
-import {
-  splitDesignsByInkPair,
-  type ProductColourGroups,
-  type SeparableDesign,
-} from "@/lib/printify/design-colours";
+import { splitDesignsByInkPair, type SeparableDesign } from "@/lib/printify/design-colours";
 import type { Design, StudioPlacement, StudioRowId, StudioSession } from "@/types/domain";
 import { Crosshair } from "lucide-react";
 
@@ -65,19 +61,10 @@ export interface DesignColours {
 /**
  * The colour groups of the ONE product in the session.
  *
- * The colours are split into two groups ONCE, in the Colors tab, and every
- * other view reads them from here. That is what keeps the Designs tab and
- * the Design panel from disagreeing about which colours print with the ink
- * artwork - the disagreement that used to leave a design printing on
- * nothing.
+ * Re-exported from the pure colour module: the Studio, the listing views and
+ * the autopilot all read the same split.
  */
-export function productColourGroups(session: StudioSession): ProductColourGroups {
-  return {
-    plain: session.rows.plain?.colors ?? [],
-    ink: session.rows.ink?.colors ?? [],
-    blackInk: session.rows.ink?.blackInkColors ?? [],
-  };
-}
+export { productColourGroups } from "@/lib/printify/design-colours";
 
 /**
  * The split to show, for the session.
