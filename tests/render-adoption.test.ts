@@ -114,6 +114,7 @@ describe("adoptedRenderEntry", () => {
       designId: "design-1",
       mockupId: "mockup-1",
       renderedAt: 777,
+      source: "mockups",
     });
   });
 });
@@ -180,6 +181,7 @@ describe("linkSavedRenderEntries", () => {
         designId: "design-1",
         mockupId: "mockup-1",
         renderedAt: 300,
+        source: "mockups",
       },
     });
   });

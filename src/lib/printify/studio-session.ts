@@ -156,6 +156,9 @@ function renderRecord(value: unknown): Record<string, StudioListingRender> {
       designId: entry.designId,
       mockupId: entry.mockupId,
       renderedAt: finiteNumber(entry.renderedAt) ?? Date.now(),
+      ...(entry.source === "mockups" || entry.source === "listing"
+        ? { source: entry.source }
+        : {}),
     };
   }
   return out;

@@ -216,6 +216,25 @@ the bookmarklet source must never contain `//` line comments - they would
 swallow the rest of the code. Use `/* ... */`; the unit test parses the exact
 newline-stripped source the browser runs.
 
+**The companion extension (`extension/`) automates the last step.** It is a
+local Chrome/Edge MV3 unpacked prototype that loads only on `printify.com` and
+the app origins. Its content script announces itself
+(`<html data-mockup-studio-ext="1">` + `mockup-studio:extension-ready`); on
+`mockup-studio:apply-request` the service worker opens the first product in a
+background printify.com tab, `chrome.scripting.executeScript` runs the SAME
+apply logic as the bookmarklet in the isolated world (same origin, cookies and
+`localStorage`, `credentials:"include"`), closes the tab, and answers via
+`mockup-studio:apply-result`/`apply-error`. No `chrome.storage`, no remote code,
+no API key in the extension, no payload persisted - it is held in memory for
+one run. `extension/protocol.md` is the contract; `extension/STORE.md` lists
+what store publishing needs (replace icons, privacy policy, fee). The app keeps
+the clipboard + bookmarklet path as the fallback when the extension is absent,
+so the one-click button appears only after the user installs it once. Competitor
+research (Mockup Maestro, Skalefy, Printify bulk tools) found NO server-side
+equivalent: every tool either uses Printify's default mockups or a browser
+extension running inside the user's printify.com session, which is exactly this
+design.
+
 `POST /api/printify/mockups` (`src/pages/api/printify/mockups.ts`) is the
 server half: it requires `confirm:true`, is same-origin only, requires
 `Content-Type: application/json`, rejects a body over 40 MB before parsing,
@@ -357,6 +376,32 @@ mockups and finally a live product.
     the newest saved pixels for each uncovered tile to the CURRENT fingerprint.
     It is deliberately not automatic: linking assumes the design and area have
     not changed since that render was saved.
+  - **Save render now means save AND use.** The Mockups panel's toolbar has a
+    visible "Save render" (distinct from "Save area", which only stores the
+    frame). Saving writes the render into `session.listingRenders` for the
+    owning listing AND makes sure that mockup is in the selection, so the
+    pixels reach Listing images / preview / Send immediately with no separate
+    adopt step. `src/lib/printify/render-link.ts` (`linkSavedRender`) is the
+    single rule: it finds the owning listing (`listing-plan.ts`), refuses on a
+    pair's **white-ink half** (the pair is owned by its black half, so the
+    white half's artwork would be wrong), refuses a design not in the batch,
+    and only extends an explicit selection (a cleared selection becomes just
+    this mockup; a never-configured listing keeps its "every mockup" default).
+  - **Tiles are labelled by where their pixels came from.** `StudioListingRender`
+    carries `source: "mockups" | "listing"`. Badges read **From Mockups**,
+    **Rendered here**, **Not rendered**, or **Excluded** (and
+    **Override: Mockups** when forced). Listing preview shows the same source
+    split and a "Fix images" link, so the preview cannot silently disagree with
+    Listing images.
+  - **Out-of-date saved renders warn and can be overridden per tile or per
+    row.** When a session entry exists but its fingerprint no longer matches
+    and no fingerprint-adopted alternative hides the difference, the tile warns
+    ("saved render is out of date") and offers **Use Mockups render**; a whole
+    row has one "Use Mockups renders (N)" button. The override pins the saved
+    pixels despite the mismatch, is reversible ("Clear override"), and is
+    session-local (it never rewrites the asset's fingerprint). If the listing's
+    image selection is **locked** (`ListingDraft.imageSelectionLocked`), any
+    replace asks first ("Replace the locked images for X?").
   - Designs that are in the library but not ticked for the batch appear in a
     "Not in this batch" card with an explicit **Add to batch** button. They are
     never added automatically: an empty tick list means NO products.
@@ -469,11 +514,18 @@ mockups and finally a live product.
   shorter set changes which image becomes the main one. The render is the
   listing's image, not the product's print file; the print file still comes
   from the print areas.
-  The Send dialog is **one press plus the final bookmarklet step**: it uploads,
-  copies the payload automatically, shows a 3-step indicator (images uploaded →
-  payload copied → run the bookmarklet), and offers one primary "Open the
-  Printify product" action. The copy-again/text fallback stays available, and
-  the bookmarklet still uses only the user's printify.com session.
+  The Send dialog is **one press plus the final step**. It uploads, copies the
+  payload automatically, and shows a 3-step indicator (images uploaded →
+  payload copied → render the selection). When the companion extension is
+  loaded the final step is a TRUE one-click: the dialog dispatches
+  `mockup-studio:apply-request` with the payload object, and the extension
+  (`extension/`) opens the product in a BACKGROUND printify.com tab, applies the
+  selection with the user's own session, closes the tab, and reports back through
+  `mockup-studio:apply-result` / `apply-error`. The dialog then shows a local
+  "mockups applied" done state (with a per-product failure list). Without the
+  extension the copy-again/text/bookmarklet fallback stays available; both paths
+  use only the user's printify.com session — no token ever leaves
+  printify.com. `extension/protocol.md` is the exact message contract.
 - **`/printify-bookmarklet`** is the install page. It is intentionally outside
   the sidebar: it is a utility page opened from the Send dialog, not another
   work surface.

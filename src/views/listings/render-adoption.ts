@@ -101,6 +101,7 @@ export function adoptedRenderEntry(params: {
   fingerprint: string;
   designId: string;
   mockupId: string;
+  source?: "mockups" | "listing";
 }): StudioListingRender {
   return {
     assetId: params.asset.id,
@@ -108,6 +109,7 @@ export function adoptedRenderEntry(params: {
     designId: params.designId,
     mockupId: params.mockupId,
     renderedAt: params.asset.createdAt,
+    source: params.source ?? "mockups",
   };
 }
 

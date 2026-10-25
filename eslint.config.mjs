@@ -7,7 +7,18 @@ import prettier from "eslint-config-prettier";
 
 export default [
   {
-    ignores: ["node_modules/**", "dist/**", ".astro/**", "test-results/**", "public/**"],
+    ignores: [
+      "node_modules/**",
+      "dist/**",
+      ".astro/**",
+      "test-results/**",
+      "public/**",
+      // Local scratch scripts and the standalone Printify bridge extension are
+      // not part of the Astro/TS build (the extension loads unpacked in a
+      // browser with its own manifest and `chrome.*` globals).
+      "tmp/**",
+      "extension/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

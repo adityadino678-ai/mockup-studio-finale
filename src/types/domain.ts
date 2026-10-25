@@ -519,6 +519,14 @@ export interface StudioListingRender {
   designId: string;
   mockupId: string;
   renderedAt: number;
+  /**
+   * Where the pixels came from.
+   *
+   * "mockups" is a render saved (or explicitly linked) in the Mockups panel;
+   * "listing" is a render produced by Listing images' Save & render. Older
+   * entries have no source; the UI treats those as Listing images renders.
+   */
+  source?: "mockups" | "listing";
 }
 
 export interface StudioSession {

@@ -77,6 +77,7 @@ import {
   bridgePayloadJson,
   buildBridgePayload,
   countBridgeImages,
+  type PrintifyBridgePayload,
   type PrintifyBridgeProduct,
   type PrintifyMockupUpload,
 } from "@/lib/printify/mockup-bridge";
@@ -119,6 +120,8 @@ interface SelectedImage {
   entry: StudioListingRender | undefined;
   /** The session entry is current. */
   fresh: boolean;
+  /** The user has forced this tile to use its saved Mockups render. */
+  overridden: boolean;
   /**
    * A saved render asset whose recorded fingerprint matches the current
    * inputs. Adopting it means "this render already shows exactly what the
@@ -231,6 +234,23 @@ export function ListingImagesView() {
     const stored = await getSetting<StudioProductResult[]>(RESULTS_KEY, []);
     return Array.isArray(stored) ? stored : [];
   }, []);
+  // A "locked" listing is one whose Export Center image selection the user has
+  // already fixed by hand. Replacing its images must therefore be confirmed.
+  const listingDrafts = useLiveQuery(() => db.listingDrafts.toArray(), []);
+  const lockedListings = React.useMemo(
+    () =>
+      new Set(
+        (listingDrafts ?? [])
+          .filter((draft) => draft.imageSelectionLocked && draft.designId)
+          .map((draft) => draft.designId as string),
+      ),
+    [listingDrafts],
+  );
+  /** A pending confirmation for replacing a locked listing's images. */
+  const [lockedConfirm, setLockedConfirm] = React.useState<{
+    listingName: string;
+    apply: () => void;
+  } | null>(null);
   const catalog = useListingCatalog();
 
   // --- session ---------------------------------------------------------------
@@ -301,6 +321,36 @@ export function ListingImagesView() {
     skipped: string[];
     firstProductId?: string;
   } | null>(null);
+  /** The structured payload object the extension needs (the string is for the clipboard). */
+  const [bridgePayloadData, setBridgePayloadData] =
+    React.useState<PrintifyBridgePayload | null>(null);
+  /**
+   * True when the "Mockup Studio Printify Bridge" extension is installed and
+   * loaded in this browser tab. It marks the page (see extension/protocol.md);
+   * when it is absent the app keeps the clipboard + bookmarklet path.
+   */
+  const [extensionReady, setExtensionReady] = React.useState(false);
+  /** True while the extension is applying the selection inside Printify. */
+  const [extensionApplying, setExtensionApplying] = React.useState(false);
+  /**
+   * The local "the mockups were applied" done state. Set from the extension's
+   * answer; it means Printify now has these selected for the products.
+   */
+  const [bridgeApplied, setBridgeApplied] = React.useState<{
+    done: number;
+    total: number;
+    failures: string[];
+  } | null>(null);
+  /** The request id of the apply currently in flight, so a late answer is matched. */
+  const applyRequestId = React.useRef<string | null>(null);
+
+  /**
+   * Tiles the user has explicitly told to use their saved Mockups render even
+   * though the fingerprint no longer matches the current inputs. Keyed by
+   * `<listingId>:<mockupId>`.
+   */
+  const [forceOverrides, setForceOverrides] = React.useState<Record<string, true>>({});
+  const [rowOverrides, setRowOverrides] = React.useState<Record<string, true>>({});
 
   // The render loop is long. If the user edits copy/selection on another page
   // while it runs, the final save must use that newer state, not the snapshot
@@ -400,8 +450,10 @@ export function ListingImagesView() {
 
   /** The current render for a selection row: the session entry, else an adopted asset. */
   const currentEntry = React.useCallback(
-    (image: SelectedImage): StudioListingRender | undefined =>
-      image.fresh && image.entry ? image.entry : image.adopted,
+    (image: SelectedImage): StudioListingRender | undefined => {
+      if (image.overridden) return image.entry ?? image.adopted;
+      return image.fresh && image.entry ? image.entry : image.adopted;
+    },
     [],
   );
 
@@ -428,10 +480,13 @@ export function ListingImagesView() {
                 mockup.id,
                 fingerprint,
               );
+          const key = listingRenderKey(listing.listingId, mockup.id);
+          const overridden = Boolean(forceOverrides[key] || rowOverrides[key]);
           return {
             mockup,
             entry,
             fresh,
+            overridden,
             adopted: adoptedAsset
               ? adoptedRenderEntry({
                   asset: adoptedAsset,
@@ -444,7 +499,7 @@ export function ListingImagesView() {
           };
         });
     },
-    [session, mockupsById, placementsByKey, effectiveIdsFor, adoptionIndex],
+    [session, mockupsById, placementsByKey, effectiveIdsFor, adoptionIndex, forceOverrides, rowOverrides],
   );
 
   /**
@@ -520,6 +575,61 @@ export function ListingImagesView() {
       `Linked ${count} saved render${count === 1 ? "" : "s"} from Mockups.`,
     );
   }, [linkableEntries, session.listingRenders, update]);
+
+  /** Force one tile to use its saved Mockups render even if it is out of date. */
+  const forceTileOverride = React.useCallback(
+    (listing: StudioListing, mockupId: string) => {
+      const key = listingRenderKey(listing.listingId, mockupId);
+      setForceOverrides((prev) => ({ ...prev, [key]: true }));
+    },
+    [],
+  );
+
+  /** Release a forced tile override so it re-evaluates freshness normally. */
+  const clearTileOverride = React.useCallback(
+    (listing: StudioListing, mockupId: string) => {
+      const key = listingRenderKey(listing.listingId, mockupId);
+      setForceOverrides((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** Force every tile in one listing (row of tiles) to use its saved render. */
+  const forceRowOverride = React.useCallback(
+    (listing: StudioListing) => {
+      const keys: string[] = [];
+      for (const image of selectionFor(listing)) {
+        keys.push(listingRenderKey(listing.listingId, image.mockup.id));
+      }
+      setRowOverrides((prev) => {
+        const next = { ...prev };
+        for (const key of keys) next[key] = true;
+        return next;
+      });
+      toast.success(`Using saved Mockups renders for "${listing.designName}".`);
+    },
+    [selectionFor],
+  );
+
+  /** Release every forced override in one listing. */
+  const clearRowOverride = React.useCallback(
+    (listing: StudioListing) => {
+      const keys: string[] = [];
+      for (const image of selectionFor(listing)) {
+        keys.push(listingRenderKey(listing.listingId, image.mockup.id));
+      }
+      setRowOverrides((prev) => {
+        const next = { ...prev };
+        for (const key of keys) delete next[key];
+        return next;
+      });
+    },
+    [selectionFor],
+  );
 
   const totalSelected = React.useMemo(
     () => listings.reduce((sum, listing) => sum + selectionFor(listing).length, 0),
@@ -1128,6 +1238,8 @@ export function ListingImagesView() {
       const payload = buildBridgePayload(prepared);
       const json = bridgePayloadJson(payload);
       setBridgePayload(json);
+      setBridgePayloadData(payload);
+      setBridgeApplied(null);
       setBridgeCopied(false);
       setBridgeSummary({
         products: prepared.length,
@@ -1190,6 +1302,95 @@ export function ListingImagesView() {
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
+  /**
+   * Detect the companion extension.
+   *
+   * Its content script marks the document and announces itself once, so both
+   * the first render and a later load (the user installed it and reloaded) are
+   * covered. Without it the dialog keeps the clipboard + bookmarklet steps.
+   */
+  React.useEffect(() => {
+    const mark = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.documentElement.getAttribute("data-mockup-studio-ext") === "1"
+      ) {
+        setExtensionReady(true);
+      }
+    };
+    mark();
+    const onReady = () => setExtensionReady(true);
+    window.addEventListener("mockup-studio:extension-ready", onReady as EventListener);
+    return () =>
+      window.removeEventListener("mockup-studio:extension-ready", onReady as EventListener);
+  }, []);
+
+  /** Listen for the extension's answer to a one-click apply. */
+  React.useEffect(() => {
+    type ApplyResultDetail = {
+      requestId?: string;
+      ok?: boolean;
+      results?: Array<{ id: string; ok: boolean; error?: string }>;
+    };
+    const onResult = (event: Event) => {
+      const detail = (event as CustomEvent).detail as ApplyResultDetail | undefined;
+      if (!detail || detail.requestId !== applyRequestId.current) return;
+      setExtensionApplying(false);
+      const results = detail.results ?? [];
+      const done = results.filter((result) => result.ok).length;
+      const failures = results
+        .filter((result) => !result.ok)
+        .map((result) => `${result.id}: ${result.error ?? "not applied"}`);
+      setBridgeApplied({ done, total: results.length, failures });
+      if (detail.ok && failures.length === 0) {
+        toast.success(
+          `Applied ${done} product${results.length === 1 ? "" : "s"} in Printify.`,
+        );
+      } else if (failures.length > 0) {
+        toast.warning(
+          `Applied ${done} of ${results.length}. ${failures.length} failed - see the dialog.`,
+        );
+      } else {
+        toast.error("The extension could not apply the images.");
+      }
+    };
+    const onError = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { requestId?: string; error?: string }
+        | undefined;
+      if (!detail || detail.requestId !== applyRequestId.current) return;
+      setExtensionApplying(false);
+      setBridgeApplied(null);
+      toast.error(detail.error ?? "The extension could not apply the images.");
+    };
+    window.addEventListener("mockup-studio:apply-result", onResult as EventListener);
+    window.addEventListener("mockup-studio:apply-error", onError as EventListener);
+    return () => {
+      window.removeEventListener("mockup-studio:apply-result", onResult as EventListener);
+      window.removeEventListener("mockup-studio:apply-error", onError as EventListener);
+    };
+  }, []);
+
+  /** The true one-click path: hand the payload to the extension and let it run. */
+  const applyWithExtension = () => {
+    if (!extensionReady || !bridgePayloadData) {
+      toast.error("The Printify bridge extension is not installed yet. Use the bookmarklet below.");
+      return;
+    }
+    const requestId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `req-${Date.now()}`;
+    applyRequestId.current = requestId;
+    setExtensionApplying(true);
+    setBridgeApplied(null);
+    window.dispatchEvent(
+      new CustomEvent("mockup-studio:apply-request", {
+        detail: { payload: bridgePayloadData, requestId },
+      }),
+    );
+  };
+
   /** The design's 1-based position, oldest first - the same number as the Mockups tabs. */
   const listingNumber = (listing: StudioListing): number =>
     listings.findIndex((entry) => entry.listingId === listing.listingId) + 1;
@@ -1212,6 +1413,14 @@ export function ListingImagesView() {
     const isDefaultSelection =
       session.listingImages?.[listing.listingId] === undefined &&
       session.listingImageCleared?.[listing.listingId] !== true;
+    // Tiles the "Use Mockups render" override can act on: a saved render that
+    // exists but is no longer fresh, with no fingerprint-matched alternative.
+    const overrideCandidates = selected.filter(
+      (image) => image.entry && !image.fresh && !image.adopted,
+    );
+    const rowOverridden =
+      overrideCandidates.length > 0 &&
+      overrideCandidates.every((image) => image.overridden);
 
     return (
       <Card key={listing.listingId} data-listing-id={listing.listingId}>
@@ -1299,6 +1508,27 @@ export function ListingImagesView() {
             >
               <Send className="h-3.5 w-3.5" /> Send
             </Button>
+            {overrideCandidates.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const run = () =>
+                    rowOverridden ? clearRowOverride(listing) : forceRowOverride(listing);
+                  if (!rowOverridden && lockedListings.has(listing.listingId)) {
+                    setLockedConfirm({ listingName: listing.designName, apply: run });
+                    return;
+                  }
+                  run();
+                }}
+                disabled={rendering || sending}
+                className="text-amber"
+              >
+                {rowOverridden
+                  ? "Clear row override"
+                  : `Use Mockups renders (${overrideCandidates.length})`}
+              </Button>
+            )}
           </div>
 
           {removing && (
@@ -1393,21 +1623,31 @@ export function ListingImagesView() {
                           </span>
                         )}
                         <span
-                          className={`absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            !image
-                              ? "bg-ink-subtle text-white"
-                              : entry
-                                ? "bg-forest text-white"
-                                : "bg-warning text-white"
-                          }`}
+                          className={
+                            `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              !image
+                                ? "bg-ink-subtle text-white"
+                                : image.overridden
+                                  ? "bg-amber text-white"
+                                  : entry
+                                    ? entry.source === "mockups"
+                                      ? "bg-forest text-white"
+                                      : "bg-default text-white"
+                                    : "bg-warning text-white"
+                            }`
+                          }
                         >
                           {marked
                             ? "Will be removed"
                             : !image
                               ? "Excluded"
-                              : entry
-                                ? "Saved"
-                                : "Not rendered"}
+                              : image.overridden
+                                ? "Override: Mockups"
+                                : entry
+                                  ? entry.source === "mockups"
+                                    ? "From Mockups"
+                                    : "Rendered here"
+                                  : "Not rendered"}
                         </span>
                       </div>
                       <div className="space-y-0.5 p-2">
@@ -1419,6 +1659,39 @@ export function ListingImagesView() {
                         </p>
                       </div>
                     </button>
+                    {image && image.entry && !image.fresh && !image.adopted && (
+                      <div className="mt-1 flex items-center gap-1 px-2 pb-2">
+                        {image.overridden ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => clearTileOverride(listing, mockup.id)}
+                            className="text-[10px] text-amber hover:bg-amber-soft"
+                          >
+                            Clear override
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() =>
+                              lockedListings.has(listing.listingId)
+                                ? setLockedConfirm({
+                                    listingName: listing.designName,
+                                    apply: () => forceTileOverride(listing, mockup.id),
+                                  })
+                                : forceTileOverride(listing, mockup.id)
+                            }
+                            className="text-[10px] text-amber hover:bg-amber-soft"
+                          >
+                            Use Mockups render
+                          </Button>
+                        )}
+                        <span className="text-[10px] text-ink-subtle">
+                          {image.overridden ? "using saved render" : "saved render is out of date"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1661,14 +1934,84 @@ export function ListingImagesView() {
               />
               <SendStep
                 step={3}
-                title="Run the bookmarklet once"
-                detail="On the product's Printify tab, in your signed-in session"
-                done={false}
+                title={
+                  bridgeApplied
+                    ? "Mockups applied"
+                    : extensionReady
+                      ? "Run the extension (one click)"
+                      : "Run the bookmarklet once"
+                }
+                detail={
+                  bridgeApplied
+                    ? "Printify now has these mockups selected"
+                    : extensionReady
+                      ? "On your signed-in Printify session, in the background"
+                      : "On the product's Printify tab, in your signed-in session"
+                }
+                done={Boolean(bridgeApplied)}
               />
             </ol>
 
+            {extensionReady && (
+              <div className="space-y-1.5 rounded-md border border-forest/40 bg-forest-soft/20 px-3 py-2">
+                <p className="text-[12px] font-medium text-ink">
+                  {bridgeApplied ? "Mockups applied" : "Apply in Printify - one click"}
+                </p>
+                {bridgeApplied ? (
+                  <p className="text-[11px] text-ink-muted">
+                    Applied {bridgeApplied.done} of {bridgeApplied.total} product
+                    {bridgeApplied.total === 1 ? "" : "s"}. The extension ran inside
+                    your own signed-in Printify session and closed the tab. Check the
+                    product if you want to reorder the images.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-ink-muted">
+                    The Printify bridge extension opens the product in a background tab,
+                    selects these mockups with your own sign-in, and closes it. Nothing
+                    leaves printify.com.
+                  </p>
+                )}
+                {bridgeApplied && bridgeApplied.failures.length > 0 && (
+                  <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                    {bridgeApplied.failures.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={applyWithExtension}
+                    disabled={extensionApplying || !bridgePayloadData}
+                  >
+                    {extensionApplying ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    {extensionApplying
+                      ? "Applying in Printify"
+                      : bridgeApplied
+                        ? "Apply again"
+                        : "Apply in Printify"}
+                  </Button>
+                  {bridgeApplied && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => openPrintify()}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> Open the product to check
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5 rounded-md border border-border-subtle px-3 py-2">
-              <p className="text-[12px] font-medium text-ink">2. Copy the payload</p>
+              <p className="text-[12px] font-medium text-ink">
+                {extensionReady ? "Or use the bookmarklet" : "2. Copy the payload"}
+              </p>
               <p className="text-[11px] text-ink-muted">
                 Already done when step 2 is ticked. Copy it again if you have copied something
                 else since, or open the raw text.
@@ -1722,6 +2065,38 @@ export function ListingImagesView() {
             <Button size="sm" onClick={openPrintify}>
               <ExternalLink className="h-3.5 w-3.5" />
               {bridgeSummary?.firstProductId ? "Open the Printify product" : "Open Printify"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(lockedConfirm)}
+        onOpenChange={(open) => {
+          if (!open) setLockedConfirm(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Replace the locked images for {lockedConfirm?.listingName}?</DialogTitle>
+            <DialogDescription>
+              You locked this listing&apos;s image selection, so the Export Center uses exactly
+              the images that are already saved. Replacing them with the Mockups render changes
+              what will be exported and sent to Printify. This cannot be undone automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setLockedConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                lockedConfirm?.apply();
+                setLockedConfirm(null);
+              }}
+            >
+              Replace the images
             </Button>
           </DialogFooter>
         </DialogContent>

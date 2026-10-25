@@ -315,7 +315,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
 
     // A design that is WIDER than the print area: the part that falls outside
@@ -451,7 +451,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Print area saved/)).toBeHidden({ timeout: 20_000 });
     await page.getByRole("button", { name: /Save render/ }).click();
@@ -469,7 +469,7 @@ test.describe("core workflow", () => {
     // not changed.
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG back/ }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /Save render/ }).click();
     await expect(page.getByText(/Mockup render saved/)).toBeVisible({ timeout: 60_000 });
@@ -911,7 +911,7 @@ test.describe("core workflow", () => {
     await expect(page.getByText("Tee · DTG front", { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // Saving it stores it on the mockup, and it is still there after a reload.
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
 
     await page.reload();
@@ -933,7 +933,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     // Let that toast go: the save after the rotation raises an identical one,
     // and the later assertion would otherwise match the FIRST toast and read
@@ -1088,7 +1088,7 @@ test.describe("core workflow", () => {
     // once: the toast above can belong to the debounced auto-save, so the
     // explicit save's write may still be in flight.
     await expect(page.getByText(/Frame \d+% of the photo/)).toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect
       .poll(
         async () => {
@@ -1179,7 +1179,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(1200);
     // Let the first toast go: the crop save below raises a second, identical
@@ -1211,7 +1211,7 @@ test.describe("core workflow", () => {
     expect(cropped).toBeGreaterThan(whole * 0.2);
 
     // The window is part of the area, not a render-time trick.
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     const stored = await page.evaluate(async () => {
       const db: IDBDatabase = await new Promise((res) => {
@@ -1605,7 +1605,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
     await page.getByRole("button", { name: "Top half" }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Top 50% of the area", { exact: true })).toBeVisible();
 
@@ -1618,7 +1618,7 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
     await page.getByRole("button", { name: "Top 60%" }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText("Top 60% of the area", { exact: true })).toBeVisible({
       timeout: 30_000,
     });
@@ -1741,22 +1741,51 @@ test.describe("core workflow", () => {
     await page.locator("#area-preset").waitFor({ timeout: 30_000 });
     await page.locator("#area-preset").click();
     await page.getByRole("option", { name: /Tee · DTG front/ }).click();
-    await page.getByRole("button", { name: /^Save$/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /Render on every mockup/ }).click();
     await expect(page.getByText(/Rendered on \d+ mockup/)).toBeVisible({
       timeout: 60_000,
     });
 
-    // Those renders carry the listing fingerprint, so the listing adopts them
-    // instead of asking for another render or showing a stand-in photo.
+    // Those renders are saved AND used: the Mockups panel writes the session
+    // entry for the owning listing, so Listing images shows them immediately as
+    // "From Mockups" instead of asking for another render.
     await gotoApp(page, "/listing-images");
     await expect(page.locator("[data-listing-id]")).toHaveCount(1, { timeout: 30_000 });
-    const saved = page.locator('[data-tile]').getByText("Saved", { exact: true });
-    await expect(saved.first()).toBeVisible({ timeout: 30_000 });
+    const fromMockups = page.locator('[data-tile]').getByText("From Mockups", { exact: true });
+    await expect(fromMockups.first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Not rendered", { exact: true })).toHaveCount(0);
     await expect(page.getByText(/saved render.* can be linked/i)).toHaveCount(0);
     // The per-design area is what the tile reports, not the shared default.
     await expect(page.getByText("Print area mapped").first()).toBeVisible();
+  });
+
+  test("32. Save render is visible on the Mockups toolbar and offers the source badge", async ({
+    page,
+  }) => {
+    await seedLibrary(page);
+    await gotoApp(page, "/printify-studio");
+    await page.getByRole("checkbox", { name: "Select design-a" }).click();
+    await expect(page.getByText("1 design selected")).toBeVisible();
+    await page.waitForTimeout(900);
+
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee.*DTG front/ }).click();
+    // The toolbar distinguishes the frame "Save area" from "Save render".
+    await expect(page.getByRole("button", { name: /^Save area$/ })).toBeVisible({
+      timeout: 30_000,
+    });
+    const saveRender = page.getByRole("button", { name: /Save render/ });
+    await expect(saveRender).toBeVisible({ timeout: 30_000 });
+    await saveRender.click();
+    await expect(page.getByText(/Mockup render saved and used/)).toBeVisible({
+      timeout: 60_000,
+    });
   });
 
   test("28. preview blocks a shop with no sales channel before publishing", async ({ page }) => {

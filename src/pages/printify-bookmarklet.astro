@@ -7,47 +7,166 @@ import { MOCKUP_BRIDGE_BOOKMARKLET } from "@/lib/printify/bookmarklet";
   <main class="mx-auto max-w-3xl px-6 py-10">
     <a
       href="/printify-studio"
-      class="text-[12px] font-medium text-forest underline underline-offset-2"
+      class="text-[13px] font-medium text-forest underline underline-offset-2"
     >
       ← Back to Printify Studio
     </a>
 
-    <header class="mt-4 space-y-2">
-      <h1 class="text-2xl font-semibold tracking-tight text-ink">Printify mockup bookmarklet</h1>
-      <p class="text-[13px] leading-relaxed text-ink-muted">
-        Printify's public API can upload listing images, but selecting them as a
-        product's mockups is only exposed to Printify's own web session. This
-        bookmarklet is the bridge: it runs on <strong>printify.com</strong>, reads
-        the payload Mockup Studio copied, and calls Printify's own web API with
-        your signed-in session.
+    <header class="mt-4 space-y-3">
+      <h1 class="text-3xl font-semibold tracking-tight text-ink">
+        Printify mockup bookmarklet
+      </h1>
+      <p class="text-[15px] leading-relaxed text-ink-muted">
+        This is the one small button that puts your finished mockups onto your
+        product in Printify. Printify will let an app upload the pictures, but it
+        only lets the person who is signed in choose which pictures become the
+        product's mockups. This page gives you that button.
+      </p>
+      <p class="text-[15px] leading-relaxed text-ink-muted">
+        You install the button <strong>once</strong>. After that it is one click
+        every time you send a batch.
       </p>
     </header>
 
-    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-4 shadow-card">
-      <h2 class="text-[15px] font-semibold text-ink">Install it once</h2>
-      <ol class="mt-2 list-decimal space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink-muted">
-        <li>Make sure your bookmarks bar is visible (Ctrl/Cmd + Shift + B).</li>
-        <li>
-          Drag the <strong>Apply Mockup Studio images</strong> link below onto the
-          bookmarks bar, or copy the bookmarklet and create a bookmark manually.
+    <!-- The three-part story, in plain words. -->
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-5 shadow-card">
+      <h2 class="text-[17px] font-semibold text-ink">The whole idea in three parts</h2>
+      <ol class="mt-4 grid list-none gap-4 p-0 sm:grid-cols-3">
+        <li class="rounded-lg border border-border-subtle bg-surface-muted p-4">
+          <div
+            class="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-[14px] font-semibold text-white"
+          >
+            1
+          </div>
+          <p class="mt-3 text-[14px] font-semibold text-ink">Mockup Studio uploads</p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            Your images go up to Printify through the normal, allowed upload door.
+          </p>
         </li>
-        <li>In Mockup Studio, open Listing images and press <strong>Send to Printify</strong>.</li>
-        <li>Open the Printify product, then click the bookmarklet on your bookmarks bar.</li>
+        <li class="rounded-lg border border-border-subtle bg-surface-muted p-4">
+          <div
+            class="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-[14px] font-semibold text-white"
+          >
+            2
+          </div>
+          <p class="mt-3 text-[14px] font-semibold text-ink">A little note is copied</p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            The app puts a short list of product ids and image links on your
+            clipboard. No password. No key.
+          </p>
+        </li>
+        <li class="rounded-lg border border-border-subtle bg-surface-muted p-4">
+          <div
+            class="flex h-8 w-8 items-center justify-center rounded-full bg-forest text-[14px] font-semibold text-white"
+          >
+            3
+          </div>
+          <p class="mt-3 text-[14px] font-semibold text-ink">The button finishes the job</p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            Clicked on printify.com, it tells Printify which mockups to pick, using
+            your own signed-in login.
+          </p>
+        </li>
+      </ol>
+    </section>
+
+    <!-- ONE-TIME install. -->
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-5 shadow-card">
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 class="text-[17px] font-semibold text-ink">One time: install the button</h2>
+        <span
+          class="rounded-full bg-forest-soft px-2.5 py-1 text-[12px] font-semibold text-forest"
+          >Do this once per browser</span
+        >
+      </div>
+      <p class="mt-2 text-[14px] leading-relaxed text-ink-muted">
+        Every person installs this for their own account. It cannot be shared: the
+        button runs as whoever is signed in to Printify in that browser.
+      </p>
+
+      <ol class="mt-4 list-none space-y-4 p-0">
+        <li class="flex gap-4">
+          <div
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest text-[15px] font-semibold text-white"
+          >
+            1
+          </div>
+          <div class="text-[15px] leading-relaxed text-ink">
+            <p class="font-semibold text-ink">Show your bookmarks bar.</p>
+            <p class="mt-1 text-ink-muted">
+              Press <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 text-[13px] font-medium text-ink">Ctrl</kbd>
+              +
+              <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 text-[13px] font-medium text-ink">Shift</kbd>
+              +
+              <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 text-[13px] font-medium text-ink">B</kbd>
+              on Windows, or
+              <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 text-[13px] font-medium text-ink">⌘</kbd>
+              +
+              <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 text-[13px] font-medium text-ink">Shift</kbd>
+              +
+              <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 text-[13px] font-medium text-ink">B</kbd>
+              on a Mac. A bar with your favourites should appear under the
+              address bar.
+            </p>
+          </div>
+        </li>
+        <li class="flex gap-4">
+          <div
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest text-[15px] font-semibold text-white"
+          >
+            2
+          </div>
+          <div class="w-full text-[15px] leading-relaxed text-ink">
+            <p class="font-semibold text-ink">
+              Drag the green button onto that bar.
+            </p>
+            <p class="mt-1 text-ink-muted">
+              Hold the button down, drag it to the bookmarks bar, and let go. It
+              stays there for good.
+            </p>
+
+            <div class="mt-3 flex flex-wrap items-center gap-3 rounded-md bg-forest-soft p-4">
+              <a
+                href={MOCKUP_BRIDGE_BOOKMARKLET}
+                draggable="true"
+                class="inline-flex items-center rounded-md bg-forest px-4 py-2 text-[14px] font-semibold text-white shadow-subtle"
+                title="Drag this to your bookmarks bar"
+              >
+                Apply Mockup Studio images
+              </a>
+              <span class="text-[13px] text-ink-muted"
+                >← drag me to your bookmarks bar</span
+              >
+            </div>
+
+            <p class="mt-3 text-ink-muted">
+              Prefer typing it in? Press
+              <strong class="font-semibold text-ink">Copy bookmarklet</strong>, then
+              make any new bookmark and paste it into the bookmark's URL box.
+            </p>
+          </div>
+        </li>
+        <li class="flex gap-4">
+          <div
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-forest text-[15px] font-semibold text-white"
+          >
+            3
+          </div>
+          <div class="text-[15px] leading-relaxed text-ink">
+            <p class="font-semibold text-ink">That's the install done.</p>
+            <p class="mt-1 text-ink-muted">
+              You never touch this page again unless you are on a new browser or a
+              new computer.
+            </p>
+          </div>
+        </li>
       </ol>
 
-      <div class="mt-4 flex flex-wrap items-center gap-2">
-        <a
-          href={MOCKUP_BRIDGE_BOOKMARKLET}
-          draggable="true"
-          class="inline-flex items-center rounded-md bg-forest px-3 py-1.5 text-[12px] font-semibold text-white shadow-subtle"
-          title="Drag this to your bookmarks bar"
-        >
-          Apply Mockup Studio images
-        </a>
+      <div class="mt-5 flex flex-wrap items-center gap-3">
         <button
           id="copy-bookmarklet"
           type="button"
-          class="inline-flex items-center rounded-md border border-border-strong bg-surface px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-surface-muted"
+          class="inline-flex items-center rounded-md border border-border-strong bg-surface px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-surface-muted"
         >
           Copy bookmarklet
         </button>
@@ -55,54 +174,223 @@ import { MOCKUP_BRIDGE_BOOKMARKLET } from "@/lib/printify/bookmarklet";
           href="https://printify.com/app/products"
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center rounded-md border border-border-subtle px-3 py-1.5 text-[12px] font-medium text-forest hover:bg-surface-muted"
+          class="inline-flex items-center rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-forest underline underline-offset-2 hover:bg-surface-muted"
         >
           Open Printify products ↗
         </a>
-        <span id="copy-status" class="text-[12px] text-ink-muted" aria-live="polite"></span>
+        <span id="copy-status" class="text-[13px] text-ink-muted" aria-live="polite"></span>
       </div>
 
-      <label for="bookmarklet-source" class="mt-4 block text-[12px] font-medium text-ink">
-        Bookmarklet source
+      <label for="bookmarklet-source" class="mt-5 block text-[13px] font-medium text-ink">
+        The button's raw text (for pasting into a bookmark)
       </label>
       <textarea
         id="bookmarklet-source"
         readonly
         spellcheck="false"
-        class="mt-1 h-32 w-full rounded-md border border-border-subtle bg-surface-muted p-2 font-mono text-[10px] text-ink"
+        class="mt-1.5 h-32 w-full rounded-md border border-border-subtle bg-surface-muted p-2 font-mono text-[11px] text-ink"
       >{MOCKUP_BRIDGE_BOOKMARKLET}</textarea>
     </section>
 
-    <section class="mt-6 space-y-2 rounded-lg border border-border-subtle bg-surface p-4">
-      <h2 class="text-[15px] font-semibold text-ink">What it does — and does not do</h2>
-      <ul class="list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink-muted">
-        <li>
-          It only runs on <code class="rounded bg-surface-muted px-1">printify.com</code>. On any
-          other site it stops with a message.
+    <!-- EVERY-TIME flow. -->
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-5 shadow-card">
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 class="text-[17px] font-semibold text-ink">
+          Every time you send mockups: 3 steps
+        </h2>
+        <span
+          class="rounded-full bg-forest-soft px-2.5 py-1 text-[12px] font-semibold text-forest"
+          >About 20 seconds</span
+        >
+      </div>
+
+      <ol class="mt-4 grid list-none gap-4 p-0 sm:grid-cols-3">
+        <li class="rounded-lg border border-border-subtle p-4">
+          <div
+            class="flex h-9 w-9 items-center justify-center rounded-full bg-forest text-[15px] font-semibold text-white"
+          >
+            1
+          </div>
+          <p class="mt-3 text-[14px] font-semibold text-ink">
+            In Mockup Studio: press Send
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            Open <strong>Listing images</strong>, choose your designs, and press
+            <strong>Send to Printify</strong>. The app uploads the pictures and
+            quietly copies the little note onto your clipboard.
+          </p>
         </li>
-        <li>
-          It reads the payload from your clipboard. The payload contains product ids,
-          image URLs and mockup ids — never an API key or a password.
+        <li class="relative rounded-lg border border-border-subtle p-4">
+          <div
+            class="flex h-9 w-9 items-center justify-center rounded-full bg-forest text-[15px] font-semibold text-white"
+          >
+            2
+          </div>
+          <p class="mt-3 text-[14px] font-semibold text-ink">
+            Open the product in Printify
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            Open the Printify product in a new tab and make sure you are signed in
+            to <strong>your own</strong> Printify account. It must be a
+            printify.com page.
+          </p>
+          <svg
+            class="pointer-events-none absolute -right-3 top-7 hidden h-5 w-5 text-forest sm:block"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M7.3 4.3a1 1 0 0 1 1.4 0l5 5a1 1 0 0 1 0 1.4l-5 5a1 1 0 1 1-1.4-1.4L11.6 10 7.3 5.7a1 1 0 0 1 0-1.4Z"
+            ></path>
+          </svg>
         </li>
-        <li>
-          It uses your existing Printify cookies first. The access token in this
-          browser's Printify session is only a 401 fallback and is sent only to
-          printify.com.
+        <li class="rounded-lg border border-border-subtle p-4">
+          <div
+            class="flex h-9 w-9 items-center justify-center rounded-full bg-forest text-[15px] font-semibold text-white"
+          >
+            3
+          </div>
+          <p class="mt-3 text-[14px] font-semibold text-ink">
+            Click the button once
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            Click <strong>Apply Mockup Studio images</strong> on your bookmarks
+            bar, and say yes to the little message that pops up.
+            <strong>One click covers the whole batch.</strong>
+          </p>
         </li>
-        <li>
-          It reads the product's current mockup layout and <strong>merges</strong> the new images
-          into the no-variant group, so existing selections are kept. If the layout
-          cannot be read, it asks before replacing instead of guessing.
+      </ol>
+
+      <div class="mt-5 rounded-md border border-border-subtle bg-surface-muted p-4">
+        <p class="text-[14px] leading-relaxed text-ink">
+          <strong>One click, all products.</strong> If you sent four products, the
+          button works through all four. Printify shows the new mockups on each
+          product and makes the first image the main one. Your old mockups are
+          kept.
+        </p>
+        <p class="mt-2 text-[13px] leading-relaxed text-ink-muted">
+          Nothing goes anywhere private. No password or login is copied, shared or
+          sent to Mockup Studio. The clipboard note holds product ids and image
+          links, and it is used on printify.com only.
+        </p>
+      </div>
+    </section>
+
+    <!-- TROUBLESHOOTING. -->
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-5 shadow-card">
+      <h2 class="text-[17px] font-semibold text-ink">If a message pops up</h2>
+      <p class="mt-2 text-[14px] leading-relaxed text-ink-muted">
+        The button talks in short messages. Here is what each one means.
+      </p>
+      <ul class="mt-4 list-none space-y-3 p-0">
+        <li class="rounded-md border border-border-subtle p-4">
+          <p class="text-[14px] font-semibold text-ink">
+            "That is not a Mockup Studio payload"
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            The clipboard changed since you pressed Send. Go back to
+            <strong>Listing images</strong> and press Send again (or
+            <strong>Copy again</strong> in the send box), then click the button
+            again.
+          </p>
         </li>
-        <li>
-          It asks for confirmation, uploads/marks at most two products at a time,
-          and backs off on HTTP 429. Nothing is published.
+        <li class="rounded-md border border-border-subtle p-4">
+          <p class="text-[14px] font-semibold text-ink">
+            "Run this bookmarklet on printify.com"
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            You are not looking at the real product. Click the product link from
+            the send box so it opens on <strong>printify.com</strong>, never on a
+            <strong>www</strong> page, then click the button again.
+          </p>
+        </li>
+        <li class="rounded-md border border-border-subtle p-4">
+          <p class="text-[14px] font-semibold text-ink">
+            "Sign in to Printify in this tab first"
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            That tab has no Printify login. Sign in in that same tab, then click
+            the button again. Nothing to redo: your pictures are already up.
+          </p>
+        </li>
+        <li class="rounded-md border border-border-subtle p-4">
+          <p class="text-[14px] font-semibold text-ink">
+            "Printify kept rate-limiting"
+          </p>
+          <p class="mt-1 text-[13px] leading-relaxed text-ink-muted">
+            Printify asked us to slow down. Wait about a minute, then click the
+            button again. Products that already worked stay done.
+          </p>
         </li>
       </ul>
-      <p class="text-[12px] leading-relaxed text-ink-subtle">
-        The app itself cannot do this step: Cloudflare Workers cannot run a browser,
-        and the server must never hold your Printify web session. That is why the
-        last click happens in your own browser.
+    </section>
+
+    <!-- WHY. -->
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-5 shadow-card">
+      <h2 class="text-[17px] font-semibold text-ink">Why do I need to do this?</h2>
+      <p class="mt-2 text-[15px] leading-relaxed text-ink-muted">
+        Your browser keeps your Printify login private. It is your login, so
+        Printify only accepts the choosing step from the browser you are signed
+        in with. Mockup Studio never sees your password or your Printify key, so
+        the last click has to happen on your side. A downloadable browser
+        extension is being prepared that can do this in one click instead — it
+        still has to be installed once, and you still have to be signed in to your
+        own Printify account.
+      </p>
+    </section>
+
+    <!-- WHAT IT DOES / DOES NOT. -->
+    <section class="mt-6 rounded-lg border border-border-subtle bg-surface p-5">
+      <h2 class="text-[17px] font-semibold text-ink">What this does — and doesn't do</h2>
+      <ul class="mt-3 list-none space-y-2.5 p-0 text-[14px] leading-relaxed text-ink-muted">
+        <li class="flex gap-3">
+          <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-forest" aria-hidden="true"></span>
+          <span>
+            It only runs on <code class="rounded bg-surface-muted px-1 text-ink">printify.com</code>.
+            On any other website it stops and says so.
+          </span>
+        </li>
+        <li class="flex gap-3">
+          <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-forest" aria-hidden="true"></span>
+          <span>
+            It only reads the note from your clipboard. That note holds product
+            ids, image links and mockup ids — never a password, never an API key.
+          </span>
+        </li>
+        <li class="flex gap-3">
+          <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-forest" aria-hidden="true"></span>
+          <span>
+            It uses the Printify login your browser already has. Nothing but
+            printify.com is ever contacted.
+          </span>
+        </li>
+        <li class="flex gap-3">
+          <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-forest" aria-hidden="true"></span>
+          <span>
+            It keeps the mockups your product already had. New pictures are added
+            beside them, and the first picture becomes the main image.
+          </span>
+        </li>
+        <li class="flex gap-3">
+          <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-forest" aria-hidden="true"></span>
+          <span>
+            It is careful with speed. It works on two products at a time and waits
+            when Printify asks it to slow down.
+          </span>
+        </li>
+        <li class="flex gap-3">
+          <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-forest" aria-hidden="true"></span>
+          <span>
+            It publishes nothing. Your products stay drafts until you press
+            Publish yourself.
+          </span>
+        </li>
+      </ul>
+      <p class="mt-4 text-[13px] leading-relaxed text-ink-subtle">
+        Good to know: this page is a helper, not a work table. It is outside the
+        sidebar on purpose — you open it once per browser and then get on with
+        your batch.
       </p>
     </section>
   </main>
@@ -119,9 +407,9 @@ import { MOCKUP_BRIDGE_BOOKMARKLET } from "@/lib/printify/bookmarklet";
     source.select();
     try {
       await navigator.clipboard.writeText(source.value);
-      if (status) status.textContent = "Copied. Create a bookmark and paste it as the URL.";
+      if (status) status.textContent = "Copied. Make a bookmark and paste it in as the URL.";
     } catch {
-      if (status) status.textContent = "Select the source above and copy it manually.";
+      if (status) status.textContent = "Your browser blocked the copy. Select the source above and copy it by hand.";
     }
   });
 </script>

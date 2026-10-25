@@ -64,13 +64,24 @@ import {
   type PrintAreaScope,
 } from "@/lib/mockups/propagate";
 import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render";
+import { linkSavedRender } from "@/lib/printify/render-link";
+import { buildStudioListings, catalogProductName } from "@/lib/printify/listing-plan";
+import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
 import { canRenderPrintFile, renderPrintFile } from "@/lib/mockups/print-file";
 import { renderComposition } from "@/lib/batch/runner";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
-import type { Mockup, MockupPrintArea, StudioPlacement, StudioSession, Template } from "@/types/domain";
+import { useListingCatalog } from "@/views/listings/listing-catalog";
+import type {
+  Design,
+  Mockup,
+  MockupPrintArea,
+  StudioPlacement,
+  StudioSession,
+  Template,
+} from "@/types/domain";
 import { AlertTriangle, Crop, Download, ImagePlus, Layers, Loader2, Ruler, Save, Trash2 } from "lucide-react";
 
 /** The crop windows offered as one-click presets. */
@@ -99,6 +110,7 @@ export function PrintAreasTab({
   const [selectedId, setSelectedId] = React.useState<string | null>(initialMockupId ?? null);
   const [designId, setDesignId] = React.useState<string | null>(null);
   const [session, setSession] = React.useState<StudioSession>(() => emptySession());
+  const catalog = useListingCatalog();
   const [area, setArea] = React.useState<MockupPrintArea | null>(null);
   const [designMeta, setDesignMeta] = React.useState({ assetId: "", w: 0, h: 0 });
   const [dirty, setDirty] = React.useState(false);
@@ -726,6 +738,21 @@ export function PrintAreasTab({
       toast.info("Pick a design, a mockup and a print area first.");
       return;
     }
+
+    // A pair is ONE listing owned by its black-ink half. Saving the white
+    // half's artwork would attach the wrong pixels to that listing, so stop
+    // before writing a render the listing can never use.
+    const before = await loadSession();
+    const pairListing = buildStudioListings((designs ?? []) as Design[], before).find(
+      (listing) => listing.partnerDesignId === design.id,
+    );
+    if (pairListing) {
+      toast.error(
+        `"${design.name}" is the white-ink half of "${pairListing.designName}". Switch to the black-ink tab (${pairListing.designName}) and save the render there - the pair uses that artwork for its listing images.`,
+      );
+      return;
+    }
+
     setRendering(true);
     try {
       // Save the draft FIRST: the fingerprint and the pixels must come from
@@ -739,13 +766,14 @@ export function PrintAreasTab({
       // clipMode (the listing path's rule), and the fingerprint hashes the
       // listing convention — so the Listing images page can ADOPT this render
       // instead of re-rendering the same pixels.
+      const latest = await loadSession();
       const { plan, fp } = await resolveRenderPlanWithFingerprint({
         designId: design.id,
         designAssetId: designMainAssetId(design),
         mockup: savedMockup,
-        session,
+        session: latest,
       });
-      await renderComposition({
+      const assetId = await renderComposition({
         designId: design.id,
         mockupId: mockup.id,
         designAssetId: designMainAssetId(design),
@@ -755,7 +783,50 @@ export function PrintAreasTab({
         renderFp: fp,
       });
       await logActivity("batch.item", `Rendered "${design.name}" on "${mockup.name}"`);
-      toast.success("Mockup render saved — find it in the Export Center");
+
+      // Save AND use. The session is the source Listing images, Listing
+      // preview, Send and the autopilot read, so writing the asset id there
+      // is what makes this render the listing's image immediately.
+      const link = linkSavedRender({
+        designId: design.id,
+        mockupId: mockup.id,
+        assetId,
+        fingerprint: fp,
+        session: latest,
+        designs: (designs ?? []) as Design[],
+      });
+      if (link.status === "linked") {
+        const next: StudioSession = {
+          ...latest,
+          ...link.patch,
+          updatedAt: Date.now(),
+        };
+        await saveSession(next);
+        setSession(next);
+        try {
+          await saveStudioListingDrafts({
+            session: next,
+            listings: buildStudioListings((designs ?? []) as Design[], next),
+            productName: catalogProductName(catalog.blueprints, next.blueprintId),
+            copyMode: "preserve",
+            lockSelection: true,
+          });
+        } catch {
+          // The pixels and the session entry are already safe. The Export
+          // Center can catch up on the next Save & render.
+        }
+        toast.success(
+          `Mockup render saved and used for "${link.listing.designName}" in Listing images.`,
+        );
+      } else if (link.status === "white-half") {
+        toast.warning(
+          `Mockup render saved, but "${link.listing.designName}" is a pair owned by its black-ink half. Save on that tab to use it as a listing image.`,
+        );
+      } else {
+        toast.success(
+          "Mockup render saved. This design is not in the Printify batch, so it is not attached to a listing.",
+        );
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The mockup could not be rendered");
     } finally {
@@ -776,6 +847,16 @@ export function PrintAreasTab({
    */
   const renderEverywhere = async () => {
     if (!design) return;
+    const before = await loadSession();
+    const pairListing = buildStudioListings((designs ?? []) as Design[], before).find(
+      (listing) => listing.partnerDesignId === design.id,
+    );
+    if (pairListing) {
+      toast.error(
+        `"${design.name}" is the white-ink half of "${pairListing.designName}". Switch to the black-ink tab (${pairListing.designName}) and render there - the pair uses that artwork for its listing images.`,
+      );
+      return;
+    }
     setBulkRendering(true);
     let done = 0;
     let failed = 0;
@@ -789,15 +870,21 @@ export function PrintAreasTab({
         toast.info("No mockup has a print area yet. Set one first.");
         return;
       }
+      const latest = await loadSession();
+      const renderedTargets: Array<{
+        mockupId: string;
+        assetId: string;
+        fingerprint: string;
+      }> = [];
       for (const target of targets) {
         try {
           const { plan, fp } = await resolveRenderPlanWithFingerprint({
             designId: design.id,
             designAssetId: designMainAssetId(design),
             mockup: target,
-            session,
+            session: latest,
           });
-          await renderComposition({
+          const assetId = await renderComposition({
             designId: design.id,
             mockupId: target.id,
             designAssetId: designMainAssetId(design),
@@ -806,11 +893,46 @@ export function PrintAreasTab({
             behindMockup: plan.behindMockup,
             renderFp: fp,
           });
+          renderedTargets.push({ mockupId: target.id, assetId, fingerprint: fp });
           done += 1;
         } catch {
           failed += 1;
         }
       }
+      // Save AND use the whole set, exactly like the single Save render.
+      if (renderedTargets.length > 0) {
+        let next = await loadSession();
+        let linkedName: string | null = null;
+        for (const target of renderedTargets) {
+          const link = linkSavedRender({
+            designId: design.id,
+            mockupId: target.mockupId,
+            assetId: target.assetId,
+            fingerprint: target.fingerprint,
+            session: next,
+            designs: (designs ?? []) as Design[],
+          });
+          if (link.status !== "linked") continue;
+          next = { ...next, ...link.patch, updatedAt: Date.now() };
+          linkedName = link.listing.designName;
+        }
+        if (linkedName) {
+          await saveSession(next);
+          setSession(next);
+          try {
+            await saveStudioListingDrafts({
+              session: next,
+              listings: buildStudioListings((designs ?? []) as Design[], next),
+              productName: catalogProductName(catalog.blueprints, next.blueprintId),
+              copyMode: "preserve",
+              lockSelection: true,
+            });
+          } catch {
+            // The session entries are safe; drafts can catch up later.
+          }
+        }
+      }
+
       if (done > 0) {
         await logActivity(
           "batch.item",
@@ -983,9 +1105,23 @@ export function PrintAreasTab({
               size="sm"
               onClick={saveArea}
               disabled={!area}
-              title={`Save and apply to ${printAreaScopeLabel(areaScope).toLowerCase()}`}
+              title={`Save the area and apply it to ${printAreaScopeLabel(areaScope).toLowerCase()}`}
             >
-              <Save className="h-3.5 w-3.5" /> Save
+              <Save className="h-3.5 w-3.5" /> Save area
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={saveRender}
+              disabled={!area || !design || rendering}
+              title="Save the composed mockup and use it in Listing images"
+            >
+              {rendering ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ImagePlus className="h-3.5 w-3.5" />
+              )}
+              Save render
             </Button>
           </div>
         </div>
@@ -1379,19 +1515,6 @@ export function PrintAreasTab({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={saveRender}
-                  disabled={!area || !design || rendering}
-                >
-                  {rendering ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ImagePlus className="h-3.5 w-3.5" />
-                  )}
-                  Save render
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
                   onClick={renderEverywhere}
                   disabled={!design || bulkRendering}
                   title={`Render "${design?.name ?? "this design"}" on every mockup that has a print area`}
@@ -1407,7 +1530,8 @@ export function PrintAreasTab({
               <p className="mt-2 text-[11.5px] leading-relaxed text-ink-subtle">
                 A template carries the area and the frame as a fraction of the photo. Tick mockups on
                 the left to apply it to them. <strong className="font-medium text-ink-muted">Save
-                render</strong> stores the composed mockup for the Export Center, and{" "}
+                area</strong> stores the frame; <strong className="font-medium text-ink-muted">Save
+                render</strong> saves the composed mockup and uses it in Listing images, and{" "}
                 <strong className="font-medium text-ink-muted">Render on every mockup</strong> does
                 the whole set for this design in one pass.
               </p>

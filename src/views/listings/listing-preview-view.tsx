@@ -1529,12 +1529,51 @@ export function ListingPreviewView() {
                     )}
 
                     <p className="text-[11px] text-ink-subtle">
-                      {selected.length} image{selected.length === 1 ? "" : "s"} · the first is the
-                      main image · chosen on{" "}
+                      {selected.length} image{selected.length === 1 ? "" : "s"} — the first is the
+                      main image — chosen on{" "}
                       <Link href="/listing-images" className="text-forest underline">
                         Listing images
                       </Link>
+                      {(() => {
+                        const entries = selected
+                          .map((image) => currentEntry(image))
+                          .filter(Boolean);
+                        const fromMockups = entries.filter(
+                          (entry) => entry?.source === "mockups",
+                        ).length;
+                        return (
+                          <>
+                            {" — "}
+                            <span className="font-medium text-ink-muted">
+                              {fromMockups} from Mockups
+                            </span>
+                            {entries.length > fromMockups
+                              ? `, ${entries.length - fromMockups} rendered on Listing images`
+                              : ""}
+                            {" — "}
+                            <Link href="/listing-images" className="text-forest underline">
+                              Fix images
+                            </Link>
+                          </>
+                        );
+                      })()}
                     </p>
+                    {(() => {
+                      const outdated = selected.filter(
+                        (image) => image.entry && !image.fresh && !image.adopted,
+                      );
+                      if (outdated.length === 0) return null;
+                      return (
+                        <p className="text-[11px] text-warning">
+                          {outdated.length} saved Mockups render
+                          {outdated.length === 1 ? "" : "s"} may be out of date. {" "}
+                          <Link href="/listing-images" className="text-forest underline">
+                            Review them on Listing images
+                          </Link>
+                          .
+                        </p>
+                      );
+                    })()}
                   </div>
 
                   {/* --- the copy ---------------------------------------- */}
