@@ -959,8 +959,9 @@ position pickers here:
 3. **PowerShell `Set-Content -Encoding UTF8` writes a BOM.** It silently corrupted
    `package.json` and introduced BOMs into 49 source files. Use the editor tools,
    or `[System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($false)))`.
-4. **Cloudflare redirects `/mockups` → `/mockups/`.** `astro dev` does not. Any
-   URL assertion must tolerate an optional trailing slash.
+4. **Cloudflare redirects directory-like routes to a trailing slash.**
+   `/mockups` → `/mockups/` and `/autopilot` → `/autopilot/`. `astro dev` does
+   not. Any URL assertion must tolerate an optional trailing slash.
 5. **Commit messages with `"` break PowerShell argument parsing.** Use
    `git commit -F <file>`.
 6. **The repo lives in OneDrive, and Astro's content store does not always
