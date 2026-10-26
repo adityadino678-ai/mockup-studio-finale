@@ -137,13 +137,19 @@ export const AGENT_TOOLS: AgentTool[] = [
         items: {
           type: "array",
           description:
-            "Multiple listings to update in one call, each with its own copy. Use this to write unique SEO title/description/tags/price for every listing at once. When present, top-level design/title/description/tags/price/priceCents are ignored.",
+            "Multiple listings to update in one call, each with its own copy. Use this to write unique SEO title/description/tags/price for every listing at once. When present, top-level design/title/description/tags/price/priceCents are ignored. Each item needs a design name (or listing id) plus at least one of title, description, tags, or price.",
           items: {
             type: "object",
             properties: {
               design: {
                 type: "string",
-                description: "Design or listing name to update.",
+                description:
+                  "Design or listing name to update. Use the design name shown in the Studio.",
+              },
+              listingId: {
+                type: "string",
+                description:
+                  "Listing id to update. Use this instead of design if you have the exact id.",
               },
               title: { type: "string", description: "The listing title to save." },
               description: { type: "string", description: "The listing description to save." },
@@ -161,7 +167,7 @@ export const AGENT_TOOLS: AgentTool[] = [
                 description: "Price in CENTS, e.g. 2499.",
               },
             },
-            required: ["design"],
+            required: [],
           },
         },
       },

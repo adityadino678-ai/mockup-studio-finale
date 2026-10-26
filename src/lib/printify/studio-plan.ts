@@ -195,6 +195,25 @@ export function planItemVariantIds(
   );
 }
 
+/**
+ * Checks each group for colors that have zero matching variants in the selected
+ * sizes. Returns a list of warnings the UI can surface.
+ */
+export function checkGroupVariantCoverage(
+  plan: StudioPlan,
+  item: StudioDesignPlan,
+  sizes: string[],
+): Array<{ ink: "main" | "black" | "white"; colors: string[] }> {
+  const warnings: Array<{ ink: "main" | "black" | "white"; colors: string[] }> = [];
+  for (const group of item.groups) {
+    const variantIds = resolveVariantIds(plan.colourIndex, group.colors, sizes);
+    if (variantIds.length === 0 && group.colors.length > 0) {
+      warnings.push({ ink: group.ink, colors: group.colors });
+    }
+  }
+  return warnings;
+}
+
 /** The enabled variant count for every plan item. */
 export function planVariantCounts(plan: StudioPlan, sizes: string[]): Map<string, number> {
   const counts = new Map<string, number>();
@@ -234,6 +253,15 @@ export function studioPartitionProblems(plan: StudioPlan, session: StudioSession
     }
     if (enabled.length === 0) {
       found.push(`${item.designName}: no variants match the selected colours and sizes.`);
+    }
+
+    // Warn about groups that have colors but no matching variants
+    const coverageWarnings = checkGroupVariantCoverage(plan, item, session.sizes);
+    for (const warning of coverageWarnings) {
+      const colourList = warning.colors.slice(0, 5).join(", ") + (warning.colors.length > 5 ? ", …" : "");
+      found.push(
+        `${item.designName}: ${warning.ink === "main" ? "Main" : warning.ink === "black" ? "Black ink" : "White ink"} group has colours (${colourList}) with no matching variants in the selected sizes — those colours will not be printed.`,
+      );
     }
   }
 

@@ -29,7 +29,10 @@ Etsy ranks listings by relevance to the search query. To rank well:
 ## How to act (be proactive, ask fewer questions)
 - When the user says "research this saying/phrase/niche" or "research Etsy for X": call etsy_research(query) immediately. Extract the query from their message (e.g. "cat mug" → query "cat mug"). Do not ask what the saying is if they already told you.
 - When research results come back: call draft_listing(concept) to generate title/tag/description ideas grounded in the observed Etsy terms.
-- When the user wants copy saved (or says "save", "apply", "set", "update"): call save_listing_details. If there are multiple listings in the batch, use the items array to write UNIQUE copy for each listing in ONE call — one title/description/tags/price per listing. Do not ask which design; default to every listing in the batch.
+- When the user wants copy saved (or says "save", "apply", "set", "update"): call save_listing_details. 
+  * For a SINGLE listing: use the design parameter with the design name plus title/description/tags/price.
+  * For MULTIPLE listings (bulk): use the items array. Each item needs a design (design name) or listingId plus its own title/description/tags/price. Example: save_listing_details({ items: [{ design: "Sunset Tee", title: "...", tags: [...], price: 24.99 }, { design: "Moon Tee", title: "...", tags: [...], priceCents: 2499 }] })
+  Do not ask which design; default to every listing in the batch when using items.
 - If an image is attached in chat, treat it as the design reference automatically. Call save_chat_image if they want to save it, or use it as the design for create_printify_product.
 - Only ask a clarifying question when the request is genuinely impossible to act on (e.g. no designs exist at all). Never ask "which design" when there's one listing, or "what saying" when they already said it.
 

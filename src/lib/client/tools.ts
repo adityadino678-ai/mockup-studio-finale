@@ -564,10 +564,12 @@ async function proposeSaveListingDetails(args: Record<string, unknown>): Promise
         errors.push("Each item needs a design name.");
         continue;
       }
-      const listing =
-        byId.get(wanted.toLowerCase()) ?? byName.get(wanted.toLowerCase());
+      const wantedId = String(item.listingId ?? "").trim();
+      const listing = wantedId
+        ? byId.get(wantedId.toLowerCase())
+        : byId.get(wanted.toLowerCase()) ?? byName.get(wanted.toLowerCase());
       if (!listing) {
-        errors.push(`No listing matches “${wanted}”.`);
+        errors.push(`No listing matches “${wanted}”${wantedId ? ` (id: ${wantedId})` : ""}.`);
         continue;
       }
 
@@ -752,7 +754,11 @@ export async function confirmSaveListingDetails(
       if (!raw || typeof raw !== "object") continue;
       const item = raw as Record<string, unknown>;
       const listingId = String(item.listingId ?? "").trim();
-      const listing = idIndex.get(listingId);
+      const designName = String(item.design ?? "").trim();
+      let listing = listingId ? idIndex.get(listingId) : undefined;
+      if (!listing && designName) {
+        listing = Array.from(idIndex.values()).find((l) => l.designName.toLowerCase() === designName.toLowerCase());
+      }
       if (!listing) continue;
 
       const title =
