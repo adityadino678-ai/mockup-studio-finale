@@ -462,11 +462,16 @@ mockups and finally a live product.
   fixes each miss.
   - **Send and Publish are two separate, confirm-gated actions.** *Send* creates
     the product draft if this listing has none (the same path
-    `confirmPrintifyProduct` uses), uploads the listing's selected renders
-    through `/api/printify/mockups`, and applies the mockup SELECTION through
-    the companion extension (one click) or the clipboard/bookmarklet bridge
-    (only a printify.com tab can write it). It then STOPS at `updated`: the
-    product is updated in Printify and still unpublished. *Publish* is a
+    `confirmPrintifyProduct` uses), uploads the active listing's selected
+    renders through `/api/printify/mockups`, and then uploads every OTHER
+    batch listing that already has a Printify product, so one payload carries
+    the mockup SELECTION for the whole batch (exactly like Listing images'
+    Send). A listing with no product, no current render, or a partial render
+    set is skipped with its reason in the step and a toast - never sent a
+    shorter selection. The payload is applied through the companion extension
+    (one click) or the clipboard/bookmarklet bridge (only a printify.com tab
+    can write it). It then STOPS at `updated`: the products are updated in
+    Printify and still unpublished. *Publish* is a
     second, explicit click on **Publish now**, which calls
     `POST /api/printify/publish` with `{confirm:true, productId, shopId}` and is
     only reachable after the selection was applied, so the shop cannot receive
@@ -476,9 +481,10 @@ mockups and finally a live product.
     shows the upstream message verbatim; a publish is never retried
     automatically, because publishing an already-published product errors
     upstream. The page never publishes a product this app did not create or
-    link for that listing. E2E test 33 drives the whole path: the extension
-    applies the selection, the run stops at `updated` with zero publish calls,
-    and only **Publish now** makes the one publish call.
+    link for that listing. E2E test 33 drives the whole path with TWO listings
+    and only the first tab open: one payload applies both products, the run
+    stops at `updated` with zero publish calls, and only **Publish now** makes
+    the one publish call (for the open listing).
   - **The saved shop is checked BEFORE the button.** The page reads
     `printifyShopId`, lists shops through `/api/printify/shops`, and blocks a
     run while the list is still loading or when no shop is selected, the saved

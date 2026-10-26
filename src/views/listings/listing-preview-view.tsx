@@ -83,6 +83,7 @@ import {
   buildBridgePayload,
   countBridgeImages,
   type PrintifyBridgePayload,
+  type PrintifyBridgeProduct,
   type PrintifyMockupUpload,
 } from "@/lib/printify/mockup-bridge";
 import { buildCatalogueIndex, resolveVariantIds } from "@/lib/printify/variants";
@@ -333,12 +334,12 @@ function planSteps(params: {
     },
     {
       key: "images",
-      title: "Upload this listing's images",
+      title: "Upload every design's images",
       status: "pending",
       detail:
         params.imageCount === 0
           ? "No selected image has a current render yet."
-          : `${params.imageCount} image${params.imageCount === 1 ? "" : "s"} in listing order — the first becomes the main image.${
+          : `${params.imageCount} image${params.imageCount === 1 ? "" : "s"} for this listing, plus every other listing that already has a Printify product — in listing order, so the first is the main image.${
               missing > 0
                 ? ` ${missing} selected image${missing === 1 ? " has" : "s have"} no current render and will not be uploaded; a shorter set can change which image is the main one, so render them first if they matter.`
                 : ""
@@ -349,7 +350,7 @@ function planSteps(params: {
       title: "Select the mockups in Printify",
       status: "pending",
       detail:
-        "Printify only exposes this step to its own web session. The companion extension does it in one click; the clipboard bookmarklet is the fallback. Either way the run pauses here until it is applied.",
+        "One payload for the whole batch. Printify only exposes this step to its own web session, so the companion extension applies every product in one click; the clipboard bookmarklet is the fallback. The run pauses here until it is applied.",
     },
     {
       key: "publish",
@@ -1304,34 +1305,96 @@ export function ListingPreviewView() {
       // Keep the stale-id guard alive for the next chunk even if a response
       // omitted the title; never replace a known title with `undefined`.
       productTitle = uploaded.title ?? productTitle;
-      patchStep("images", {
-        status: "done",
-        detail: `${uploaded.uploads.length} image${
-          uploaded.uploads.length === 1 ? "" : "s"
-        } uploaded for product ${productId} (shop ${uploaded.shopId}).`,
-      });
-
-      // (c) hand the selection step to the bookmarklet. The run PAUSES: the
-      // payload is on the clipboard, and the user must apply it on printify.com.
-      const payload = buildBridgePayload([
+      // (c) The mockup selection is ONE payload for the whole batch, exactly
+      // like Listing images' Send. The active listing was uploaded above; every
+      // other listing that already has a Printify product is uploaded here too,
+      // so one extension click applies every design's mockups. A listing with
+      // no product, no current render, or a partial render set is skipped with
+      // its reason - it is never sent a shorter selection.
+      const prepared: PrintifyBridgeProduct[] = [
         {
           shopId: uploaded.shopId,
           productId,
           productTitle: productTitle ?? copy.title,
           uploads: uploaded.uploads,
         },
-      ]);
+      ];
+      const skipped: string[] = [];
+      const included = new Set<string>([productId]);
+      for (const other of listings) {
+        if (other.listingId === listing.listingId) continue;
+        const linkedOther = productsByListing.get(other.listingId);
+        if (!linkedOther?.productId) {
+          skipped.push(`${other.designName}: create the Printify product first`);
+          continue;
+        }
+        if (included.has(linkedOther.productId)) continue;
+        const otherSelected = selectionFor(other);
+        const otherImages = otherSelected.filter((image) => Boolean(currentEntry(image)));
+        if (otherImages.length === 0) {
+          skipped.push(`${other.designName}: no current renders selected`);
+          continue;
+        }
+        if (otherImages.length < otherSelected.length) {
+          skipped.push(
+            `${other.designName}: render all ${otherSelected.length} selected images first`,
+          );
+          continue;
+        }
+        try {
+          const otherUploaded = await uploadListingImages({
+            listing: other,
+            images: otherImages,
+            productId: linkedOther.productId,
+            shopId: linkedOther.shopId,
+            expectedTitle: linkedOther.title,
+          });
+          included.add(linkedOther.productId);
+          prepared.push({
+            shopId: otherUploaded.shopId,
+            productId: linkedOther.productId,
+            productTitle: otherUploaded.title ?? linkedOther.title ?? other.designName,
+            uploads: otherUploaded.uploads,
+          });
+        } catch (error) {
+          skipped.push(
+            `${other.designName}: ${error instanceof Error ? error.message : "upload failed"}`,
+          );
+        }
+      }
+
+      const payload = buildBridgePayload(prepared);
       const json = bridgePayloadJson(payload);
+      const imageCount = countBridgeImages(payload);
+      patchStep("images", {
+        status: "done",
+        detail: `${imageCount} image${imageCount === 1 ? "" : "s"} uploaded across ${
+          prepared.length
+        } product${prepared.length === 1 ? "" : "s"}.${
+          skipped.length > 0
+            ? ` Skipped: ${skipped.slice(0, 3).join("; ")}${
+                skipped.length > 3 ? ` and ${skipped.length - 3} more` : ""
+              }.`
+            : ""
+        }`,
+      });
       patchStep("mockups", {
         status: "waiting",
-        detail: `Payload ready — ${countBridgeImages(payload)} image${
-          countBridgeImages(payload) === 1 ? "" : "s"
-        } for product ${productId}. ${
+        detail: `Payload ready — ${imageCount} image${
+          imageCount === 1 ? "" : "s"
+        } for ${prepared.length} product${prepared.length === 1 ? "" : "s"}. ${
           extensionReady
             ? "Apply it with the extension (one click), then continue."
             : "Run the bookmarklet, then continue."
         }`,
       });
+      if (skipped.length > 0) {
+        toast.warning(
+          `${skipped.length} listing${skipped.length === 1 ? "" : "s"} skipped: ${skipped
+            .slice(0, 2)
+            .join("; ")}${skipped.length > 2 ? "…" : ""}`,
+        );
+      }
       setPipeline((prev) =>
         prev
           ? {

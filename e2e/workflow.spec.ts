@@ -2021,9 +2021,28 @@ test.describe("core workflow", () => {
   }) => {
     await seedLibrary(page);
     await gotoApp(page, "/printify-studio");
-    await page.getByRole("checkbox", { name: "Select design-a" }).click();
-    await expect(page.getByText("1 design selected")).toBeVisible();
+    // TWO designs in the batch: the preview's Send must cover both, not only
+    // the tab that happens to be open.
+    for (const name of ["design-a", "design-b"]) {
+      await page.getByRole("checkbox", { name: `Select ${name}` }).check();
+    }
+    await expect(page.getByText("2 designs selected")).toBeVisible();
     await page.waitForTimeout(900);
+
+    const designIds = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      return {
+        a: designs.find((d) => d.name === "design-a")!.id,
+        b: designs.find((d) => d.name === "design-b")!.id,
+      };
+    });
 
     // A current render for every mockup, through the real Save/render path.
     await gotoApp(page, "/mockups");
@@ -2035,7 +2054,22 @@ test.describe("core workflow", () => {
     await page.getByRole("button", { name: /^Save area$/ }).click();
     await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /Render on every mockup/ }).click();
-    await expect(page.getByText(/Rendered on \d+ mockup/)).toBeVisible({ timeout: 60_000 });
+    // Poll the stored renders instead of the toast: the toast is shared by
+    // both designs, so it cannot prove which one finished.
+    await expect
+      .poll(() => listingRenderCount(page, designIds.a), { timeout: 60_000 })
+      .toBe(2);
+
+    // Design B needs its own area and its own complete render set too, or the
+    // batch correctly refuses to send a shorter selection for it.
+    await page.getByRole("button", { name: "design-b", exact: true }).click();
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
+    await page.getByRole("button", { name: /Render on every mockup/ }).click();
+    await expect
+      .poll(() => listingRenderCount(page, designIds.b), { timeout: 60_000 })
+      .toBe(2);
 
     // Copy is what makes Send available; it is not what this test is about.
     await setStudioSession(page, { descriptionTemplate: "A soft, everyday tee." });
@@ -2053,6 +2087,9 @@ test.describe("core workflow", () => {
           payload: { products: Array<{ productId: string }> };
           requestId: string;
         };
+        // What the batch actually sent, for the assertion below.
+        (window as unknown as { __appliedProductIds?: string[] }).__appliedProductIds =
+          detail.payload.products.map((product) => product.productId);
         window.dispatchEvent(
           new CustomEvent("mockup-studio:apply-result", {
             detail: {
@@ -2069,8 +2106,11 @@ test.describe("core workflow", () => {
     });
 
     let publishCalls = 0;
+    const publishProductIds: string[] = [];
     await page.route("**/api/printify/publish", async (route) => {
       publishCalls += 1;
+      const body = JSON.parse(route.request().postData() ?? "{}") as { productId?: string };
+      if (body.productId) publishProductIds.push(body.productId);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -2101,6 +2141,7 @@ test.describe("core workflow", () => {
         }),
       });
     });
+    const uploadedProductIds: string[] = [];
     await page.route("**/api/printify/mockups", async (route) => {
       const body = JSON.parse(route.request().postData() ?? "{}") as {
         productId?: string;
@@ -2108,6 +2149,7 @@ test.describe("core workflow", () => {
         images?: unknown[];
       };
       const count = Array.isArray(body.images) ? body.images.length : 0;
+      uploadedProductIds.push(body.productId ?? "prod-1");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -2127,18 +2169,7 @@ test.describe("core workflow", () => {
 
     // A linked product and a saved shop: Send is enabled without creating
     // anything or loading variants.
-    const designId = await page.evaluate(async () => {
-      const db: IDBDatabase = await new Promise((res) => {
-        const r = indexedDB.open("mockup-studio");
-        r.onsuccess = () => res(r.result);
-      });
-      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
-        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
-        rq.onsuccess = () => res(rq.result);
-      });
-      return designs.find((d) => d.name === "design-a")!.id;
-    });
-    await page.evaluate(async (id) => {
+    await page.evaluate(async ({ a, b }) => {
       const db: IDBDatabase = await new Promise((res) => {
         const r = indexedDB.open("mockup-studio");
         r.onsuccess = () => res(r.result);
@@ -2161,11 +2192,13 @@ test.describe("core workflow", () => {
           key: "integrations",
           value: { printifyKey: "pp_test_key_not_real", printifyShopId: 222 },
         });
+        // BOTH listings already have their own Printify product, which is the
+        // state the batch payload must cover in one run.
         tx.objectStore("settings").put({
           key: "printifyStudio:results",
           value: [
             {
-              designId: id,
+              designId: a,
               title: "design-a",
               designName: "design-a",
               status: "created",
@@ -2173,22 +2206,32 @@ test.describe("core workflow", () => {
               createdAt: Date.now(),
               shopId: 222,
             },
+            {
+              designId: b,
+              title: "design-b",
+              designName: "design-b",
+              status: "created",
+              remoteProductId: "prod-2",
+              createdAt: Date.now() + 1,
+              shopId: 222,
+            },
           ],
         });
         for (const draft of drafts) {
-          if (draft.designId !== id) continue;
+          if (draft.designId !== a && draft.designId !== b) continue;
+          const name = draft.designId === a ? "design-a" : "design-b";
           tx.objectStore("listingDrafts").put({
             ...draft,
             title:
               typeof draft.title === "string" && draft.title.trim()
                 ? draft.title
-                : "design-a tee",
+                : `${name} tee`,
             description: "A soft, everyday tee.",
             updatedAt: Date.now(),
           });
         }
       });
-    }, designId);
+    }, designIds);
 
     await gotoApp(page, "/listing-preview");
     // The page names the extension instead of only offering the bookmarklet.
@@ -2209,16 +2252,51 @@ test.describe("core workflow", () => {
     await expect(page.getByText(/Updated in Printify — still unpublished/)).toBeVisible({
       timeout: 30_000,
     });
+    // ONE press covered BOTH designs: both products were uploaded and both
+    // were in the single apply payload, even though only design-a's tab was
+    // open. Publish is still untouched.
+    expect(uploadedProductIds).toEqual(["prod-1", "prod-2"]);
+    const appliedProductIds = await page.evaluate(
+      () =>
+        (window as unknown as { __appliedProductIds?: string[] }).__appliedProductIds ?? [],
+    );
+    expect(appliedProductIds).toEqual(["prod-1", "prod-2"]);
     expect(publishCalls).toBe(0);
 
-    // Publishing is the separate, explicit click.
+    // Publishing is the separate, explicit click, and it publishes the open
+    // listing only - applying the batch does not publish the others.
     await page.getByRole("button", { name: "Publish now" }).click();
     await expect(page.getByText(/Published — live on your shop/).first()).toBeVisible({
       timeout: 30_000,
     });
     expect(publishCalls).toBe(1);
+    expect(publishProductIds).toEqual(["prod-1"]);
   });
 });
+
+/**
+ * How many saved listing renders the stored session has for one design.
+ *
+ * The render toast is shared by every design, so the test needs the store to
+ * tell design A's renders from design B's.
+ */
+async function listingRenderCount(page: Page, designId: string) {
+  return page.evaluate(async (id) => {
+    const db: IDBDatabase = await new Promise((res) => {
+      const r = indexedDB.open("mockup-studio");
+      r.onsuccess = () => res(r.result);
+    });
+    const row = await new Promise<{ value?: Record<string, unknown> } | undefined>((res) => {
+      const rq = db
+        .transaction(["settings"], "readonly")
+        .objectStore("settings")
+        .get("printifyStudio:session");
+      rq.onsuccess = () => res(rq.result);
+    });
+    const renders = (row?.value?.listingRenders ?? {}) as Record<string, unknown>;
+    return Object.keys(renders).filter((key) => key.startsWith(`${id}:`)).length;
+  }, designId);
+}
 
 /**
  * Sets the Printify Studio's stored session directly.
