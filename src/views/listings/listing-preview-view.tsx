@@ -6,7 +6,9 @@
 // The third listing page, and the only one that talks to Printify's shop. It
 // draws each listing the way Printify's "My products" screen does - a big main
 // image, the remaining images under it, and the copy beside them - and then
-// offers ONE button that takes that listing all the way live.
+// offers the two actions that are actually different: SEND (create the draft,
+// upload the images, apply the mockup selection, and stop with the product
+// updated and unpublished) and PUBLISH (a separate, explicit click).
 //
 // Three things this page refuses to do, because they are how publishing goes
 // wrong:
@@ -27,10 +29,10 @@
 //
 // The step that cannot run from a server is the mockup selection: Printify
 // only exposes it to its own web session, so the pipeline pauses there with
-// the clipboard payload and the bookmarklet, exactly like Listing images. The
-// publish step waits for the user to say the selection landed - publishing
-// early would put Printify's generated mockups on the shop instead of the
-// ones this page shows.
+// the clipboard payload, the companion extension (one click) and the
+// bookmarklet (fallback), exactly like Listing images. The run NEVER chains
+// into a publish: applying the selection ends at "updated in Printify", and
+// publishing is a second, deliberate click.
 //
 // The session is read LIVE (the Studio and the agent write the same blob) and
 // this page never writes it: browsing a preview must not change the batch.
@@ -80,6 +82,7 @@ import {
   bridgePayloadJson,
   buildBridgePayload,
   countBridgeImages,
+  type PrintifyBridgePayload,
   type PrintifyMockupUpload,
 } from "@/lib/printify/mockup-bridge";
 import { buildCatalogueIndex, resolveVariantIds } from "@/lib/printify/variants";
@@ -112,6 +115,7 @@ import {
   Images,
   Loader2,
   Rocket,
+  Sparkles,
 } from "lucide-react";
 
 /** Printify's own limit on enabled variants per product. */
@@ -234,7 +238,17 @@ interface PipelineStep {
   detail: string;
 }
 
-type PipelinePhase = "confirm" | "running" | "awaiting-mockups" | "done" | "failed";
+type PipelinePhase =
+  | "confirm"
+  | "running"
+  | "awaiting-mockups"
+  /** The product is updated in Printify and still unpublished. */
+  | "updated"
+  | "done"
+  | "failed";
+
+/** What the user asked this run to do. */
+type PipelineIntent = "send" | "publish";
 
 interface PipelineState {
   listingId: string;
@@ -245,6 +259,8 @@ interface PipelineState {
   createdHere: boolean;
   steps: PipelineStep[];
   phase: PipelinePhase;
+  /** Send/update only, or continue to the separate publish click. */
+  intent: PipelineIntent;
   /** Printify's own message, verbatim, when the run stopped. */
   error?: string;
   /** The upstream code (8254 = the shop is not connected to a sales channel). */
@@ -255,6 +271,15 @@ interface PipelineState {
   errorConnectUrl?: string;
   /** The clipboard payload built in the mockup-selection step. */
   payload?: string;
+  /** The same payload as an object, for the extension's one-click apply. */
+  payloadData?: PrintifyBridgePayload;
+}
+
+/** The extension's per-product answer to one-click apply. */
+interface AppliedState {
+  done: number;
+  total: number;
+  failures: string[];
 }
 
 /** A listing this session has published, so the page stops asking. */
@@ -294,6 +319,7 @@ function planSteps(params: {
   linked?: LinkedProduct;
   imageCount: number;
   selectedCount: number;
+  intent: PipelineIntent;
 }): PipelineStep[] {
   const missing = params.selectedCount - params.imageCount;
   return [
@@ -302,7 +328,7 @@ function planSteps(params: {
       title: "Create the Printify product draft",
       status: params.linked ? "skipped" : "pending",
       detail: params.linked
-        ? `Already created (${params.linked.productId}) — this step is skipped, and the existing product is the only one that can be published.`
+        ? `Already created (${params.linked.productId}) — this step is skipped, and the existing product is the only one that can be updated.`
         : "This listing's title, description, tags, price and print area, through the same creation path the agent's Create product card uses. The product is an UNPUBLISHED draft.",
     },
     {
@@ -323,14 +349,16 @@ function planSteps(params: {
       title: "Select the mockups in Printify",
       status: "pending",
       detail:
-        "Printify only exposes this step to its own web session, so it runs through the clipboard bookmarklet in your browser. The run pauses here until you say it is applied.",
+        "Printify only exposes this step to its own web session. The companion extension does it in one click; the clipboard bookmarklet is the fallback. Either way the run pauses here until it is applied.",
     },
     {
       key: "publish",
       title: "Publish the product",
-      status: "pending",
+      status: params.intent === "send" ? "skipped" : "pending",
       detail:
-        "POST /api/printify/publish with the documented booleans body. This makes the product live on your shop, and it is never retried automatically.",
+        params.intent === "send"
+          ? "NOT run. Sending stops with the product updated in Printify and unpublished. Publishing is a separate, explicit click."
+          : "POST /api/printify/publish with the documented booleans body. This makes the product live on your shop, and it is never retried automatically.",
     },
   ];
 }
@@ -933,6 +961,88 @@ export function ListingPreviewView() {
   // pre-render state. One run at a time is what keeps the publish POST single.
   const inFlight = React.useRef(false);
 
+  // --- the companion extension ----------------------------------------------
+  // It only ever applies the mockup SELECTION with the user's own Printify
+  // session. It has no publish call, and this page never turns its answer into
+  // one: a successful apply ends at "updated in Printify", unpublished.
+  const [extensionReady, setExtensionReady] = React.useState(false);
+  const [extensionApplying, setExtensionApplying] = React.useState(false);
+  const [applied, setApplied] = React.useState<AppliedState | null>(null);
+  const applyRequestId = React.useRef<string | null>(null);
+  /** Lets the listener (created once) call the current mark function. */
+  const markAppliedRef = React.useRef<() => void>(() => {});
+
+  /**
+   * Detect the companion extension.
+   *
+   * Its content script marks the document and announces itself once, so both
+   * the first render and a later load (the user installed it and reloaded) are
+   * covered. Without it the dialog keeps the clipboard + bookmarklet steps.
+   */
+  React.useEffect(() => {
+    const mark = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.documentElement.getAttribute("data-mockup-studio-ext") === "1"
+      ) {
+        setExtensionReady(true);
+      }
+    };
+    mark();
+    const onReady = () => setExtensionReady(true);
+    window.addEventListener("mockup-studio:extension-ready", onReady as EventListener);
+    return () =>
+      window.removeEventListener("mockup-studio:extension-ready", onReady as EventListener);
+  }, []);
+
+  /** Listen for the extension's answer to a one-click apply. */
+  React.useEffect(() => {
+    type ApplyResultDetail = {
+      requestId?: string;
+      ok?: boolean;
+      results?: Array<{ id: string; ok: boolean; error?: string }>;
+    };
+    const onResult = (event: Event) => {
+      const detail = (event as CustomEvent).detail as ApplyResultDetail | undefined;
+      if (!detail || detail.requestId !== applyRequestId.current) return;
+      setExtensionApplying(false);
+      const results = detail.results ?? [];
+      const done = results.filter((result) => result.ok).length;
+      const failures = results
+        .filter((result) => !result.ok)
+        .map((result) => `${result.id}: ${result.error ?? "not applied"}`);
+      setApplied({ done, total: results.length, failures });
+      if (results.length > 0 && failures.length === 0) {
+        toast.success(`Applied ${done} product${results.length === 1 ? "" : "s"} in Printify.`);
+        // Updated in Printify only. Publishing stays a separate click.
+        markAppliedRef.current();
+      } else if (failures.length > 0) {
+        // Never advance on a partial apply: the product would keep some of
+        // Printify's generated mockups, and publishing it would put them live.
+        toast.warning(
+          `Applied ${done} of ${results.length}. ${failures.length} failed - see the dialog.`,
+        );
+      } else {
+        toast.error("The extension could not apply the images.");
+      }
+    };
+    const onError = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { requestId?: string; error?: string }
+        | undefined;
+      if (!detail || detail.requestId !== applyRequestId.current) return;
+      setExtensionApplying(false);
+      setApplied(null);
+      toast.error(detail.error ?? "The extension could not apply the images.");
+    };
+    window.addEventListener("mockup-studio:apply-result", onResult as EventListener);
+    window.addEventListener("mockup-studio:apply-error", onError as EventListener);
+    return () => {
+      window.removeEventListener("mockup-studio:apply-result", onResult as EventListener);
+      window.removeEventListener("mockup-studio:apply-error", onError as EventListener);
+    };
+  }, []);
+
   const patchStep = (key: StepKey, patch: Partial<PipelineStep>) => {
     setPipeline((prev) =>
       prev
@@ -1063,7 +1173,7 @@ export function ListingPreviewView() {
     return { uploads, shopId, title };
   };
 
-  const openConfirm = () => {
+  const openConfirm = (intent: PipelineIntent) => {
     if (!activeListing || publishing || inFlight.current) return;
     if (published[activeListing.listingId]) return;
     if (blockersFor(activeListing).length > 0) return;
@@ -1071,6 +1181,9 @@ export function ListingPreviewView() {
     const selected = selectionFor(listing);
     const current = selected.filter((image) => Boolean(currentEntry(image)));
     const linked = productsByListing.get(listing.listingId);
+    setApplied(null);
+    setExtensionApplying(false);
+    applyRequestId.current = null;
     setPipeline({
       listingId: listing.listingId,
       designName: listing.designName,
@@ -1080,15 +1193,17 @@ export function ListingPreviewView() {
         linked,
         imageCount: current.length,
         selectedCount: selected.length,
+        intent,
       }),
       phase: "confirm",
+      intent,
     });
   };
 
   const closePipeline = () => {
     // A run in flight owns the dialog: closing it would hide a failure the
     // user has to see (and the publish step must never happen unwatched).
-    if (publishing) return;
+    if (publishing || extensionApplying) return;
     setPipeline(null);
   };
 
@@ -1211,7 +1326,11 @@ export function ListingPreviewView() {
         status: "waiting",
         detail: `Payload ready — ${countBridgeImages(payload)} image${
           countBridgeImages(payload) === 1 ? "" : "s"
-        } for product ${productId}. Run the bookmarklet, then continue.`,
+        } for product ${productId}. ${
+          extensionReady
+            ? "Apply it with the extension (one click), then continue."
+            : "Run the bookmarklet, then continue."
+        }`,
       });
       setPipeline((prev) =>
         prev
@@ -1221,12 +1340,17 @@ export function ListingPreviewView() {
               productId,
               createdHere,
               payload: json,
+              payloadData: payload,
             }
           : prev,
       );
       try {
         await navigator.clipboard.writeText(json);
-        toast.success("Mockup payload copied. Run the bookmarklet on Printify, then continue.");
+        toast.success(
+          extensionReady
+            ? "Mockups uploaded. Apply them in Printify with the extension, then continue."
+            : "Mockup payload copied. Run the bookmarklet on Printify, then continue.",
+        );
       } catch {
         toast.message("Mockup payload ready. Copy it from the dialog.");
       }
@@ -1239,14 +1363,74 @@ export function ListingPreviewView() {
   };
 
   /**
-   * Step (d): the only place in this page that publishes.
+   * Ends the mockup step: the product is UPDATED in Printify, unpublished.
    *
-   * The product id is re-checked against this listing's own link right before
-   * the request. A confirmation dialog that outlived a changed session must
-   * not be able to publish something else.
+   * This is the only thing a successful extension apply does. It never calls
+   * the publish endpoint - publishing is `publishNow`, a separate click.
    */
-  const continueToPublish = async () => {
-    if (!pipeline || pipeline.phase !== "awaiting-mockups" || publishing || inFlight.current) return;
+  const markMockupsApplied = (detail?: string) => {
+    if (!pipeline || pipeline.phase !== "awaiting-mockups") return;
+    const { listingId, productId, createdHere } = pipeline;
+    const linked = createdHere ? productId : productsByListing.get(listingId)?.productId;
+    if (!productId || linked !== productId) {
+      failRun(
+        new Error(
+          "This Printify product is no longer linked to this listing, so the update is not recorded.",
+        ),
+      );
+      return;
+    }
+    patchStep("mockups", {
+      status: "done",
+      detail: detail ?? "Mockup selection applied in Printify.",
+    });
+    patchStep("publish", {
+      status: "pending",
+      detail:
+        "Not run. The product is updated in Printify and still unpublished — publishing is the separate button below.",
+    });
+    setPipeline((prev) => (prev ? { ...prev, phase: "updated" } : prev));
+    toast.success("Updated in Printify. The product is still unpublished.");
+  };
+
+  /** Hands the payload to the extension: one click, in the background. */
+  const applyWithExtension = () => {
+    if (!pipeline || pipeline.phase !== "awaiting-mockups") return;
+    if (!extensionReady || !pipeline.payloadData) {
+      toast.error(
+        "The Printify bridge extension is not installed yet. Use the bookmarklet below.",
+      );
+      return;
+    }
+    const requestId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `req-${Date.now()}`;
+    applyRequestId.current = requestId;
+    setExtensionApplying(true);
+    setApplied(null);
+    window.dispatchEvent(
+      new CustomEvent("mockup-studio:apply-request", {
+        detail: { payload: pipeline.payloadData, requestId },
+      }),
+    );
+  };
+
+  // The result listener is created once; keep its mark function current.
+  React.useEffect(() => {
+    markAppliedRef.current = markMockupsApplied;
+  });
+
+  /**
+   * The ONLY place in this page that publishes.
+   *
+   * It is reachable only from the `updated` phase, i.e. after the mockup
+   * selection has been applied, so the shop cannot receive Printify's
+   * generated mockups. The product id is re-checked against this listing's own
+   * link right before the request.
+   */
+  const publishNow = async () => {
+    if (!pipeline || pipeline.phase !== "updated" || publishing || inFlight.current) return;
     const { listingId, productId, createdHere } = pipeline;
     const linked = createdHere
       ? productId
@@ -1260,7 +1444,6 @@ export function ListingPreviewView() {
           "This Printify product is no longer linked to this listing, so it will not be published.",
         );
       }
-      patchStep("mockups", { status: "done", detail: "Payload applied in Printify." });
       patchStep("publish", { status: "running", detail: `Publishing ${productId}…` });
 
       const response = await authedFetch("/api/printify/publish", {
@@ -1365,8 +1548,9 @@ export function ListingPreviewView() {
               </h2>
               <p className="text-[12px] text-ink-muted">
                 Each tab is one listing in the batch. The left is what a shopper sees; the right is
-                what Printify receives. Publishing runs one confirmed sequence and stops at the
-                first failure — nothing is retried behind your back.
+                what Printify receives. <strong>Send</strong> updates the product in Printify and
+                stops unpublished; <strong>Publish</strong> is a separate, explicit click. A run
+                stops at the first failure and nothing is retried behind your back.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1756,31 +1940,45 @@ export function ListingPreviewView() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
-                      <Rocket className="h-4 w-4 text-forest" /> Publish to Printify
+                      <Rocket className="h-4 w-4 text-forest" /> Send to Printify
                     </h2>
                     <p className="text-[12px] text-ink-muted">
-                      One confirmed run: create the draft if this listing has none, upload its
-                      images, hand the mockup selection to the bookmarklet, then publish. The run
-                      stops at the first failure and never retries.
+                      Create the draft if this listing has none, upload its images, and apply the
+                      mockup selection. The run stops with the product updated in Printify — it
+                      never publishes. Publishing is a separate, explicit click.
+                    </p>
+                    <p className="mt-1 text-[11px] text-ink-muted">
+                      {extensionReady
+                        ? "Printify bridge extension detected — the mockup step is one click."
+                        : "Printify bridge extension not detected — the dialog offers the bookmarklet instead."}
                     </p>
                   </div>
-                  <Button
-                    onClick={openConfirm}
-                    disabled={publishing || blockers.length > 0 || Boolean(publishedState)}
-                  >
-                    {publishing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Rocket className="h-4 w-4" />
-                    )}
-                    Publish to Printify
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      onClick={() => openConfirm("send")}
+                      disabled={publishing || blockers.length > 0 || Boolean(publishedState)}
+                    >
+                      {publishing ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      Send to Printify
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => openConfirm("publish")}
+                      disabled={publishing || blockers.length > 0 || Boolean(publishedState)}
+                    >
+                      <Rocket className="h-4 w-4" /> Publish to Printify
+                    </Button>
+                  </div>
                 </div>
 
                 {blockers.length > 0 && (
                   <div className="space-y-1 rounded-md bg-surface-muted px-3 py-2">
                     <p className="text-[12px] font-medium text-ink">
-                      The button stays off until this is true:
+                      Both buttons stay off until this is true:
                     </p>
                     <ul className="space-y-1">
                       {blockers.map((blocker) => (
@@ -1823,7 +2021,7 @@ export function ListingPreviewView() {
         )
       )}
 
-      {/* --- the one dialog: confirm, run, pause for the bookmarklet ------ */}
+      {/* --- the one dialog: confirm, run, apply, then an explicit publish --- */}
       <Dialog open={pipeline !== null} onOpenChange={(open) => (open ? null : closePipeline())}>
         <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
           <DialogHeader>
@@ -1831,18 +2029,26 @@ export function ListingPreviewView() {
               <Rocket className="h-4 w-4 text-forest" />
               {pipeline?.phase === "done"
                 ? "Published"
-                : `Publish ${pipeline?.designName ?? "this listing"}`}
+                : pipeline?.phase === "updated"
+                  ? "Updated in Printify"
+                  : pipeline?.intent === "send"
+                    ? `Send ${pipeline?.designName ?? "this listing"} to Printify`
+                    : `Publish ${pipeline?.designName ?? "this listing"}`}
             </DialogTitle>
             <DialogDescription>
               {pipeline?.phase === "confirm"
-                ? "Four steps, in order. This is the only confirmation — and the publish step is the only thing that makes the product live."
+                ? pipeline?.intent === "send"
+                  ? "Create the draft, upload the images, apply the mockups. The run stops there with the product updated in Printify and unpublished — publishing is never automatic."
+                  : "Four steps, in order. The first three send the listing to Printify; the fourth publishes only when you press the separate publish button."
                 : pipeline?.phase === "awaiting-mockups"
-                  ? "The product exists and its images are uploaded. Printify's selection step only works in its own web session, so the run waits for you."
-                  : pipeline?.phase === "done"
-                    ? "The product is live. Nothing else ran after the publish call."
-                    : pipeline?.phase === "failed"
-                      ? "The run stopped at the step below. Nothing was retried."
-                      : "Running the steps in order…"}
+                  ? "The product exists and its images are uploaded. Printify's selection step only works in its own web session, so the run waits for you — the extension does it in one click, the bookmarklet is the fallback."
+                  : pipeline?.phase === "updated"
+                    ? "The product is updated in Printify and still unpublished. Nothing was published; that is the separate button below."
+                    : pipeline?.phase === "done"
+                      ? "The product is live. Nothing else ran after the publish call."
+                      : pipeline?.phase === "failed"
+                        ? "The run stopped at the step below. Nothing was retried."
+                        : "Running the steps in order…"}
             </DialogDescription>
           </DialogHeader>
 
@@ -1899,17 +2105,67 @@ export function ListingPreviewView() {
 
               {pipeline.phase === "confirm" && (
                 <p className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
-                  Publishing makes this product live on the connected shop. The product is created
-                  as an unpublished draft first, so a failure before the last step leaves nothing
-                  live.
+                  {pipeline.intent === "send"
+                    ? "This run creates the draft, uploads the images and applies the mockups. It does NOT publish: the product stays an unpublished draft in Printify."
+                    : "The product is created as an unpublished draft first. Publishing is the last, separate click, so a failure before it leaves nothing live."}
                 </p>
               )}
 
               {pipeline.phase === "awaiting-mockups" && (
                 <div className="space-y-3 rounded-md border border-border-subtle p-3">
+                  {extensionReady && (
+                    <div className="space-y-1.5 rounded-md border border-forest/40 bg-forest-soft/20 px-3 py-2">
+                      <p className="text-[12px] font-medium text-ink">
+                        {applied ? "Mockups applied" : "Apply in Printify — one click"}
+                      </p>
+                      <p className="text-[11px] text-ink-muted">
+                        {applied
+                          ? `Applied ${applied.done} of ${applied.total} product${
+                              applied.total === 1 ? "" : "s"
+                            }. The extension ran inside your own signed-in Printify session and closed the tab. It does not publish.`
+                          : "The Printify bridge extension opens the product in a background tab, selects these mockups with your own sign-in, and closes it. It does not publish."}
+                      </p>
+                      {applied && applied.failures.length > 0 && (
+                        <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                          {applied.failures.map((line) => (
+                            <p key={line}>{line}</p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          onClick={applyWithExtension}
+                          disabled={extensionApplying || !pipeline.payloadData}
+                        >
+                          {extensionApplying ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="h-3.5 w-3.5" />
+                          )}
+                          {extensionApplying
+                            ? "Applying in Printify"
+                            : applied
+                              ? "Apply again"
+                              : "Apply in Printify"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            pipeline.productId && openPrintifyProduct(pipeline.productId)
+                          }
+                          disabled={!pipeline.productId}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" /> Open the product to check
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-1.5">
                     <p className="text-[12px] font-medium text-ink">
-                      1. Copy the payload
+                      {extensionReady ? "Or use the bookmarklet" : "1. Copy the payload"}
                     </p>
                     <p className="text-[11px] text-ink-muted">
                       It is copied automatically when the browser allows it; otherwise use the
@@ -1928,7 +2184,9 @@ export function ListingPreviewView() {
                   </div>
                   <div className="space-y-1.5">
                     <p className="text-[12px] font-medium text-ink">
-                      2. Apply it in your own Printify session
+                      {extensionReady
+                        ? "2. Run it on the product"
+                        : "2. Apply it in your own Printify session"}
                     </p>
                     <p className="text-[11px] text-ink-muted">
                       Save the bookmarklet once, open{" "}
@@ -1963,8 +2221,23 @@ export function ListingPreviewView() {
                     </div>
                   </div>
                   <p className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
-                    Only continue once the selection is applied. Publishing before that puts
-                    Printify&apos;s generated mockups on the shop instead of the images above.
+                    Continue only once the selection is applied. Continuing records the update in
+                    Printify — it does not publish. Publishing is the separate button after this
+                    step.
+                  </p>
+                </div>
+              )}
+
+              {pipeline.phase === "updated" && (
+                <div className="space-y-1.5 rounded-md bg-sage-soft px-3 py-2 text-[12px] text-forest">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    <Check className="h-3.5 w-3.5" /> Updated in Printify — still unpublished
+                  </p>
+                  <p className="font-mono text-[11px]">{pipeline.productId}</p>
+                  <p className="text-[11px]">
+                    The draft now has this listing&apos;s images and mockup selection. Nothing was
+                    published, so it is not on your shop yet. Check it on Printify, then press
+                    Publish now when you want it live.
                   </p>
                 </div>
               )}
@@ -2029,22 +2302,41 @@ export function ListingPreviewView() {
                       Cancel
                     </Button>
                     <Button size="sm" onClick={() => void startRun()} disabled={publishing}>
-                      <Rocket className="h-3.5 w-3.5" /> Create, upload & publish
+                      <Sparkles className="h-3.5 w-3.5" /> Create & upload
                     </Button>
                   </>
                 ) : pipeline.phase === "awaiting-mockups" ? (
                   <Button
                     size="sm"
-                    onClick={() => void continueToPublish()}
-                    disabled={publishing}
+                    onClick={() => markMockupsApplied()}
+                    disabled={publishing || extensionApplying}
                   >
-                    {publishing ? (
+                    {extensionApplying ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Check className="h-3.5 w-3.5" />
                     )}
-                    The mockups are applied — publish
+                    The mockups are applied — continue
                   </Button>
+                ) : pipeline.phase === "updated" ? (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={closePipeline} disabled={publishing}>
+                      Close
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={pipeline.intent === "publish" ? "default" : "outline"}
+                      onClick={() => void publishNow()}
+                      disabled={publishing}
+                    >
+                      {publishing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Rocket className="h-3.5 w-3.5" />
+                      )}
+                      Publish now
+                    </Button>
+                  </>
                 ) : (
                   <Button size="sm" variant="ghost" onClick={closePipeline} disabled={publishing}>
                     Close

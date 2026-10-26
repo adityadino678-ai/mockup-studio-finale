@@ -2015,6 +2015,209 @@ test.describe("core workflow", () => {
     await expect(page.getByRole("button", { name: "Build products & upload mockups" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Approve all" })).toBeDisabled();
   });
+
+  test("33. preview applies the mockups with the extension and never publishes until asked", async ({
+    page,
+  }) => {
+    await seedLibrary(page);
+    await gotoApp(page, "/printify-studio");
+    await page.getByRole("checkbox", { name: "Select design-a" }).click();
+    await expect(page.getByText("1 design selected")).toBeVisible();
+    await page.waitForTimeout(900);
+
+    // A current render for every mockup, through the real Save/render path.
+    await gotoApp(page, "/mockups");
+    await page.getByRole("button", { name: /^Print areas/ }).click();
+    await page.getByRole("button", { name: "design-a", exact: true }).click();
+    await page.locator("#area-preset").waitFor({ timeout: 30_000 });
+    await page.locator("#area-preset").click();
+    await page.getByRole("option", { name: /Tee · DTG front/ }).click();
+    await page.getByRole("button", { name: /^Save area$/ }).click();
+    await expect(page.getByText(/Print area saved/)).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: /Render on every mockup/ }).click();
+    await expect(page.getByText(/Rendered on \d+ mockup/)).toBeVisible({ timeout: 60_000 });
+
+    // Copy is what makes Send available; it is not what this test is about.
+    await setStudioSession(page, { descriptionTemplate: "A soft, everyday tee." });
+
+    // The extension marks the page before the app hydrates, exactly like its
+    // content script, and answers an apply request with a per-product result.
+    await page.addInitScript(() => {
+      const mark = () => {
+        document.documentElement?.setAttribute("data-mockup-studio-ext", "1");
+      };
+      if (document.documentElement) mark();
+      else document.addEventListener("DOMContentLoaded", mark);
+      window.addEventListener("mockup-studio:apply-request", (event) => {
+        const detail = (event as CustomEvent).detail as {
+          payload: { products: Array<{ productId: string }> };
+          requestId: string;
+        };
+        window.dispatchEvent(
+          new CustomEvent("mockup-studio:apply-result", {
+            detail: {
+              requestId: detail.requestId,
+              ok: true,
+              results: detail.payload.products.map((product) => ({
+                id: product.productId,
+                ok: true,
+              })),
+            },
+          }),
+        );
+      });
+    });
+
+    let publishCalls = 0;
+    await page.route("**/api/printify/publish", async (route) => {
+      publishCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ published: true, productId: "prod-1" }),
+      });
+    });
+    await page.route("**/api/integrations/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ printify: { configured: true } }),
+      });
+    });
+    await page.route("**/api/printify/catalog", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ blueprints: [] }),
+      });
+    });
+    await page.route("**/api/printify/shops", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          configured: true,
+          shops: [{ id: 222, title: "Connected shop", salesChannel: "Etsy", connected: true }],
+        }),
+      });
+    });
+    await page.route("**/api/printify/mockups", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        productId?: string;
+        expectedTitle?: string;
+        images?: unknown[];
+      };
+      const count = Array.isArray(body.images) ? body.images.length : 0;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          shopId: 222,
+          productId: body.productId ?? "prod-1",
+          title: body.expectedTitle ?? "design-a",
+          uploads: Array.from({ length: count }, (_, index) => ({
+            libraryId: `library-${index}`,
+            mockupId: `mockup-${index}`,
+            src: `https://example.com/mockup-${index}.jpg`,
+            filename: `mockup-${index}.jpg`,
+          })),
+        }),
+      });
+    });
+
+    // A linked product and a saved shop: Send is enabled without creating
+    // anything or loading variants.
+    const designId = await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      const designs: Array<{ id: string; name: string }> = await new Promise((res) => {
+        const rq = db.transaction(["designs"], "readonly").objectStore("designs").getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      return designs.find((d) => d.name === "design-a")!.id;
+    });
+    await page.evaluate(async (id) => {
+      const db: IDBDatabase = await new Promise((res) => {
+        const r = indexedDB.open("mockup-studio");
+        r.onsuccess = () => res(r.result);
+      });
+      // A render/save pass has already written a listing draft with empty
+      // copy. The preview reads the draft first, so the description belongs
+      // there - an empty string is not a missing value.
+      const drafts: Array<Record<string, unknown>> = await new Promise((res) => {
+        const rq = db
+          .transaction(["listingDrafts"], "readonly")
+          .objectStore("listingDrafts")
+          .getAll();
+        rq.onsuccess = () => res(rq.result);
+      });
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction(["settings", "listingDrafts"], "readwrite");
+        tx.oncomplete = () => res();
+        tx.onerror = () => rej(tx.error);
+        tx.objectStore("settings").put({
+          key: "integrations",
+          value: { printifyKey: "pp_test_key_not_real", printifyShopId: 222 },
+        });
+        tx.objectStore("settings").put({
+          key: "printifyStudio:results",
+          value: [
+            {
+              designId: id,
+              title: "design-a",
+              designName: "design-a",
+              status: "created",
+              remoteProductId: "prod-1",
+              createdAt: Date.now(),
+              shopId: 222,
+            },
+          ],
+        });
+        for (const draft of drafts) {
+          if (draft.designId !== id) continue;
+          tx.objectStore("listingDrafts").put({
+            ...draft,
+            title:
+              typeof draft.title === "string" && draft.title.trim()
+                ? draft.title
+                : "design-a tee",
+            description: "A soft, everyday tee.",
+            updatedAt: Date.now(),
+          });
+        }
+      });
+    }, designId);
+
+    await gotoApp(page, "/listing-preview");
+    // The page names the extension instead of only offering the bookmarklet.
+    await expect(page.getByText(/Printify bridge extension detected/i)).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.getByRole("button", { name: "Send to Printify" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("button", { name: "Create & upload" }).click();
+
+    // The one-click apply is offered, and it is the extension.
+    const apply = page.getByRole("button", { name: "Apply in Printify" });
+    await expect(apply).toBeVisible({ timeout: 30_000 });
+    await apply.click();
+
+    // The extension's answer ends the run at "updated" - nothing published.
+    await expect(page.getByText(/Updated in Printify — still unpublished/)).toBeVisible({
+      timeout: 30_000,
+    });
+    expect(publishCalls).toBe(0);
+
+    // Publishing is the separate, explicit click.
+    await page.getByRole("button", { name: "Publish now" }).click();
+    await expect(page.getByText(/Published — live on your shop/).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    expect(publishCalls).toBe(1);
+  });
 });
 
 /**

@@ -57,7 +57,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
 npm run test          # 484 unit tests
-npm run test:e2e      # 34 acceptance tests (local dev server)
+npm run test:e2e      # 35 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -274,7 +274,7 @@ place the artwork, create one Printify product per design.
   (`listing-images-view.tsx`, `/listing-images`), **Listing details**
   (`listing-details-view.tsx`, `/listing-details`) and **Listing preview**
   (`listing-preview-view.tsx`, `/listing-preview` — the Printify "My
-  products"-style preview with the confirm-gated Publish button). The engines
+  products"-style preview with separate Send and Publish actions). The engines
   underneath are unchanged: `listing-plan`, `listing-drafts`,
   `listing-render`, `renderComposition`, the send/bookmarklet bridge, and
   `src/lib/server/printify.ts` (+ the new `/api/printify/publish` endpoint
@@ -460,16 +460,25 @@ mockups and finally a live product.
   expanded title, price, description, tag chips, meta rows, and a "What
   Printify gets" checklist that fails honestly and links to the page that
   fixes each miss.
-  - **Publish is one confirm-gated pipeline, reusing the existing engines:**
-    create the product draft if this listing has none (the same path
-    `confirmPrintifyProduct` uses), upload the listing's selected renders
-    through `/api/printify/mockups`, hand the mockup SELECTION step to the
-    clipboard/bookmarklet bridge (only a printify.com tab can write it), then
-    `POST /api/printify/publish` with `{confirm:true, productId, shopId}`. Any
-    failure stops the pipeline and shows the upstream message verbatim; a
-    publish is never retried automatically, because publishing an
-    already-published product errors upstream. The page never publishes a
-    product this app did not create or link for that listing.
+  - **Send and Publish are two separate, confirm-gated actions.** *Send* creates
+    the product draft if this listing has none (the same path
+    `confirmPrintifyProduct` uses), uploads the listing's selected renders
+    through `/api/printify/mockups`, and applies the mockup SELECTION through
+    the companion extension (one click) or the clipboard/bookmarklet bridge
+    (only a printify.com tab can write it). It then STOPS at `updated`: the
+    product is updated in Printify and still unpublished. *Publish* is a
+    second, explicit click on **Publish now**, which calls
+    `POST /api/printify/publish` with `{confirm:true, productId, shopId}` and is
+    only reachable after the selection was applied, so the shop cannot receive
+    Printify's generated mockups. **The extension never publishes** — its only
+    network calls are the layout GET and the `selected-mockups` PUT — and a
+    successful apply never chains into a publish. Any failure stops the run and
+    shows the upstream message verbatim; a publish is never retried
+    automatically, because publishing an already-published product errors
+    upstream. The page never publishes a product this app did not create or
+    link for that listing. E2E test 33 drives the whole path: the extension
+    applies the selection, the run stops at `updated` with zero publish calls,
+    and only **Publish now** makes the one publish call.
   - **The saved shop is checked BEFORE the button.** The page reads
     `printifyShopId`, lists shops through `/api/printify/shops`, and blocks a
     run while the list is still loading or when no shop is selected, the saved
@@ -529,6 +538,11 @@ mockups and finally a live product.
   extension the copy-again/text/bookmarklet fallback stays available; both paths
   use only the user's printify.com session — no token ever leaves
   printify.com. `extension/protocol.md` is the exact message contract.
+  **Listing preview uses the same detection and apply path** (`extension-ready`
+  marker/listener, `apply-request`, `apply-result`/`apply-error`), so the
+  extension is offered there too instead of only the bookmarklet. Its apply
+  step ends at "updated in Printify" and never publishes; only a separate
+  **Publish now** click calls `/api/printify/publish`.
 - **`/printify-bookmarklet`** is the install page. It is intentionally outside
   the sidebar: it is a utility page opened from the Send dialog, not another
   work surface.
