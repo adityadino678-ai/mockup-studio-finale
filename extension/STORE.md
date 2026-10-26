@@ -88,8 +88,14 @@ Typical review time is a few days for a first submission.
 >
 > **Host permission `https://printify.com/*` and `https://*.printify.com/*`** —
 > the injected code must make same-origin requests to Printify's own endpoints
-> with the user's Printify session cookies. Printify is the only third-party site
-> the extension touches, and it is the site the user asked it to work on.
+> with the user's Printify session cookies. Printify is the site the user asked it
+> to work on.
+>
+> **Host permission `https://etsy.com/*` and `https://*.etsy.com/*`** — only used
+> for the optional Etsy research fallback: when the app has no Etsy API key, the
+> extension opens the public Etsy search page in a background tab and reads the
+> listing titles and prices that page displayed. It uses the user's own Etsy
+> session, sends no Etsy credentials anywhere, and cannot read listing tags.
 >
 > **Host permissions on `mockup-studio.adityadino678.workers.dev`,
 > `http://localhost/*` and `http://127.0.0.1/*`** — these are where Mockup Studio
@@ -115,6 +121,10 @@ in plain words:
 - The image list (product ids, mockup ids, image URLs, file names, titles) is
   sent only to `printify.com`, only because the user pressed the button, and is
   not kept after that run.
+- An Etsy query is read only from `etsy.com` in the user's own browser, only when
+  the user asks the agent for research, and is not kept after that run. The cards
+  it reads are returned to the app page, not to any server of the extension's
+  own.
 - No analytics, no advertising, no tracking, no third parties, no server of the
   extension's own.
 
@@ -130,7 +140,10 @@ and reference it in the store listing.
 - **No credentials, ever.** The extension cannot read the app's API key: it is
   held in Mockup Studio's browser-local storage and sent only to Mockup Studio's
   server, never to the extension.
-- **Single purpose:** apply mockups to a Printify product.
+- **Single purpose:** help Mockup Studio finish a listing — apply mockups to a
+  Printify product, and (only when the app has no Etsy API key) read the public
+  Etsy search page for research. Both actions are user-initiated and run in the
+  user's own browser session.
 - **No obfuscation, no minification** in the shipped files (the repo versions
   are already readable; keep them that way — reviewers can and do read them).
 

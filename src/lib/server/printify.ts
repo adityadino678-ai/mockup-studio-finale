@@ -232,6 +232,26 @@ export interface CreatePrintifyProductInput {
   shopId?: number;
 }
 
+/**
+ * A partial update of an existing product.
+ *
+ * Printify's own contract: "A product can be updated partially or as a whole
+ * document. When updating variants, all variants must be present in the
+ * request." This type only carries the fields the Listing preview owns - the
+ * print areas and artwork are deliberately absent, so an update can never
+ * reprint a product by accident.
+ */
+export interface UpdatePrintifyProductInput {
+  productId: string;
+  /** Preferred shop; the product's real owner is still resolved first. */
+  shopId?: number;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  /** Price in cents applied to every existing variant. */
+  price?: number;
+}
+
 /** One artwork group: the variants it prints on, and where it sits. */
 export interface PrintifyPrintAreaGroup {
   /** The variants this artwork is printed on. */
@@ -631,6 +651,67 @@ export function createPrintifyClient(explicitKey?: string) {
         method: "POST",
         body: JSON.stringify(body),
       });
+    },
+
+    /**
+     * PUT /shops/{shop_id}/products/{product_id}.json — a PARTIAL update.
+     *
+     * The listing preview owns the copy and the price, not the artwork, so this
+     * sends only title/description/tags and (when asked) the variants with the
+     * new price. It never sends `print_areas`, so an update cannot move or
+     * replace the printed artwork.
+     *
+     * Printify requires every variant in a variant update. The product is read
+     * first, then every variant is echoed back with its existing `is_enabled`
+     * flag and the new price - dropping a variant from the array would let
+     * Printify rewrite the product's variant set.
+     */
+    async updateProduct(
+      input: UpdatePrintifyProductInput,
+    ): Promise<{ product: PrintifyShopProduct; shopId: number }> {
+      const productId = input.productId?.trim();
+      if (!productId) {
+        throw new PrintifyError("A product id is required to update a product", 400);
+      }
+      const owned = await resolveProductShop(input.shopId, productId);
+      if (!owned) {
+        throw new PrintifyError(
+          `Printify could not find product ${productId} in any shop on this account.`,
+          404,
+        );
+      }
+
+      const body: Record<string, unknown> = {};
+      if (typeof input.title === "string") body.title = input.title;
+      if (typeof input.description === "string") body.description = input.description;
+      if (Array.isArray(input.tags)) body.tags = input.tags;
+      if (input.price !== undefined) {
+        const price = Math.round(input.price);
+        if (!(price > 0)) {
+          throw new PrintifyError("Price must be a positive number of cents", 400);
+        }
+        const variants = owned.product.variants ?? [];
+        if (variants.length === 0) {
+          throw new PrintifyError(
+            "This product has no variants, so its price cannot be updated.",
+            400,
+          );
+        }
+        body.variants = variants.map((variant) => ({
+          id: variant.id,
+          price,
+          is_enabled: variant.is_enabled !== false,
+        }));
+      }
+      if (Object.keys(body).length === 0) {
+        throw new PrintifyError("Nothing to update: send a title, description, tags or price", 400);
+      }
+
+      const product = await request<PrintifyShopProduct>(
+        `/shops/${owned.shopId}/products/${encodeURIComponent(productId)}.json`,
+        { method: "PUT", body: JSON.stringify(body) },
+      );
+      return { product, shopId: owned.shopId };
     },
 
     /** GET /shops.json (first shop, for a friendly "connected" label). */

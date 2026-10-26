@@ -76,9 +76,24 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
   },
   {
+    name: "etsy_research",
+    description:
+      "Research what is already listed on Etsy for a query. Uses the Etsy API when a keystring is configured; otherwise reads the public Etsy search page in the user's own browser through the companion extension. Read-only. Reports observed titles, recurring title terms, a median price and samples; never invents search volume, sales or rankings. Browser mode cannot see listing tags, so topTags is empty there.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "What to search on Etsy, e.g. \"personalized cat mug\".",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "draft_listing",
     description:
-      "Draft Etsy listing copy (keyword ideas, title drafts, description, tags) for a print-on-demand concept. Returns editable ideas; fabricates no search volume or sales data.",
+      "Draft Etsy listing copy (keyword ideas, title drafts, description, tags) for a print-on-demand concept. Returns editable ideas only; it does NOT save anything. To apply finished copy to a listing, call save_listing_details. Fabricates no search volume or sales data.",
     parameters: {
       type: "object",
       properties: {
@@ -87,6 +102,40 @@ export const AGENT_TOOLS: AgentTool[] = [
         keywords: { type: "string", description: "Optional seed keyword or phrase." },
       },
       required: ["concept"],
+    },
+  },
+  {
+    name: "save_listing_details",
+    description:
+      "WRITE the listing details into the user's saved listing drafts: title, description, tags and/or price. This is the counterpart of draft_listing — use it after you have written the copy, when the user asks to save, apply, set or update listing details. It updates the listing the user names, or every listing in the batch when no design is named. Nothing is written until the user confirms.",
+    confirm: true,
+    parameters: {
+      type: "object",
+      properties: {
+        design: {
+          type: "string",
+          description:
+            "Design or listing name to update. Omit to update every listing in the Studio batch.",
+        },
+        title: { type: "string", description: "The listing title to save." },
+        description: { type: "string", description: "The listing description to save." },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Listing tags. Capped at 13 tags of 20 characters.",
+        },
+        price: {
+          type: "number",
+          description:
+            "Price in DOLLARS, e.g. 24.99. Use this or priceCents, not both.",
+        },
+        priceCents: {
+          type: "integer",
+          description:
+            "Price in CENTS, e.g. 2499. Prefer this when you already have an exact cent value.",
+        },
+      },
+      required: [],
     },
   },
   {
@@ -407,9 +456,19 @@ const INTENT_RULES: Array<{ name: string; patterns: RegExp[] }> = [
     patterns: [/(^|[.!?]\s*)(list|show)\b[^.?!]*\b(designs?|mockups?)\b/i],
   },
   {
+    name: "etsy_research",
+    patterns: [
+      // "research Etsy", "search Etsy for…", "check the market", "compare competitors"
+      /\b(research|search|check|scan|look up|analyse|analyze|compare)\b[^.?!]*\b(etsy|market|competitors?|competition)\b/i,
+      // "Etsy trends", "what's selling on Etsy", "Etsy keyword/price research"
+      /\b(etsy|market|competitors?|competition)\b[^.?!]*\b(research|search|trends?|trending|selling|popular|keywords?|pricing|prices?|competitors?)\b/i,
+      /\bwhat('?s| is) (selling|trending|popular)\b/i,
+    ],
+  },
+  {
     name: "draft_listing",
     patterns: [
-      /\b(listing|titles?|descriptions?|tags?|etsy|seo|keyword)\b/i,
+      /\b(listing|titles?|descriptions?|tags?|seo|keyword)\b/i,
       /\b(write|draft|brainstorm) (me )?(copy|listing)\b/i,
     ],
   },
@@ -492,6 +551,8 @@ export function routeIntent(text: string): RoutedIntent | null {
     switch (rule.name) {
       case "explain_howto":
         return { name: rule.name, args: { topic: clean.slice(0, 200) } };
+      case "etsy_research":
+        return { name: rule.name, args: { query: clean.slice(0, 200) } };
       case "draft_listing":
         return { name: rule.name, args: { concept: clean.slice(0, 200) } };
       case "create_printify_product": {

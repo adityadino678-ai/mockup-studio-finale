@@ -23,12 +23,14 @@ import {
   confirmPrintifyProduct,
   confirmRemoveBackground,
   confirmSaveChatImage,
+  confirmSaveListingDetails,
   confirmSavePlacement,
   executeTool,
 } from "@/lib/client/tools";
 import { agentTool, parseToolArguments, routeIntent, toOpenAiTools } from "@/lib/ai/tools";
+import { loadSession, saveSession } from "@/lib/printify/studio-session";
 import { db } from "@/lib/db/schema";
-import type { ChatMessage } from "@/types/domain";
+import type { ChatMessage, StudioSession } from "@/types/domain";
 
 function sseResponse(frames: string[]): Response {
   const encoder = new TextEncoder();
@@ -300,6 +302,7 @@ describe("agent tools", () => {
       "remove_background",
       "save_chat_image",
       "create_printify_product",
+      "save_listing_details",
     ]) {
       expect(agentTool(name)?.confirm, name).toBe(true);
     }
@@ -326,6 +329,10 @@ describe("agent tools", () => {
     expect(routeIntent("how do I upload a design")?.name).toBe("explain_howto");
     expect(routeIntent("how many designs do I have")?.name).toBe("summarize_workspace");
     expect(routeIntent("draft me an Etsy listing for cat mugs")?.name).toBe("draft_listing");
+    expect(routeIntent("write Etsy tags for my cat mug")?.name).toBe("draft_listing");
+    expect(routeIntent("research Etsy for cat mug keywords")?.name).toBe("etsy_research");
+    expect(routeIntent("search Etsy for personalized gifts")?.name).toBe("etsy_research");
+    expect(routeIntent("what's trending on Etsy")?.name).toBe("etsy_research");
     expect(routeIntent("generate a batch of all designs and mockups")?.name).toBe("create_batch_job");
     expect(routeIntent("list this design on printify")?.name).toBe("create_printify_product");
     expect(routeIntent("create a printify product for my art")?.name).toBe("create_printify_product");
@@ -354,6 +361,13 @@ describe("agent tools", () => {
     const routed = routeIntent("how do I remove a background?");
     expect(routed?.name).toBe("explain_howto");
     expect(String(routed?.args.topic)).toContain("background");
+  });
+
+  it("carries the query into etsy_research args", () => {
+    const routed = routeIntent("research Etsy for cat mug keywords");
+    expect(routed?.name).toBe("etsy_research");
+    expect(String(routed?.args.query)).toContain("Etsy");
+    expect(String(routed?.args.query).length).toBeLessThanOrEqual(200);
   });
 });
 
@@ -815,9 +829,152 @@ describe("mockup + library tools", () => {
       "remove_background",
       "save_chat_image",
       "create_printify_product",
+      "save_listing_details",
     ]) {
       expect(CONFIRM_TOOL_RUNNERS[name], name).toBeTypeOf("function");
     }
+  });
+});
+
+describe("save_listing_details", () => {
+  beforeEach(async () => {
+    await db.delete();
+    await db.open();
+  });
+
+  async function seed(overrides: Partial<StudioSession> = {}) {
+    await db.designs.put({
+      id: "d1",
+      name: "Sunset",
+      tags: [],
+      originalAssetId: "a1",
+      activeVariant: "main",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await db.designs.put({
+      id: "d2",
+      name: "Moon",
+      tags: [],
+      originalAssetId: "a3",
+      activeVariant: "main",
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    const session = await loadSession();
+    await saveSession({
+      ...session,
+      designIds: ["d1", "d2"],
+      titleTemplate: "{design} — {product}",
+      descriptionTemplate: "Old description for {design}",
+      tags: ["old-tag"],
+      priceMode: "fixed",
+      priceCents: 1999,
+      ...overrides,
+    });
+  }
+
+  it("proposes a write without touching the drafts", async () => {
+    await seed();
+    const result = await executeTool("save_listing_details", {
+      design: "sunset",
+      title: "Golden Hour Tee",
+      description: "A warm sunset tee.",
+      tags: ["sunset", "Sunset", "gift"],
+      price: 24.99,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload).toMatchObject({
+      listingIds: ["d1"],
+      title: "Golden Hour Tee",
+      description: "A warm sunset tee.",
+      tags: ["sunset", "gift"],
+      priceCents: 2499,
+    });
+    expect(await db.listingDrafts.count()).toBe(0);
+  });
+
+  it("writes one listing, pins the other price and leaves its draft alone", async () => {
+    await seed();
+    await db.listingDrafts.put({
+      id: "draft-moon",
+      title: "Moon keeps this",
+      description: "Moon description",
+      tags: ["moon"],
+      priceCents: 1999,
+      designId: "d2",
+      imageAssetIds: ["img-moon"],
+      imageSelectionLocked: true,
+      status: "local-draft",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const result = await confirmSaveListingDetails({
+      listingIds: ["d1"],
+      title: "Golden Hour Tee",
+      description: "A warm sunset tee.",
+      tags: ["sunset", "gift"],
+      priceCents: 2499,
+    });
+    expect(result.error).toBeUndefined();
+
+    const sunset = (await db.listingDrafts.where("designId").equals("d1").toArray())[0];
+    expect(sunset.title).toBe("Golden Hour Tee");
+    expect(sunset.description).toBe("A warm sunset tee.");
+    expect(sunset.tags).toEqual(["sunset", "gift"]);
+    expect(sunset.priceCents).toBe(2499);
+
+    const moon = await db.listingDrafts.get("draft-moon");
+    expect(moon?.title).toBe("Moon keeps this");
+    expect(moon?.imageAssetIds).toEqual(["img-moon"]);
+    expect(moon?.imageSelectionLocked).toBe(true);
+
+    const session = await loadSession();
+    expect(session.priceMode).toBe("custom");
+    expect(session.listingPrices?.d1).toBe(2499);
+    // Moving to custom prices must not silently reprice the other listing.
+    expect(session.listingPrices?.d2).toBe(1999);
+  });
+
+  it("preserves the fields the agent did not supply", async () => {
+    await seed();
+    await db.listingDrafts.put({
+      id: "draft-sunset",
+      title: "Existing title",
+      description: "Keep me",
+      tags: ["keep"],
+      priceCents: 1999,
+      designId: "d1",
+      imageAssetIds: ["img-1"],
+      imageSelectionLocked: true,
+      status: "local-draft",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const result = await confirmSaveListingDetails({
+      listingIds: ["d1"],
+      title: "Only the title",
+    });
+    expect(result.error).toBeUndefined();
+
+    const draft = await db.listingDrafts.get("draft-sunset");
+    expect(draft?.title).toBe("Only the title");
+    expect(draft?.description).toBe("Keep me");
+    expect(draft?.tags).toEqual(["keep"]);
+    expect(draft?.imageAssetIds).toEqual(["img-1"]);
+    expect(draft?.imageSelectionLocked).toBe(true);
+    expect((await loadSession()).priceMode).toBe("fixed");
+  });
+
+  it("rejects an empty write and an unknown design", async () => {
+    await seed();
+    const empty = await executeTool("save_listing_details", { design: "sunset" });
+    expect(empty.error).toBeDefined();
+    const unknown = await executeTool("save_listing_details", { design: "nope", title: "X" });
+    expect(unknown.error).toContain("No listing matches");
+    expect(await db.listingDrafts.count()).toBe(0);
   });
 });
 

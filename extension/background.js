@@ -14,6 +14,12 @@
  *   5. The results come back through `sendResponse`, and the background tab is
  *      closed again.
  *
+ * It also answers `MS_ETSY_RESEARCH`: open `etsy.com/search?q=...` in a
+ * background tab, inject `scrapeEtsySearch`, return the public listing cards,
+ * and close the tab. That path only runs when the app's Etsy API key is
+ * missing or rejected, and it reads titles/prices/URLs only - search cards do
+ * not expose listing tags.
+ *
  * It keeps nothing: the payload is held in a module-level variable for the
  * length of ONE apply and dropped in the `finally`. No `chrome.storage` is used
  * or requested, and no payload, session or token is ever logged - the logging
@@ -28,19 +34,22 @@
 
 "use strict";
 
-/* Two files, both required at runtime and both plain JS:
-   - payload-guard.js   the payload contract, shared with the content script;
-   - printify-apply.js  the function injected into the printify.com tab. */
-["payload-guard.js", "printify-apply.js"].forEach((file) => {
+/* Three files, all required at runtime and all plain JS:
+   - payload-guard.js    the payload contract, shared with the content script;
+   - printify-apply.js   the function injected into the printify.com tab;
+   - etsy-research.js    the function injected into the etsy.com tab. */
+["payload-guard.js", "printify-apply.js", "etsy-research.js"].forEach((file) => {
   try {
     importScripts(file);
   } catch (e) {
-    /* Reported honestly when an apply is requested rather than ignored. */
+    /* Reported honestly when a request is made rather than ignored. */
   }
 });
 
 var MS_APPLY = "MS_APPLY";
+var MS_ETSY_RESEARCH = "MS_ETSY_RESEARCH";
 var PRINTIFY_HOST = "printify.com";
+var ETSY_SEARCH_BASE = "https://www.etsy.com/search?q=";
 
 /* How long to wait for the printify.com tab to load, how often to look, and how
    long to let the SPA mount before injecting: the session lives in
@@ -48,10 +57,13 @@ var PRINTIFY_HOST = "printify.com";
 var LOAD_TIMEOUT_MS = 20000;
 var LOAD_POLL_MS = 250;
 var SETTLE_MS = 1500;
+var ETSY_LOAD_TIMEOUT_MS = 25000;
+var ETSY_SETTLE_MS = 1500;
 
 /* The payload for the apply that is running right now, in memory only. */
 var pendingPayload = null;
 var applyInFlight = false;
+var etsyInFlight = false;
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -87,9 +99,17 @@ function productUrl(productId) {
   return "https://" + PRINTIFY_HOST + "/app/products/" + productId;
 }
 
-/* ------------------------------------------------------------ the printify tab */
+function etsySearchUrl(query) {
+  return ETSY_SEARCH_BASE + encodeURIComponent(query);
+}
 
-async function openPrintifyTab(url) {
+function isEtsyHost(host) {
+  return host === "etsy.com" || /\.etsy\.com$/i.test(host);
+}
+
+/* ---------------------------------------------------------- the background tab */
+
+async function openBackgroundTab(url) {
   var tab;
   try {
     /* Background by default: the user keeps working in the app while the
@@ -117,13 +137,13 @@ async function readTab(tabId) {
   }
 }
 
-async function waitForTabLoad(tabId) {
-  var deadline = Date.now() + LOAD_TIMEOUT_MS;
+async function waitForTabLoad(tabId, timeoutMs) {
+  var deadline = Date.now() + (timeoutMs || LOAD_TIMEOUT_MS);
   for (;;) {
     var tab = await readTab(tabId);
     if (!tab) return null;
     if (tab.status === "complete") return tab;
-    if (Date.now() >= deadline) return tab; /* try anyway; the apply says why it failed */
+    if (Date.now() >= deadline) return tab; /* try anyway; the caller says why it failed */
     await sleep(LOAD_POLL_MS);
   }
 }
@@ -203,7 +223,7 @@ async function handleApply(payload, requestId) {
   var tabId = null;
   try {
     var first = payload.products[0];
-    var tab = await openPrintifyTab(productUrl(first.productId));
+    var tab = await openBackgroundTab(productUrl(first.productId));
     tabId = tab.id;
     log("Opened the Printify tab for one product.");
 
@@ -253,12 +273,130 @@ async function handleApply(payload, requestId) {
   }
 }
 
+/* -------------------------------------------------------------- etsy research */
+
+function normaliseEtsyCards(listings) {
+  if (!Array.isArray(listings)) return [];
+  var out = [];
+  for (var i = 0; i < listings.length && out.length < 48; i++) {
+    var entry = listings[i];
+    if (!entry || typeof entry !== "object") continue;
+    var title =
+      typeof entry.title === "string" ? entry.title.replace(/\s+/g, " ").trim() : "";
+    if (title.length < 3) continue;
+    var url =
+      typeof entry.url === "string" &&
+      /^https:\/\/([a-z0-9-]+\.)*etsy\.com\/listing\//i.test(entry.url)
+        ? entry.url
+        : "";
+    out.push({
+      title: title.slice(0, 300),
+      priceText: typeof entry.priceText === "string" ? entry.priceText.slice(0, 40) : "",
+      url: url,
+    });
+  }
+  return out;
+}
+
+async function handleEtsyResearch(query, requestId) {
+  if (etsyInFlight) {
+    return {
+      ok: false,
+      requestId: requestId,
+      error: "Another Etsy research request is already running. Wait for it to finish.",
+    };
+  }
+  if (typeof scrapeEtsySearch !== "function") {
+    return {
+      ok: false,
+      requestId: requestId,
+      error:
+        "The Etsy research code did not load. Remove the extension in chrome://extensions and load the folder again.",
+    };
+  }
+
+  var clean = typeof query === "string" ? query.replace(/\s+/g, " ").trim() : "";
+  if (clean.length < 2 || clean.length > 120) {
+    return {
+      ok: false,
+      requestId: requestId,
+      error: "The Etsy query must be 2-120 characters.",
+    };
+  }
+
+  etsyInFlight = true;
+  var tabId = null;
+  try {
+    var tab = await openBackgroundTab(etsySearchUrl(clean));
+    tabId = tab.id;
+    log("Opened the Etsy search tab.");
+
+    var loaded = await waitForTabLoad(tabId, ETSY_LOAD_TIMEOUT_MS);
+    if (!loaded) {
+      return {
+        ok: false,
+        requestId: requestId,
+        error: "The Etsy tab closed before the search page could be read.",
+      };
+    }
+    var host = hostnameOf(loaded.url);
+    if (!isEtsyHost(host)) {
+      return {
+        ok: false,
+        requestId: requestId,
+        error:
+          "Etsy did not stay on etsy.com (it went to " +
+          (host || "another page") +
+          "). Open etsy.com in this browser, then try again.",
+      };
+    }
+    /* Etsy's search page is server-rendered, but give the cards a moment to
+       settle before reading them. */
+    await sleep(ETSY_SETTLE_MS);
+
+    var injected = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: "ISOLATED",
+      func: scrapeEtsySearch,
+    });
+    var frame = injected && injected[0];
+    var page = frame && frame.result;
+    if (!page || page.ok !== true) {
+      return {
+        ok: false,
+        requestId: requestId,
+        error: "Etsy did not answer in a way this extension understands.",
+      };
+    }
+    if (page.blocked) {
+      return { ok: false, requestId: requestId, error: page.blocked, blocked: page.blocked };
+    }
+
+    var cards = normaliseEtsyCards(page.listings);
+    log("Etsy research finished: " + cards.length + " card(s).");
+    return { ok: true, requestId: requestId, cards: cards };
+  } catch (error) {
+    log("Etsy research failed.");
+    return { ok: false, requestId: requestId, error: describeError(error) };
+  } finally {
+    etsyInFlight = false;
+    closeTab(tabId);
+  }
+}
+
 /* ------------------------------------------------------------------ messages */
 
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
-  if (!message || message.type !== MS_APPLY) return undefined; /* not ours */
+  if (!message || (message.type !== MS_APPLY && message.type !== MS_ETSY_RESEARCH)) {
+    return undefined; /* not ours */
+  }
   var requestId = typeof message.requestId === "string" ? message.requestId : null;
-  handleApply(message.payload, requestId)
+  var work =
+    message.type === MS_APPLY
+      ? handleApply(message.payload, requestId)
+      : handleEtsyResearch(message.query, requestId);
+
+  work
     .then(function (response) {
       try {
         sendResponse(response);

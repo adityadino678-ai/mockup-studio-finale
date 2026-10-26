@@ -1,7 +1,8 @@
 # Mockup Studio Printify Bridge
 
 A tiny browser extension for Chrome and Edge that finishes the "Send to Printify"
-step for you.
+step for you, and reads public Etsy search results when Mockup Studio has no
+Etsy API key.
 
 Mockup Studio can upload your listing images to Printify and can build the list
 of which images should become a product's mockups — but choosing a product's
@@ -9,6 +10,13 @@ mockups is something Printify only lets you do inside your own signed-in
 Printify web page. Until now that last step was a **bookmarklet** you had to
 click on the Printify tab. This extension does the same thing with **one click**
 from inside Mockup Studio.
+
+It also gives the in-app agent an Etsy research fallback. The app prefers Etsy's
+public API (a keystring in **Settings → API connections**). When that key is
+missing or rejected, the extension opens the public Etsy search page in a
+background tab, reads the listing cards that page displayed, and returns the
+titles and prices. It cannot read listing tags, because Etsy's search cards do
+not expose them.
 
 It is a prototype, local-only companion: it is **not published in any store**,
 so it has to be loaded by hand once (see below). Browsers deliberately forbid
@@ -20,11 +28,12 @@ has to do this once on their own machine.
 ## What you install
 
 - A **background worker** that opens a Printify tab, quietly, applies the images,
-  then closes that tab again. You normally never see it.
+  then closes that tab again. You normally never see it. It does the same for an
+  Etsy search tab when the app asks it to research a query.
 - A small **content script** that only runs on the Mockup Studio pages
   (`mockup-studio.adityadino678.workers.dev`, `localhost`, `127.0.0.1`). It puts
-  a marker on the page and listens for one event, so the app knows the extension
-  is there and can offer the one-click button.
+  a marker on the page and listens for the app's events, so the app knows the
+  extension is there and can offer the one-click button and the Etsy fallback.
 
 Nothing else runs anywhere. No other website is touched.
 
@@ -70,20 +79,10 @@ Once the app is wired to it (see the status note below), the flow is:
 5. The dialog shows which products worked and which did not. You can then open
    the product in Printify and check.
 
-> **Status: the extension is built, the app button is not.** The extension is
-> finished and loadable, but the app itself has not been changed to show that
-> button — wiring the Send dialog to the `mockup-studio:apply-request` event is
-> the next step, and `protocol.md` is the contract for it. Until then, keep using
-> the bookmarklet, or try the extension by hand: on an app page, paste this in
-> the browser console and the one-click run happens:
->
-> ```js
-> window.dispatchEvent(new CustomEvent("mockup-studio:apply-request", {
->   detail: { payload: JSON.parse("<paste the payload the app copied here>") },
-> }));
-> ```
->
-> The answer comes back as a `mockup-studio:apply-result` event on `window`.
+> **Status: local prototype.** The app now detects the extension and offers the
+> one-click apply in the Send dialog. The extension is still loaded by hand
+> (below), not published in a store. `protocol.md` is the exact event contract,
+> including the Etsy research events.
 
 ### What the extension does on the product
 
@@ -91,6 +90,24 @@ It keeps whatever mockups the product already has selected and puts your new
 images in front, so the **first image becomes the main image**, exactly like the
 bookmarklet. It reads the current selection first: if it cannot read it, it
 skips that product and tells you, instead of replacing the selection blindly.
+
+### Etsy research fallback
+
+You do not press a separate button for this. When the agent needs Etsy research
+and the app has no working Etsy keystring, it asks the extension for it:
+
+1. The extension opens `etsy.com/search?q=<your query>` in a **background tab**.
+2. It reads the listing cards that page displayed: title, price label and URL.
+3. It closes the tab and hands the cards to the app.
+4. The app reports the observed titles, recurring title words and median price.
+
+If Etsy shows a "Just a moment" verification page, the extension says so instead
+of returning an empty result. Open <https://www.etsy.com> in a normal tab, finish
+the check, and try again.
+
+**Tags are not available this way.** Etsy's search cards do not expose listing
+tags, so browser mode reports none. Add an Etsy keystring in Settings if you need
+tag data.
 
 ## How it stays private
 
@@ -104,10 +121,13 @@ skips that product and tells you, instead of replacing the selection blindly.
 - The list of images (product ids, mockup ids, image URLs, file names and
   titles) is held in memory only for the length of one run, then thrown away. It
   is **not** saved to disk, to `chrome.storage`, to a file, or to any server.
+- An Etsy query is held in memory only for the length of that one research run.
+  The cards it reads are returned to the app page; they are **not** sent to
+  Mockup Studio's server, and they are not saved by the extension.
 - The extension asks your browser for three permissions only — `tabs`,
-  `scripting`, `activeTab` — and permission to run on `printify.com`, the Mockup
-  Studio website and `localhost`/`127.0.0.1` (for the local dev server). Nothing
-  else.
+  `scripting`, `activeTab` — and permission to run on `printify.com`, `etsy.com`,
+  the Mockup Studio website and `localhost`/`127.0.0.1` (for the local dev
+  server). Nothing else.
 - It contains no analytics, no ads, no remote code and no `eval`.
 
 ## If something goes wrong
@@ -118,7 +138,9 @@ skips that product and tells you, instead of replacing the selection blindly.
 | "Printify kept rate-limiting (429)" | Printify slowed down. Wait a minute and press the button again. |
 | "Printify did not open on printify.com" | Printify redirected somewhere else (a login wall, a temporary outage). Open printify.com by hand, sign in, then try again. |
 | "The extension is not installed correctly" | Remove the extension in `chrome://extensions` and load the folder again. |
-| No one-click button in the dialog | The app has not shipped the button yet (see the note above), or the extension is not loaded in this browser. Load it, then reload the Mockup Studio page. |
+| "Etsy showed a verification page" | Open <https://www.etsy.com> in a normal tab, finish the check it asks for, then ask the agent again. |
+| Etsy research returns no tags | Expected in browser mode: Etsy's search cards do not expose tags. Add an Etsy keystring in Settings for tag data. |
+| No one-click button in the dialog | The extension is not loaded in this browser. Load it, then reload the Mockup Studio page. |
 | Nothing happens and the Printify tab closed | The browser stopped the extension's background worker mid-run (a known Chrome limitation on long runs). Check the product in Printify first — the images may already be applied — then press the button again. |
 
 The old bookmarklet still works, so you are never stuck: install it from
@@ -132,12 +154,12 @@ Studio; the dialog goes back to the bookmarklet steps automatically.
 
 ## Limitations of this prototype
 
-- **The app-side button does not exist yet.** The extension is complete and can
-  be exercised by hand (see "How to use it" above); wiring the Send dialog to the
-  `mockup-studio:apply-request` event is the next step and is specified in
-  `protocol.md`.
 - **It is not store-published.** It has to be loaded by hand, in every browser,
   by every person. `STORE.md` lists what publishing would take.
+- **Etsy can serve a verification page.** The extension reports that instead of
+  pretending it found nothing; finish the check on etsy.com and retry.
+- **Etsy browser mode cannot read tags.** Search cards expose titles and prices
+  only. Use an Etsy keystring if you need tag data.
 - **Background tabs can be closed.** If you have "continue where you left off"
   or an aggressive memory saver, the Printify tab may be closed before it
   finishes. Re-run it.
@@ -153,10 +175,11 @@ Studio; the dialog goes back to the bookmarklet steps automatically.
 | File | What it is |
 |---|---|
 | `manifest.json` | The extension's manifest (MV3): permissions, host permissions, the content script and the background worker. |
-| `background.js` | The service worker: takes the payload, opens the Printify tab in the background, injects the apply code, returns the results, closes the tab. |
+| `background.js` | The service worker: takes the payload, opens the Printify tab in the background, injects the apply code, returns the results, closes the tab. It also handles the Etsy research message. |
 | `printify-apply.js` | The Printify mockup-selection logic, ported from Mockup Studio's bookmarklet with its pop-up questions removed. |
+| `etsy-research.js` | The Etsy search-card scraper injected into the background Etsy tab. Titles, price labels and URLs only — no tags. |
 | `payload-guard.js` | What a Mockup Studio payload is — shared by the background worker and the content script. |
-| `content-app.js` | Runs on the Mockup Studio pages only: marks the page, listens for the apply event, forwards it, relays the answer. |
+| `content-app.js` | Runs on the Mockup Studio pages only: marks the page, listens for the apply and Etsy research events, forwards them, relays the answers. |
 | `icons/` | Placeholder PNG icons. |
 | `tools/generate-icons.mjs` | Regenerates those placeholder icons (plain Node, no dependencies). |
 | `tools/offline-check.mjs` | Checks the ported Printify logic against stubbed browser globals. |

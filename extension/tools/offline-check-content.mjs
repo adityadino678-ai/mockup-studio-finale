@@ -123,6 +123,106 @@ console.log("on the app origin");
   check("kept the error text of a failed product", results[0].detail.results[1].error === "HTTP 500");
 }
 
+console.log("an Etsy research request");
+{
+  const win = makeWindow();
+  const messages = [];
+  const chrome = {
+    runtime: {
+      lastError: null,
+      sendMessage: (message, callback) => {
+        messages.push(message);
+        if (message.type === "MS_ETSY_RESEARCH") {
+          callback({
+            ok: true,
+            requestId: message.requestId,
+            cards: [
+              {
+                title: "Personalized Cat Mug",
+                priceText: "$24.99",
+                url: "https://www.etsy.com/listing/1/cat-mug",
+              },
+            ],
+          });
+        } else {
+          callback({ ok: true, results: [] });
+        }
+      },
+    },
+  };
+  load(win, { origin: APP_ORIGIN, hostname: "mockup-studio.adityadino678.workers.dev", protocol: "https:" }, chrome);
+
+  check(
+    "listens for Etsy requests",
+    (win.listeners.get("mockup-studio:etsy-research-request") || []).length === 1,
+  );
+  win.dispatchEvent(
+    new CustomEvent("mockup-studio:etsy-research-request", {
+      detail: { query: "  cat   mug  ", requestId: "e1" },
+    }),
+  );
+
+  check("forwarded exactly one message", messages.length === 1, `${messages.length}`);
+  check("forwarded it as MS_ETSY_RESEARCH", messages[0].type === "MS_ETSY_RESEARCH");
+  check("normalised the query", messages[0].query === "cat mug", messages[0].query);
+  check("forwarded the requestId", messages[0].requestId === "e1");
+  check("sent no credentials", JSON.stringify(messages[0]).indexOf("token") === -1);
+
+  const results = win.dispatched.filter((e) => e.type === "mockup-studio:etsy-research-result");
+  check("relaid the cards", results.length === 1 && results[0].detail.cards.length === 1, JSON.stringify(results));
+  check("relaid the requestId", results[0].detail.requestId === "e1");
+}
+
+console.log("an Etsy verification page");
+{
+  const win = makeWindow();
+  const chrome = {
+    runtime: {
+      lastError: null,
+      sendMessage: (message, callback) =>
+        callback({ ok: false, error: "Etsy showed a verification page instead of search results." }),
+    },
+  };
+  load(win, { origin: APP_ORIGIN, hostname: "mockup-studio.adityadino678.workers.dev", protocol: "https:" }, chrome);
+  win.dispatchEvent(
+    new CustomEvent("mockup-studio:etsy-research-request", {
+      detail: { query: "cat", requestId: "e2" },
+    }),
+  );
+  const errors = win.dispatched.filter((e) => e.type === "mockup-studio:etsy-research-error");
+  check("dispatched etsy-research-error", errors.length === 1, JSON.stringify(win.dispatched));
+  check("with the requestId", errors[0].detail.requestId === "e2");
+  check("with the reason", /verification page/.test(errors[0].detail.error || ""), errors[0].detail.error);
+  check(
+    "and no etsy-research-result",
+    win.dispatched.filter((e) => e.type === "mockup-studio:etsy-research-result").length === 0,
+  );
+}
+
+console.log("an Etsy query that is too short");
+{
+  const win = makeWindow();
+  const messages = [];
+  const chrome = {
+    runtime: {
+      lastError: null,
+      sendMessage: (message, callback) => {
+        messages.push(message);
+        callback({ ok: true, cards: [] });
+      },
+    },
+  };
+  load(win, { origin: APP_ORIGIN, hostname: "mockup-studio.adityadino678.workers.dev", protocol: "https:" }, chrome);
+  win.dispatchEvent(
+    new CustomEvent("mockup-studio:etsy-research-request", {
+      detail: { query: "x", requestId: "e3" },
+    }),
+  );
+  check("nothing forwarded", messages.length === 0);
+  const errors = win.dispatched.filter((e) => e.type === "mockup-studio:etsy-research-error");
+  check("said why", errors.length === 1 && /2-120/.test(errors[0].detail.error || ""), JSON.stringify(errors));
+}
+
 console.log("a failing run");
 {
   const win = makeWindow();

@@ -47,7 +47,11 @@ function makeChrome() {
           const live = state.tabs.get(tab.id);
           if (live) {
             live.status = "complete";
-            live.url = "https://printify.com/app/products/" + String(live.url).split("/").pop();
+            /* Etsy search URLs stay as they are; a product URL resolves to
+               Printify's SPA route. */
+            if (String(live.url).indexOf("https://www.etsy.com/") !== 0) {
+              live.url = "https://printify.com/app/products/" + String(live.url).split("/").pop();
+            }
           }
         }, 5);
         return Object.assign({}, tab);
@@ -71,8 +75,12 @@ function makeChrome() {
     },
     scripting: {
       executeScript: async (options) => {
-        state.executed.push({ world: options.world, tabId: options.target.tabId, argCount: options.args.length });
-        const result = await options.func.apply(null, options.args);
+        state.executed.push({
+          world: options.world,
+          tabId: options.target.tabId,
+          argCount: Array.isArray(options.args) ? options.args.length : 0,
+        });
+        const result = await options.func.apply(null, options.args || []);
         return [{ result }];
       },
     },
@@ -98,7 +106,7 @@ function makeChrome() {
 /** Loads the three files as one classic script and returns its message listener. */
 function makeWorker() {
   const { chrome, state } = makeChrome();
-  const combined = ["payload-guard.js", "printify-apply.js", "background.js"]
+  const combined = ["payload-guard.js", "printify-apply.js", "etsy-research.js", "background.js"]
     .map((name) => read(name))
     .join("\n;\n");
   /* `new Function` gives one function scope for the three files; `importScripts`
@@ -189,6 +197,122 @@ console.log("a real apply message");
   check("read the layout for each product", fetched.filter((f) => f.method === "GET").length === 2, `${fetched.length} calls`);
   check("put the merged selection", fetched.filter((f) => f.method === "PUT").length === 2);
   check("sent the XSRF header", fetched[0].headers["X-XSRF-TOKEN"] === "csrf-1");
+}
+
+console.log("an Etsy research request");
+{
+  const originalDocument = globalThis.document;
+  const originalLocation = globalThis.location;
+  const heading = (text) => ({ textContent: text });
+  function anchor(href, title, price) {
+    const h = heading(title);
+    const a = {
+      href,
+      textContent: title + " " + price,
+      getAttribute: () => null,
+      querySelector: (selector) => (String(selector).indexOf("h2") >= 0 ? h : null),
+      parentElement: null,
+    };
+    const card = {
+      textContent: title + " " + price,
+      querySelector: (selector) => (String(selector).indexOf("h2") >= 0 ? h : null),
+      querySelectorAll: () => [a],
+      parentElement: null,
+    };
+    a.parentElement = card;
+    return a;
+  }
+  const anchors = [
+    anchor("https://www.etsy.com/listing/1/cat-mug?ref=search", "Personalized Cat Mug", "$24.99"),
+    anchor("https://www.etsy.com/listing/2/cat-shirt", "Cat Mom Shirt", "US$32.50"),
+    anchor("https://www.etsy.com/listing/1/cat-mug?ref=again", "Duplicate", "$24.99"),
+  ];
+  globalThis.document = {
+    cookie: "XSRF-TOKEN=csrf-1",
+    title: "cat mug | Etsy",
+    body: { innerText: "Results for cat mug" },
+    querySelectorAll: () => anchors,
+  };
+  globalThis.location = {
+    hostname: "www.etsy.com",
+    href: "https://www.etsy.com/search?q=cat+mug",
+  };
+
+  const { state } = makeWorker();
+  fetched = [];
+  const response = await send(state, {
+    type: "MS_ETSY_RESEARCH",
+    query: "cat mug",
+    requestId: "etsy-1",
+  });
+
+  check("answered ok", response.ok === true, JSON.stringify(response));
+  check("carried the requestId", response.requestId === "etsy-1");
+  check(
+    "returned the cards",
+    Array.isArray(response.cards) && response.cards.length === 2,
+    JSON.stringify(response.cards),
+  );
+  check(
+    "de-duplicated the same listing",
+    response.cards.filter((c) => c.url.indexOf("/listing/1/") >= 0).length === 1,
+    JSON.stringify(response.cards),
+  );
+  check("kept the title", response.cards[0].title === "Personalized Cat Mug", JSON.stringify(response.cards[0]));
+  check("kept the price text", response.cards[0].priceText === "$24.99", JSON.stringify(response.cards[0]));
+  check(
+    "opened the Etsy search page",
+    state.created.length === 1 && state.created[0].url === "https://www.etsy.com/search?q=cat%20mug",
+    JSON.stringify(state.created),
+  );
+  check("opened it in the background", state.created[0].active === false);
+  check("closed the tab afterwards", state.removed.length === 1 && state.tabs.size === 0);
+  check("injected the scraper once", state.executed.length === 1 && state.executed[0].world === "ISOLATED");
+  check("did not touch chrome.storage", state.storageTouched.length === 0);
+
+  globalThis.document = originalDocument;
+  globalThis.location = originalLocation;
+}
+
+console.log("an Etsy verification page");
+{
+  const originalDocument = globalThis.document;
+  const originalLocation = globalThis.location;
+  globalThis.document = {
+    cookie: "",
+    title: "Just a moment...",
+    body: { innerText: "Enable JavaScript and cookies to continue" },
+    querySelectorAll: () => [],
+  };
+  globalThis.location = {
+    hostname: "www.etsy.com",
+    href: "https://www.etsy.com/search?q=cat",
+  };
+
+  const { state } = makeWorker();
+  const response = await send(state, {
+    type: "MS_ETSY_RESEARCH",
+    query: "cat",
+    requestId: "etsy-2",
+  });
+  check("refused the verification page", response.ok === false, JSON.stringify(response));
+  check("said what to do", /verification page/i.test(response.error || ""), response.error);
+  check("closed the tab", state.removed.length === 1);
+
+  globalThis.document = originalDocument;
+  globalThis.location = originalLocation;
+}
+
+console.log("an Etsy query that is too short");
+{
+  const { state } = makeWorker();
+  const response = await send(state, {
+    type: "MS_ETSY_RESEARCH",
+    query: "x",
+    requestId: "etsy-3",
+  });
+  check("refused", response.ok === false && /2-120/.test(response.error || ""), JSON.stringify(response));
+  check("opened no tab", state.created.length === 0);
 }
 
 console.log("a foreign payload");

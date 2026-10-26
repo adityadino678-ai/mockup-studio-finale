@@ -12,6 +12,7 @@
 
 import { db } from "@/lib/db/schema";
 import { authedFetch } from "@/lib/client/integrations";
+import { researchEtsy } from "@/lib/client/etsy-research";
 import { artworkToBase64, MAX_ARTWORK_BYTES } from "@/lib/client/artwork";
 import { createBatchJob, renderComposition, runBatchJob } from "@/lib/batch/runner";
 import {
@@ -30,7 +31,21 @@ import {
 import { createInkVariantBlob } from "@/lib/canvas/compose";
 import { canvasToBlob, decodeImage } from "@/lib/image/image";
 import { removeBackgroundAuto } from "@/lib/printify/remove-background";
-import { loadSession } from "@/lib/printify/studio-session";
+import {
+  loadSession,
+  parseTags,
+  priceForListing,
+  renderTemplate,
+  renderTitle,
+  saveSession,
+} from "@/lib/printify/studio-session";
+import {
+  buildStudioListings,
+  catalogProductName,
+  type StudioListing,
+} from "@/lib/printify/listing-plan";
+import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
+import { loadCachedBlueprints } from "@/lib/printify/catalog-client";
 import {
   printAreaOf,
   studioPlacementFromTransform,
@@ -43,6 +58,7 @@ import {
   type InkVariant,
   type MockupCategory,
   type ProductDraft,
+  type StudioSession,
   type Template,
   type Transform,
 } from "@/types/domain";
@@ -386,6 +402,298 @@ async function draftListing(args: Record<string, unknown>): Promise<ToolExecResu
   return {
     summary: `Drafted ${titles.length} titles and ${(data.result.tags ?? []).length} tags for “${concept}”`,
     result: data.result,
+  };
+}
+
+async function etsyResearch(args: Record<string, unknown>): Promise<ToolExecResult> {
+  const query = String(args.query ?? "").trim();
+  if (!query) {
+    return { summary: "Needed an Etsy query", error: "etsy_research needs a query." };
+  }
+  const research = await researchEtsy(query);
+  const source = research.source === "etsy-api" ? "the Etsy API" : "your browser";
+  const terms = research.titleTerms
+    .slice(0, 8)
+    .map((term) => `${term.term} (${term.count})`)
+    .join(", ");
+  return {
+    summary: `Etsy research for “${query}” · ${research.sampled} listing${
+      research.sampled === 1 ? "" : "s"
+    } sampled from ${source}`,
+    result: {
+      ...research,
+      ...(terms ? { topTitleTerms: terms } : {}),
+      note: research.disclaimer,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Listing details (proposal + real write)
+//
+// `draft_listing` only asks the SEO endpoint for ideas. This pair is the WRITE
+// half: it resolves the listing the user means, merges the fields the model
+// supplied over that listing's current copy, and saves one draft per listing
+// through the SAME `saveStudioListingDrafts` path the Listing details page
+// uses. Unspecified fields are preserved, and a price change pins the other
+// active listings so switching to "custom" cannot silently reprice them.
+// ---------------------------------------------------------------------------
+
+/** A price argument, in either cents or dollars, normalised to cents. */
+function priceCentsFromArgs(args: Record<string, unknown>): {
+  cents?: number;
+  error?: string;
+} {
+  const hasCents = args.priceCents !== undefined && args.priceCents !== null && args.priceCents !== "";
+  const hasPrice = args.price !== undefined && args.price !== null && args.price !== "";
+  if (hasCents) {
+    const value = Number(args.priceCents);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { error: "priceCents must be a positive number of cents, e.g. 2499." };
+    }
+    return { cents: Math.round(value) };
+  }
+  if (hasPrice) {
+    const value = Number(args.price);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { error: "price must be a positive dollar amount, e.g. 24.99." };
+    }
+    return { cents: Math.round(value * 100) };
+  }
+  return {};
+}
+
+async function listingTargets(designArg: unknown): Promise<
+  | {
+      ok: true;
+      session: StudioSession;
+      listings: StudioListing[];
+      targets: StudioListing[];
+    }
+  | { ok: false; result: ToolExecResult }
+> {
+  const session = await loadSession();
+  const designs = await db.designs.toArray();
+  const listings = buildStudioListings(designs, session);
+  if (!listings.length) {
+    return {
+      ok: false,
+      result: {
+        summary: "No listings in this batch",
+        error:
+          "There are no listings yet. Tick at least one design in the Studio, then ask again.",
+      },
+    };
+  }
+
+  const wanted = String(designArg ?? "").trim().toLowerCase();
+  const targets = wanted
+    ? listings.filter((listing) =>
+        [listing.listingId, listing.designId, listing.designName]
+          .map((value) => value.toLowerCase())
+          .some((value) => value === wanted || value.includes(wanted)),
+      )
+    : listings;
+
+  if (!targets.length) {
+    return {
+      ok: false,
+      result: {
+        summary: `No listing matches “${String(designArg)}”`,
+        error: `No listing matches that name. Available listings: ${listings
+          .map((listing) => listing.designName)
+          .join(", ")}.`,
+      },
+    };
+  }
+  return { ok: true, session, listings, targets };
+}
+
+async function proposeSaveListingDetails(args: Record<string, unknown>): Promise<ToolExecResult> {
+  const resolved = await listingTargets(args.design);
+  if (!resolved.ok) return resolved.result;
+
+  const title =
+    args.title === undefined || args.title === null ? undefined : String(args.title).trim();
+  const description =
+    args.description === undefined || args.description === null
+      ? undefined
+      : String(args.description);
+  const tags = Array.isArray(args.tags)
+    ? parseTags(args.tags.map((tag) => String(tag)))
+    : undefined;
+  const price = priceCentsFromArgs(args);
+  if (price.error) {
+    return { summary: "Could not read the price", error: price.error };
+  }
+  if (
+    title === undefined &&
+    description === undefined &&
+    tags === undefined &&
+    price.cents === undefined
+  ) {
+    return {
+      summary: "Nothing to write",
+      error:
+        "Give save_listing_details at least one of title, description, tags, price or priceCents.",
+    };
+  }
+  if (title === "") {
+    return {
+      summary: "The title is empty",
+      error: "A listing title cannot be empty. Write the title first, then save it.",
+    };
+  }
+
+  const names = resolved.targets.map((listing) => listing.designName);
+  const fields = [
+    title !== undefined ? "title" : "",
+    description !== undefined ? "description" : "",
+    tags !== undefined ? `${tags.length} tag${tags.length === 1 ? "" : "s"}` : "",
+    price.cents !== undefined ? `$${(price.cents / 100).toFixed(2)}` : "",
+  ].filter(Boolean);
+
+  return {
+    summary: `Ready to write ${fields.join(", ")} to ${resolved.targets.length} listing${
+      resolved.targets.length === 1 ? "" : "s"
+    }`,
+    confirmation: {
+      detail: `Write ${fields.join(", ")} to ${names.join(", ")}. This updates the local listing drafts${
+        price.cents !== undefined ? " and the listing price" : ""
+      }; it does not send anything to Printify or publish it.`,
+      payload: {
+        listingIds: resolved.targets.map((listing) => listing.listingId),
+        ...(title !== undefined ? { title } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(tags !== undefined ? { tags } : {}),
+        ...(price.cents !== undefined ? { priceCents: price.cents } : {}),
+      },
+    },
+  };
+}
+
+export async function confirmSaveListingDetails(
+  payload: Record<string, unknown>,
+): Promise<ToolExecResult> {
+  const resolved = await listingTargets(undefined);
+  if (!resolved.ok) return resolved.result;
+
+  const ids = Array.isArray(payload.listingIds)
+    ? payload.listingIds.map((id) => String(id))
+    : [];
+  const targets = resolved.listings.filter((listing) => ids.includes(listing.listingId));
+  if (!targets.length) {
+    return {
+      summary: "The listings changed",
+      error:
+        "Those listings are no longer in the batch. Open the Studio, check the selection, and ask again.",
+    };
+  }
+
+  const title =
+    payload.title === undefined || payload.title === null ? undefined : String(payload.title);
+  const description =
+    payload.description === undefined || payload.description === null
+      ? undefined
+      : String(payload.description);
+  const tags = Array.isArray(payload.tags)
+    ? parseTags(payload.tags.map((tag) => String(tag)))
+    : undefined;
+  const price = priceCentsFromArgs(payload);
+  if (price.error) {
+    return { summary: "Could not read the price", error: price.error };
+  }
+
+  const blueprints = (await loadCachedBlueprints()) ?? [];
+  const productName = catalogProductName(blueprints, resolved.session.blueprintId);
+
+  // Moving the batch to "custom" prices must not change any other listing.
+  // Pin every active listing that is not being written to its current value.
+  let nextSession = resolved.session;
+  if (price.cents !== undefined) {
+    const listingPrices: Record<string, number> = {
+      ...(resolved.session.listingPrices ?? {}),
+    };
+    for (const listing of resolved.listings) {
+      if (!targets.some((target) => target.listingId === listing.listingId)) {
+        listingPrices[listing.listingId] = priceForListing(
+          resolved.session,
+          listing.listingId,
+        );
+      }
+    }
+    for (const target of targets) listingPrices[target.listingId] = price.cents;
+    nextSession = {
+      ...resolved.session,
+      priceMode: "custom",
+      priceCents: resolved.session.priceCents ?? 1999,
+      listingPrices,
+    };
+  }
+
+  let saved = 0;
+  for (const target of targets) {
+    const rows = await db.listingDrafts
+      .where("designId")
+      .equals(target.listingId)
+      .toArray();
+    const existing = rows.sort((a, b) => a.updatedAt - b.updatedAt)[rows.length - 1];
+
+    // The hybrid session is the details page's per-design write: the values
+    // being saved stand in for the templates, and only THIS listing is passed,
+    // so other drafts and the stored templates are untouched.
+    const currentTitle =
+      existing?.title ??
+      renderTitle(resolved.session.titleTemplate, target.designName, productName);
+    const currentDescription =
+      existing?.description ??
+      renderTemplate(
+        resolved.session.descriptionTemplate,
+        target.designName,
+        productName,
+        "",
+        5000,
+      );
+    const currentTags = existing?.tags ?? parseTags(resolved.session.tags);
+
+    const perDesignSession: StudioSession = {
+      ...nextSession,
+      titleTemplate: title ?? currentTitle,
+      descriptionTemplate: description ?? currentDescription,
+      tags: tags ?? currentTags,
+      category: existing?.category ?? (resolved.session.category ?? "").trim(),
+      quantity: existing?.quantity ?? resolved.session.quantity,
+      updatedAt: Date.now(),
+    };
+
+    await saveStudioListingDrafts({
+      session: perDesignSession,
+      listings: [target],
+      productName,
+      // A copy edit must not newly lock an image selection the user has not
+      // confirmed; an existing locked selection still stays locked.
+      lockSelection: false,
+      copyMode: "regenerate",
+    });
+    saved++;
+  }
+
+  if (price.cents !== undefined) await saveSession(nextSession);
+
+  return {
+    summary: `Saved listing details for ${targets.length} listing${
+      targets.length === 1 ? "" : "s"
+    }`,
+    result: {
+      saved,
+      listingIds: targets.map((listing) => listing.listingId),
+      designNames: targets.map((listing) => listing.designName),
+      ...(title !== undefined ? { title } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(tags !== undefined ? { tags } : {}),
+      ...(price.cents !== undefined ? { priceCents: price.cents } : {}),
+      note: "Saved to the local listing drafts. Nothing was sent to Printify or published.",
+    },
   };
 }
 
@@ -1271,8 +1579,12 @@ export async function executeTool(
         return await listLibrary(args);
       case "browse_printify_catalog":
         return await browsePrintifyCatalog(args);
+      case "etsy_research":
+        return await etsyResearch(args);
       case "draft_listing":
         return await draftListing(args);
+      case "save_listing_details":
+        return await proposeSaveListingDetails(args);
       case "create_batch_job":
         return await proposeBatchJob(args);
       case "create_mockup_render":
@@ -1312,4 +1624,5 @@ export const CONFIRM_TOOL_RUNNERS: Record<string, ConfirmToolRunner> = {
   create_ink_variant: confirmInkVariant,
   remove_background: confirmRemoveBackground,
   save_chat_image: confirmSaveChatImage,
+  save_listing_details: confirmSaveListingDetails,
 };

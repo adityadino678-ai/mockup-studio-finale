@@ -9,6 +9,10 @@
  * printify.com tab. The result (or the failure) is dispatched straight back to
  * the page.
  *
+ * It also forwards `mockup-studio:etsy-research-request` as `MS_ETSY_RESEARCH`,
+ * so the app can fall back to the public Etsy search page when no Etsy API key
+ * is configured. That path carries a query string only.
+ *
  * It reads nothing else from the page: no tokens, no crypto, no storage. The
  * page hands over a payload that was already built from ids, URLs, filenames
  * and titles, and this file only checks that it really is that payload.
@@ -22,7 +26,11 @@
   var EVENT_REQUEST = "mockup-studio:apply-request";
   var EVENT_RESULT = "mockup-studio:apply-result";
   var EVENT_ERROR = "mockup-studio:apply-error";
+  var EVENT_ETSY_REQUEST = "mockup-studio:etsy-research-request";
+  var EVENT_ETSY_RESULT = "mockup-studio:etsy-research-result";
+  var EVENT_ETSY_ERROR = "mockup-studio:etsy-research-error";
   var MS_APPLY = "MS_APPLY";
+  var MS_ETSY_RESEARCH = "MS_ETSY_RESEARCH";
 
   function originAllowed() {
     if (location.origin === "https://mockup-studio.adityadino678.workers.dev") return true;
@@ -68,6 +76,22 @@
     try {
       window.dispatchEvent(
         new CustomEvent(EVENT_RESULT, { detail: { ok: true, requestId: requestId, results: results } }),
+      );
+    } catch (e) {}
+  }
+
+  function emitEtsyResult(requestId, cards) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(EVENT_ETSY_RESULT, { detail: { ok: true, requestId: requestId, cards: cards } }),
+      );
+    } catch (e) {}
+  }
+
+  function emitEtsyError(requestId, error) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(EVENT_ETSY_ERROR, { detail: { requestId: requestId, error: error } }),
       );
     } catch (e) {}
   }
@@ -126,11 +150,64 @@
     }
   }
 
+  function onEtsyResearchRequest(event) {
+    var detail = event && event.detail;
+    if (!detail || typeof detail !== "object") return; /* nothing to forward */
+
+    var query =
+      typeof detail.query === "string" ? detail.query.replace(/\s+/g, " ").trim() : "";
+    var requestId = requestIdOf(detail);
+
+    /* A query is the only thing this path accepts. It is length-checked so the
+       extension never opens a tab for an empty or absurdly long string. */
+    if (query.length < 2 || query.length > 120) {
+      emitEtsyError(
+        requestId,
+        "Mockup Studio Bridge: the Etsy query must be 2-120 characters.",
+      );
+      return;
+    }
+
+    try {
+      chrome.runtime.sendMessage(
+        { type: MS_ETSY_RESEARCH, query: query, requestId: requestId },
+        function (response) {
+          if (chrome.runtime.lastError) {
+            var why = chrome.runtime.lastError.message || "the extension could not be reached";
+            emitEtsyError(requestId, "Mockup Studio Bridge: " + why);
+            return;
+          }
+          if (!response || typeof response !== "object") {
+            emitEtsyError(requestId, "Mockup Studio Bridge: no answer from the extension.");
+            return;
+          }
+          if (response.ok !== true || !Array.isArray(response.cards)) {
+            emitEtsyError(
+              requestId,
+              typeof response.error === "string" && response.error
+                ? "Mockup Studio Bridge: " + response.error
+                : "Mockup Studio Bridge could not read Etsy.",
+            );
+            return;
+          }
+          emitEtsyResult(requestId, response.cards);
+        },
+      );
+    } catch (error) {
+      emitEtsyError(
+        requestId,
+        "Mockup Studio Bridge: " +
+          (error && error.message ? error.message : "could not reach the extension"),
+      );
+    }
+  }
+
   /* Presence, announced now and kept marked if the app rebuilds the DOM. */
   markPresence();
   announce();
 
   window.addEventListener(EVENT_REQUEST, onApplyRequest);
+  window.addEventListener(EVENT_ETSY_REQUEST, onEtsyResearchRequest);
 
   try {
     var observer = new MutationObserver(function () {

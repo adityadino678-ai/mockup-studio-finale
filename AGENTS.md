@@ -56,7 +56,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 484 unit tests
+npm run test          # 511 unit tests
 npm run test:e2e      # 35 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
@@ -217,8 +217,8 @@ swallow the rest of the code. Use `/* ... */`; the unit test parses the exact
 newline-stripped source the browser runs.
 
 **The companion extension (`extension/`) automates the last step.** It is a
-local Chrome/Edge MV3 unpacked prototype that loads only on `printify.com` and
-the app origins. Its content script announces itself
+local Chrome/Edge MV3 unpacked prototype that loads on `printify.com`,
+`etsy.com` and the app origins. Its content script announces itself
 (`<html data-mockup-studio-ext="1">` + `mockup-studio:extension-ready`); on
 `mockup-studio:apply-request` the service worker opens the first product in a
 background printify.com tab, `chrome.scripting.executeScript` runs the SAME
@@ -226,14 +226,17 @@ apply logic as the bookmarklet in the isolated world (same origin, cookies and
 `localStorage`, `credentials:"include"`), closes the tab, and answers via
 `mockup-studio:apply-result`/`apply-error`. No `chrome.storage`, no remote code,
 no API key in the extension, no payload persisted - it is held in memory for
-one run. `extension/protocol.md` is the contract; `extension/STORE.md` lists
-what store publishing needs (replace icons, privacy policy, fee). The app keeps
-the clipboard + bookmarklet path as the fallback when the extension is absent,
-so the one-click button appears only after the user installs it once. Competitor
-research (Mockup Maestro, Skalefy, Printify bulk tools) found NO server-side
-equivalent: every tool either uses Printify's default mockups or a browser
-extension running inside the user's printify.com session, which is exactly this
-design.
+one run. It has a second job: when the app has no working Etsy keystring, it
+opens `etsy.com/search?q=...` in a background tab, injects
+`extension/etsy-research.js`, returns the public titles/prices/URLs and closes
+the tab (see the Etsy section below). `extension/protocol.md` is the contract;
+`extension/STORE.md` lists what store publishing needs (replace icons, privacy
+policy, fee). The app keeps the clipboard + bookmarklet path as the fallback
+when the extension is absent, so the one-click button appears only after the
+user installs it once. Competitor research (Mockup Maestro, Skalefy, Printify
+bulk tools) found NO server-side equivalent: every tool either uses Printify's
+default mockups or a browser extension running inside the user's printify.com
+session, which is exactly this design.
 
 `POST /api/printify/mockups` (`src/pages/api/printify/mockups.ts`) is the
 server half: it requires `confirm:true`, is same-origin only, requires
@@ -462,13 +465,20 @@ mockups and finally a live product.
   fixes each miss.
   - **Send and Publish are two separate, confirm-gated actions.** *Send* creates
     the product draft if this listing has none (the same path
-    `confirmPrintifyProduct` uses), uploads the active listing's selected
-    renders through `/api/printify/mockups`, and then uploads every OTHER
-    batch listing that already has a Printify product, so one payload carries
-    the mockup SELECTION for the whole batch (exactly like Listing images'
-    Send). A listing with no product, no current render, or a partial render
-    set is skipped with its reason in the step and a toast - never sent a
-    shorter selection. The payload is applied through the companion extension
+    `confirmPrintifyProduct` uses); when it already has a Printify product,
+    Send **updates that product first** with a partial
+    `PUT /shops/{shop_id}/products/{product_id}.json`. The first pipeline step
+    is therefore "Create or update the Printify product". Only
+    title/description/tags and, when a price is set, every existing variant
+    (with `is_enabled` preserved) are sent - never `print_areas`. The update
+    runs BEFORE the image upload, so `/api/printify/mockups`'s stale-title check
+    compares against the new title. Then Send uploads the active listing's
+    selected renders through `/api/printify/mockups`, and then uploads every
+    OTHER batch listing that already has a Printify product, so one payload
+    carries the mockup SELECTION for the whole batch (exactly like Listing
+    images' Send). A listing with no product, no current render, or a partial
+    render set is skipped with its reason in the step and a toast - never sent
+    a shorter selection. The payload is applied through the companion extension
     (one click) or the clipboard/bookmarklet bridge (only a printify.com tab
     can write it). It then STOPS at `updated`: the products are updated in
     Printify and still unpublished. *Publish* is a
@@ -1145,18 +1155,24 @@ position pickers here:
   models flagged as reasoning models. The floating `AssistantPanel` is now just a
   launcher for `/agent`.
 - **Agent tools (M2) are real, and only real.** `src/lib/ai/tools.ts` is the
-  isomorphic registry of twelve tools. Five are read-only: `explain_howto`,
-  `summarize_workspace`, `list_library` (designs/mockups by name), and
+  isomorphic registry of fourteen tools. Six are read-only: `explain_howto`,
+  `summarize_workspace`, `list_library` (designs/mockups by name),
   `browse_printify_catalog` (product types / print providers / variants),
-  plus `draft_listing` (calls the existing `/api/ai/seo`). Seven write:
-  `create_batch_job`, `create_printify_product`, `create_mockup_render`,
-  `save_placement`, `create_ink_variant`, `remove_background`, and
-  `save_chat_image`. Every writing tool is marked `confirm` and **writes nothing**
-  until the user clicks Create on the tool card; only then does
+  `draft_listing` (calls the existing `/api/ai/seo`), and `etsy_research`
+  (API first, browser-extension fallback). Eight write: `create_batch_job`,
+  `create_printify_product`, `create_mockup_render`, `save_placement`,
+  `create_ink_variant`, `remove_background`, `save_chat_image`, and
+  `save_listing_details`. Every writing tool is marked `confirm` and **writes
+  nothing** until the user clicks Create on the tool card; only then does
   `src/lib/client/tools.ts` run the real work through `CONFIRM_TOOL_RUNNERS`
   (`confirmBatchJob`, `confirmPrintifyProduct`, `confirmMockupRender`,
   `confirmSavePlacement`, `confirmInkVariant`, `confirmRemoveBackground`,
-  `confirmSaveChatImage`). `create_printify_product` auto-resolves the blueprint
+  `confirmSaveChatImage`, `confirmSaveListingDetails`). `save_listing_details`
+  is the write counterpart of `draft_listing`: it writes the title, description,
+  tags and/or price into the local `listingDrafts` (and `session.listingPrices`
+  when a price is present), so the agent can actually change what will be sent,
+  not just return copy ideas. `etsy_research` tries `/api/etsy/research` first
+  and only falls back to the extension when that endpoint is missing or fails. `create_printify_product` auto-resolves the blueprint
   from a product type (catalog keyword search), then a print provider and up to
   100 variants, but never invents ids — with no product type it asks. `create_ink_variant`
   and `remove_background` reuse the Studio's own canvas code
@@ -1282,12 +1298,18 @@ position pickers here:
 - **Cloudflare calls `workers.dev` "not business-critical"** — a custom domain is
   the next step if this ever matters commercially.
 - **Etsy *research* is built; Etsy listing *submission* is still deliberately
-  not implemented.** The autopilot reads active-listing data with a developer
-  keystring (API v3, no OAuth, no scraping) and uses it to ground copy. It does
-  not create an Etsy listing or connect an Etsy shop, because v3 submission
-  needs OAuth app registration. Settings shows the keystring card **enabled**
-  with a Test research button; the card says read-only and never implies that
-  research is a search-volume or sales report.
+  not implemented.** The preferred path reads active-listing data with a
+  developer keystring (API v3, no OAuth) and uses it to ground copy. When no key
+  is configured, or Etsy rejects it, the agent's `etsy_research` tool falls back
+  to the companion extension: the extension opens the public
+  `etsy.com/search?q=...` page in a background tab in the USER'S browser, reads
+  the listing cards, and returns titles/prices/URLs. That path cannot read tags,
+  so it returns `topTags: []` and says so; nothing is scraped server-side, and
+  no Etsy credential or query reaches Mockup Studio's server. It does not create
+  an Etsy listing or connect an Etsy shop, because v3 submission needs OAuth app
+  registration. Settings shows the keystring card **enabled** with a Test
+  research button; the card says read-only and never implies that research is a
+  search-volume or sales report.
 - **Background removal is local and deliberately limited.** It handles a
   solid or faded backdrop; a busy photographic background has to be cut out
   before upload. There is no AI model and no hosted service, so there is

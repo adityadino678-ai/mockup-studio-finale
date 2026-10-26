@@ -1,13 +1,15 @@
 // ---------------------------------------------------------------------------
-// Etsy Open API v3 research.
+// Etsy research.
 //
-// The app is a READ-ONLY Etsy client. It uses the public keystring to search
-// active listings, then reports what it observed: how many listings matched,
-// which tags/title words recur, the sampled price range and a few examples.
+// The app is a READ-ONLY Etsy client. The preferred path uses the public
+// keystring to search active listings. When no key is available, the companion
+// extension can read the public search page in the user's own browser and
+// returns the same shape. Both report only what they observed: titles, tags
+// when available, and a sampled price range.
 //
 // It deliberately carries no "search volume", sales, revenue or ranking data.
-// Etsy's public API does not expose those, and inventing them would make the
-// autopilot worse, not better.
+// Etsy does not expose those, and inventing them would make the autopilot
+// worse, not better.
 // ---------------------------------------------------------------------------
 
 /** One active listing used as an example. */
@@ -28,10 +30,14 @@ export interface EtsyTermCount {
 export interface EtsyResearch {
   query: string;
   searchedAt: number;
-  source: "etsy-api";
-  /** Etsy's `count`: every active listing matching the query. */
+  /** `etsy-api` is the keystring path; `etsy-browser` is the extension. */
+  source: "etsy-api" | "etsy-browser";
+  /**
+   * The API's `count` (every matching active listing), or — in browser mode —
+   * the number of cards the search page displayed. It is never a made-up total.
+   */
   activeListings: number;
-  /** How many listings were actually sampled (the API limit). */
+  /** How many listings were actually sampled. */
   sampled: number;
   topTags: EtsyTermCount[];
   titleTerms: EtsyTermCount[];

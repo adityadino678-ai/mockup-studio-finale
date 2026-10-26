@@ -2,7 +2,11 @@
 
 Everything the extension and the app say to each other, exactly. Implemented in
 `extension/content-app.js` (the app-facing half) and `extension/background.js`
-(the Printify half). Plain DOM events on the app page; nothing else.
+(the Printify and Etsy half). Plain DOM events on the app page; nothing else.
+
+The extension has two jobs: **apply the mockup selection to a Printify product**
+(section 2) and **read the public Etsy search page when the app has no Etsy API
+key** (section 6).
 
 The extension is **optional**. The app keeps the clipboard + bookmarklet path as
 the fallback, so the one-click button only appears when the extension is loaded.
@@ -143,6 +147,11 @@ backoff ran out.
 6. closes the tab with `chrome.tabs.remove(tabId)` and answers through
    `sendResponse`.
 
+`MS_ETSY_RESEARCH` takes a different branch: it opens
+`https://www.etsy.com/search?q=<query>` in a background tab, injects
+`scrapeEtsySearch` from `etsy-research.js`, returns the cards and closes the
+tab. See section 6.
+
 No `chrome.storage` is used or requested; the payload lives in a module-level
 variable for the length of that one run.
 
@@ -188,7 +197,67 @@ function applyWithExtension() {
 
 Remember to remove the three listeners when the dialog closes.
 
-## 6. What the extension will never do
+## 6. Etsy research fallback
+
+The app prefers `POST /api/etsy/research` (an Etsy keystring in Settings). When
+that is missing or rejected, it asks the extension to read the public Etsy
+search page in the user's own browser.
+
+The app dispatches on `window`:
+
+```js
+new CustomEvent("mockup-studio:etsy-research-request", {
+  detail: { query: "personalized cat mug", requestId },
+});
+```
+
+- `query` — 2–120 characters. Nothing else is accepted.
+- `requestId` — any string, echoed back so the app can match a late answer.
+
+The content script forwards `{ type: "MS_ETSY_RESEARCH", query, requestId }`.
+The service worker opens `https://www.etsy.com/search?q=<query>` in a background
+tab, waits for it to load, injects `etsy-research.js`'s `scrapeEtsySearch`, and
+closes the tab. It uses the user's own Etsy session.
+
+On success:
+
+```js
+new CustomEvent("mockup-studio:etsy-research-result", {
+  detail: {
+    ok: true,
+    requestId,
+    cards: [
+      {
+        title: "Personalized Cat Mug",
+        priceText: "$24.99",
+        url: "https://www.etsy.com/listing/123/cat-mug",
+      },
+    ],
+  },
+});
+```
+
+On failure — a verification page, no Etsy session, a closed tab, or an invalid
+query:
+
+```js
+new CustomEvent("mockup-studio:etsy-research-error", {
+  detail: { requestId, error },
+});
+```
+
+`cards` is capped at 48. `priceText` is the label exactly as Etsy showed it; the
+app parses it. `url` is empty when Etsy did not expose a listing URL.
+
+**What browser mode cannot see: tags.** Etsy's search cards expose the title and
+price, not the listing tags. The app therefore reports `topTags: []` and says so
+in the disclaimer. It never invents tags from the title.
+
+**This is a fallback, not a scraping service.** It only runs when the API cannot
+answer, it runs in the user's browser, and it sends no query or result to Mockup
+Studio's server.
+
+## 7. What the extension will never do
 
 - It will not ask for, read or send the app's Printify API key. It does not know
   it exists.
@@ -196,5 +265,8 @@ Remember to remove the three listeners when the dialog closes.
   `localStorage.session` read and the `XSRF-TOKEN` cookie to the injected code,
   which runs on `printify.com` and only ever talks to `printify.com`.
 - It will not forward data from the page that is not a valid payload.
-- It will not run anywhere except `printify.com` and the app origins listed in
-  the manifest.
+- It will not send an Etsy query or its results to Mockup Studio's server, or to
+  any other server. The Etsy page is read in the user's own browser.
+- It will not read Etsy listing tags. Search cards do not expose them.
+- It will not run anywhere except `printify.com`, `etsy.com` and the app origins
+  listed in the manifest.

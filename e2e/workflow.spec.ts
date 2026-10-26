@@ -2105,6 +2105,37 @@ test.describe("core workflow", () => {
       });
     });
 
+    // Send must UPDATE the linked product's copy before it uploads images.
+    // Both calls are recorded in order so a regression that skips the update,
+    // or uploads first, is visible.
+    const productCalls: string[] = [];
+    const updateBodies: Array<{
+      productId?: string;
+      title?: string;
+      description?: string;
+      tags?: string[];
+      price?: number;
+    }> = [];
+    await page.route("**/api/printify/products", async (route) => {
+      const body = JSON.parse(route.request().postData() ?? "{}") as {
+        productId?: string;
+        title?: string;
+        description?: string;
+        tags?: string[];
+        price?: number;
+      };
+      updateBodies.push(body);
+      productCalls.push(`update:${body.productId ?? "?"}`);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          shopId: 222,
+          product: { id: body.productId ?? "prod-1", title: body.title ?? "design-a tee" },
+        }),
+      });
+    });
+
     let publishCalls = 0;
     const publishProductIds: string[] = [];
     await page.route("**/api/printify/publish", async (route) => {
@@ -2150,6 +2181,7 @@ test.describe("core workflow", () => {
       };
       const count = Array.isArray(body.images) ? body.images.length : 0;
       uploadedProductIds.push(body.productId ?? "prod-1");
+      productCalls.push(`upload:${body.productId ?? "prod-1"}`);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -2241,7 +2273,9 @@ test.describe("core workflow", () => {
 
     await page.getByRole("button", { name: "Send to Printify" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByRole("button", { name: "Create & upload" }).click();
+    // The active listing already has a product, so the same Send click now
+    // says "Update & upload" - no second product is created.
+    await page.getByRole("button", { name: "Update & upload" }).click();
 
     // The one-click apply is offered, and it is the extension.
     const apply = page.getByRole("button", { name: "Apply in Printify" });
@@ -2252,6 +2286,16 @@ test.describe("core workflow", () => {
     await expect(page.getByText(/Updated in Printify — still unpublished/)).toBeVisible({
       timeout: 30_000,
     });
+    // The linked product was UPDATED before its images were uploaded, with
+    // the listing's current copy and price - no second product was created.
+    expect(updateBodies).toHaveLength(1);
+    expect(updateBodies[0]).toMatchObject({
+      productId: "prod-1",
+      description: "A soft, everyday tee.",
+      price: 1999,
+    });
+    expect(updateBodies[0].title).toContain("design-a");
+    expect(productCalls).toEqual(["update:prod-1", "upload:prod-1", "upload:prod-2"]);
     // ONE press covered BOTH designs: both products were uploaded and both
     // were in the single apply payload, even though only design-a's tab was
     // open. Publish is still untouched.

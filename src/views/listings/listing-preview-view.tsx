@@ -187,6 +187,14 @@ interface UploadResponse {
   detail?: string;
 }
 
+/** The update endpoint's answer: the product as Printify now holds it. */
+interface UpdateProductResponse {
+  product?: { id?: string; title?: string };
+  shopId?: number;
+  error?: string;
+  detail?: string;
+}
+
 /** One row of GET /api/printify/shops. */
 interface ShopOption {
   id: number;
@@ -326,10 +334,10 @@ function planSteps(params: {
   return [
     {
       key: "create",
-      title: "Create the Printify product draft",
-      status: params.linked ? "skipped" : "pending",
+      title: "Create or update the Printify product",
+      status: "pending",
       detail: params.linked
-        ? `Already created (${params.linked.productId}) — this step is skipped, and the existing product is the only one that can be updated.`
+        ? `Update the existing product (${params.linked.productId}) with this listing's current title, description, tags and price. No new product is created, and its print areas and artwork are left alone.`
         : "This listing's title, description, tags, price and print area, through the same creation path the agent's Create product card uses. The product is an UNPUBLISHED draft.",
     },
     {
@@ -1112,6 +1120,43 @@ export function ListingPreviewView() {
     }
   };
 
+  /**
+   * Pushes the listing's current copy to an EXISTING Printify product.
+   *
+   * The same Send click does this before uploading images, so a draft created
+   * earlier stops showing stale copy. It sends only title/description/tags and
+   * the price; the endpoint resolves the product's real shop and echoes every
+   * variant back, so print areas and enabled variants are not rewritten.
+   */
+  const updateListingProduct = async (params: {
+    productId: string;
+    shopId?: number;
+    copy: ListingCopy;
+  }): Promise<{ shopId?: number; title?: string }> => {
+    const response = await authedFetch("/api/printify/products", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirm: true,
+        productId: params.productId,
+        shopId: params.shopId,
+        title: params.copy.title,
+        description: params.copy.description,
+        tags: params.copy.tags,
+        // A listing with no price is blocked before this runs, but never send
+        // a zero: Printify would reject the whole update.
+        ...(params.copy.hasPrice ? { price: params.copy.priceCents } : {}),
+      }),
+    });
+    const data = (await response.json().catch(() => null)) as UpdateProductResponse | null;
+    if (!response.ok) throw new Error(upstreamError(data, response.status));
+    return {
+      shopId: typeof data?.shopId === "number" ? data.shopId : params.shopId,
+      title:
+        typeof data?.product?.title === "string" ? data.product.title : params.copy.title,
+    };
+  };
+
   /** Uploads the listing's current renders, in order, in chunks of eight. */
   const uploadListingImages = async (params: {
     listing: StudioListing;
@@ -1282,9 +1327,25 @@ export function ListingPreviewView() {
           detail: `Created draft ${productId} in shop ${shopId ?? "resolved by Printify"} — still unpublished.`,
         });
       } else {
+        // The product already exists: Send updates its copy instead of
+        // creating a second product. This is what makes edits made after the
+        // draft was created (title, description, tags, price) reach Printify.
         patchStep("create", {
-          status: "skipped",
-          detail: `Already created (${productId}) — not created twice.`,
+          status: "running",
+          detail: `Updating ${productId}: title, description, tags${
+            copy.hasPrice ? " and price" : ""
+          }. No new product is created.`,
+        });
+        const updated = await updateListingProduct({ productId, shopId, copy });
+        shopId = updated.shopId ?? shopId;
+        // The title is part of the update, so the upload route's stale-title
+        // check must compare against the NEW title, not the one from before.
+        productTitle = updated.title ?? copy.title ?? productTitle;
+        patchStep("create", {
+          status: "done",
+          detail: `Updated product ${productId} in shop ${
+            shopId ?? "resolved by Printify"
+          } — copy and price only; print areas and artwork were not touched.`,
         });
       }
 
@@ -2074,7 +2135,8 @@ export function ListingPreviewView() {
                     </p>
                     <p className="text-[11px]">
                       The button above stays off now: publishing an already-published product errors
-                      upstream, and this page has no update path. Edit the live product on Printify.
+                      upstream. This page updates unpublished drafts; edit the live product on
+                      Printify.
                     </p>
                   </div>
                 )}
@@ -2101,7 +2163,7 @@ export function ListingPreviewView() {
             <DialogDescription>
               {pipeline?.phase === "confirm"
                 ? pipeline?.intent === "send"
-                  ? "Create the draft, upload the images, apply the mockups. The run stops there with the product updated in Printify and unpublished — publishing is never automatic."
+                  ? "Create or update the draft, upload the images, apply the mockups. The run stops there with the product updated in Printify and unpublished — publishing is never automatic."
                   : "Four steps, in order. The first three send the listing to Printify; the fourth publishes only when you press the separate publish button."
                 : pipeline?.phase === "awaiting-mockups"
                   ? "The product exists and its images are uploaded. Printify's selection step only works in its own web session, so the run waits for you — the extension does it in one click, the bookmarklet is the fallback."
@@ -2365,7 +2427,8 @@ export function ListingPreviewView() {
                       Cancel
                     </Button>
                     <Button size="sm" onClick={() => void startRun()} disabled={publishing}>
-                      <Sparkles className="h-3.5 w-3.5" /> Create & upload
+                      <Sparkles className="h-3.5 w-3.5" />{" "}
+                      {pipelineLinked ? "Update & upload" : "Create & upload"}
                     </Button>
                   </>
                 ) : pipeline.phase === "awaiting-mockups" ? (

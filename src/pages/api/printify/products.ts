@@ -4,6 +4,19 @@ import { credentialsFromRequest } from "@/lib/server/creds";
 import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/server/printify";
 import { clampPlacement } from "@/lib/printify/fit";
 
+interface UpdateProductBody {
+  /** Explicit user confirmation is required before anything changes remotely. */
+  confirm: boolean;
+  productId: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  /** Price in cents applied to every existing variant. */
+  price?: number;
+  /** Preferred shop; the server still verifies the product's real owner. */
+  shopId?: number;
+}
+
 interface CreateProductBody {
   /** Explicit user confirmation is required before anything is created remotely. */
   confirm: boolean;
@@ -316,6 +329,111 @@ export const POST: APIRoute = async ({ request }) => {
     }
     return json(
       { error: error instanceof Error ? error.message : "Unexpected error creating product" },
+      500,
+    );
+  }
+};
+
+/**
+ * PUT /api/printify/products — update an existing product's copy and price.
+ *
+ * This is the Listing preview's "Send" half for a listing that already has a
+ * Printify draft: title, description, tags and the price on every variant. It
+ * never sends print areas, so it cannot change the artwork, and it never
+ * publishes - publishing stays the separate `/api/printify/publish` call.
+ */
+export const PUT: APIRoute = async ({ request }) => {
+  const creds = credentialsFromRequest(request);
+  const client = createPrintifyClient(creds.printify?.apiKey);
+
+  if (!client.configured) {
+    return json(
+      {
+        error:
+          "Printify is not configured. Paste your Printify API key in Settings, or set PRINTIFY_API_KEY on the server, before updating products.",
+      },
+      503,
+    );
+  }
+
+  let body: UpdateProductBody;
+  try {
+    body = (await request.json()) as UpdateProductBody;
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (body.confirm !== true) {
+    return json(
+      { error: "Confirmation required: updating a product on Printify has external side effects." },
+      428,
+    );
+  }
+
+  const productId = typeof body.productId === "string" ? body.productId.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(productId)) {
+    return json({ error: "A valid productId is required" }, 400);
+  }
+
+  const hasTitle = typeof body.title === "string";
+  const hasDescription = typeof body.description === "string";
+  const hasTags = Array.isArray(body.tags);
+  const hasPrice = body.price !== undefined;
+  if (!hasTitle && !hasDescription && !hasTags && !hasPrice) {
+    return json(
+      { error: "Nothing to update: send a title, description, tags or price." },
+      400,
+    );
+  }
+  if (hasTitle && !body.title?.trim()) {
+    return json({ error: "Product title cannot be empty" }, 400);
+  }
+  if (body.shopId != null && normalizeShopId(body.shopId) === undefined) {
+    return json({ error: "shopId must be a positive integer" }, 400);
+  }
+
+  let price: number | undefined;
+  if (hasPrice) {
+    price = Math.round(Number(body.price));
+    if (!Number.isFinite(price) || price <= 0) {
+      return json(
+        { error: "price must be a positive integer number of cents (e.g. 2499 for $24.99)" },
+        400,
+      );
+    }
+  }
+
+  try {
+    const updated = await client.updateProduct({
+      productId,
+      shopId: normalizeShopId(body.shopId) ?? creds.printify?.shopId,
+      title: hasTitle ? body.title!.trim() : undefined,
+      description: hasDescription ? body.description : undefined,
+      tags: hasTags ? sanitizeTags(body.tags) : undefined,
+      price,
+    });
+    return json({ product: updated.product, shopId: updated.shopId });
+  } catch (error) {
+    if (error instanceof PrintifyError) {
+      const detail =
+        error.detail === undefined
+          ? undefined
+          : (typeof error.detail === "string"
+              ? error.detail
+              : JSON.stringify(error.detail)
+            ).slice(0, 400);
+      const status =
+        error.status === 429
+          ? 429
+          : error.status === 400 || error.status === 422 || error.status === 413
+            ? 400
+            : error.status === 404
+              ? 404
+              : 502;
+      return json({ error: error.message, detail, status: error.status }, status);
+    }
+    return json(
+      { error: error instanceof Error ? error.message : "Unexpected error updating product" },
       500,
     );
   }
