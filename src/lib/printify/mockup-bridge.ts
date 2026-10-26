@@ -29,6 +29,14 @@ export interface PrintifyBridgePayload {
   source: "mockup-studio";
   version: 1;
   createdAt: string;
+  /**
+   * Replace the product's current mockup selection with `products[].uploads`.
+   *
+   * This is what removes Printify's generated/default mockups. It is explicit
+   * so an older bookmarklet that ignores the field cannot be mistaken for the
+   * new behaviour, and `false` remains available for a deliberate merge.
+   */
+  replace: boolean;
   products: PrintifyBridgeProduct[];
 }
 
@@ -37,6 +45,7 @@ export function buildBridgePayload(products: PrintifyBridgeProduct[]): PrintifyB
     source: "mockup-studio",
     version: 1,
     createdAt: new Date().toISOString(),
+    replace: true,
     products,
   };
 }

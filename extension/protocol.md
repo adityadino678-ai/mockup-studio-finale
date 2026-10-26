@@ -17,34 +17,51 @@ the fallback, so the one-click button only appears when the extension is loaded.
 
 The content script runs on the app origins at `document_idle` and immediately:
 
-1. sets the attribute
+1. sets the attributes
 
    ```html
-   <html data-mockup-studio-ext="1">
+   <html data-mockup-studio-ext="1"
+         data-mockup-studio-ext-protocol="2"
+         data-mockup-studio-ext-etsy="1"
+         data-mockup-studio-ext-version="1.2.0">
    ```
 
-   (and the same attribute on `<body>`; a `MutationObserver` re-marks it if the
-   app rebuilds the DOM), and
+   (and the marker on `<body>`; a `MutationObserver` re-marks it if the app
+   rebuilds the DOM), and
 2. dispatches on `window`
 
    ```js
    new CustomEvent("mockup-studio:extension-ready", {
-     detail: { version: 1, marker: "data-mockup-studio-ext" },
+     detail: {
+       version: 2,
+       protocol: 2,
+       etsy: true,
+       extensionVersion: "1.2.0",
+       marker: "data-mockup-studio-ext",
+     },
    });
    ```
 
-Safe detection, both work and are cheap:
+Safe detection:
 
 ```js
-const ready = document.documentElement.getAttribute("data-mockup-studio-ext") === "1";
+const root = document.documentElement;
+const present = root.getAttribute("data-mockup-studio-ext") === "1";
+const protocol = Number(root.getAttribute("data-mockup-studio-ext-protocol") || "0");
+const etsy = root.getAttribute("data-mockup-studio-ext-etsy") === "1";
+const ready = present && protocol >= 2; // this app's protocol
 window.addEventListener("mockup-studio:extension-ready", () => setReady(true));
 ```
 
-Use whichever fits the component's lifecycle. The attribute is the simple answer
-on first render; the event covers an extension loaded (or reloaded) after the
-page was already open — which is exactly the "reload the page" case in the README.
+Use whichever fits the component's lifecycle. The attributes are the simple
+answer on first render; the event covers an extension loaded (or reloaded) after
+the page was already open — which is exactly the "reload the page" case in the
+README.
 
-If neither is there, the extension is not loaded in this browser: keep the
+**Protocol 2 is required.** An older build only sets the marker, so it is
+reported as "reload the extension" instead of being used: it would merge the
+mockups instead of replacing them and cannot answer Etsy research. If the
+marker is absent, the extension is not loaded in this browser: keep the
 bookmarklet steps.
 
 ## 2. Asking for an apply
@@ -62,13 +79,20 @@ new CustomEvent("mockup-studio:apply-request", {
   serialises:
 
   ```ts
-  { source: "mockup-studio", version: 1, createdAt: string,
+  { source: "mockup-studio", version: 1, createdAt: string, replace: boolean,
     products: [ { shopId: number, productId: string, productTitle: string,
                   uploads: [ { libraryId, mockupId, src, filename } ] } ] }
   ```
 
   **Never add credentials to it.** No API key, no token, no session. It is ids,
   URLs, file names and titles.
+
+  `replace: true` (what the app sends) makes the uploads the product's WHOLE
+  mockup selection: every group keeps its `group_key`, `label` and
+  `variant_ids`, every group's `mockup_ids` is cleared, and only the new
+  uploads are placed in `not_linked`. That is what removes Printify's
+  generated/default mockups. `replace: false` opts back into the old
+  dedupe/prepend merge; an older payload with no flag is treated as `true`.
 - `requestId` — any string the app makes up (e.g. `crypto.randomUUID()`), echoed
   back so the app can match a late answer to the right dialog. Optional: the
   extension invents one if it is missing, but always send one.
@@ -124,9 +148,9 @@ function summarise(results) {
 ```
 
 A product fails (and the rest still run) when: its existing selection could not
-be read (**skipped, never blindly replaced**), Printify returned 401/403 (the
-session was rejected), Printify returned another error status, or the 429
-backoff ran out.
+be read (the background tab cannot ask, so it **skips rather than blindly
+replacing**), Printify returned 401/403 (the session was rejected), Printify
+returned another error status, or the 429 backoff ran out.
 
 ## 4. Inside the extension
 

@@ -22,6 +22,13 @@
 
 (function () {
   var MARKER_ATTR = "data-mockup-studio-ext";
+  var MARKER_PROTOCOL_ATTR = "data-mockup-studio-ext-protocol";
+  var MARKER_ETSY_ATTR = "data-mockup-studio-ext-etsy";
+  var MARKER_VERSION_ATTR = "data-mockup-studio-ext-version";
+  /* Protocol 2 = replacement apply (the payload's `replace` flag) and Etsy
+     research. The app refuses an older build instead of letting it merge
+     mockups or wait for an Etsy answer that will never arrive. */
+  var PROTOCOL = 2;
   var EVENT_READY = "mockup-studio:extension-ready";
   var EVENT_REQUEST = "mockup-studio:apply-request";
   var EVENT_RESULT = "mockup-studio:apply-result";
@@ -51,9 +58,22 @@
     } catch (e) {}
   }
 
+  function extensionVersion() {
+    try {
+      return chrome.runtime.getManifest().version || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
   function markPresence() {
     try {
-      if (document.documentElement) document.documentElement.setAttribute(MARKER_ATTR, "1");
+      if (document.documentElement) {
+        document.documentElement.setAttribute(MARKER_ATTR, "1");
+        document.documentElement.setAttribute(MARKER_PROTOCOL_ATTR, String(PROTOCOL));
+        document.documentElement.setAttribute(MARKER_ETSY_ATTR, "1");
+        document.documentElement.setAttribute(MARKER_VERSION_ATTR, extensionVersion());
+      }
       if (document.body) document.body.setAttribute(MARKER_ATTR, "1");
     } catch (e) {}
   }
@@ -61,7 +81,15 @@
   function announce() {
     try {
       window.dispatchEvent(
-        new CustomEvent(EVENT_READY, { detail: { version: 1, marker: MARKER_ATTR } }),
+        new CustomEvent(EVENT_READY, {
+          detail: {
+            version: PROTOCOL,
+            protocol: PROTOCOL,
+            etsy: true,
+            extensionVersion: extensionVersion(),
+            marker: MARKER_ATTR,
+          },
+        }),
       );
     } catch (e) {}
   }

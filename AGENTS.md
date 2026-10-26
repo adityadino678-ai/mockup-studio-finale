@@ -56,7 +56,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 511 unit tests
+npm run test          # 529 unit tests
 npm run test:e2e      # 35 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
@@ -186,9 +186,10 @@ server:
    Groups are `{group_key, label, variant_ids, mockup_ids}`; the no-variant
    group is `not_linked`. The web app hides groups with an empty `mockup_ids`
    and uses group order for display, so the first group is the main image.
-   **The bookmarklet preserves empty groups.** Dropping one would lose the
-   product's group configuration; it only makes sure `not_linked` is first and
-   carries the new ids.
+   **The bookmarklet preserves every group's identity, not its old mockups.**
+   Dropping a group would lose the product's variant configuration, so
+   `group_key`, `label` and `variant_ids` survive; replacement clears each
+   group's `mockup_ids` and puts the new ids in `not_linked` (first).
 
 The web session is in `localStorage.session` on **printify.com**:
 `{access_token, embedded, user_id, shop_id}`. CSRF is the readable `XSRF-TOKEN`
@@ -201,15 +202,19 @@ selected renders and builds a payload (`src/lib/printify/mockup-bridge.ts`)
 containing product ids, mockup ids and image URLs only. The bookmarklet
 (`src/lib/printify/bookmarklet.ts`) reads that payload, calls the BFF with the
 user's cookies first, and only on a 401 retries with the session token. It
-**merges** by default: `selected_mockups` is normalised whether the BFF returns
-the keyed object or an array, new ids are deduped and prepended, and every
-group (including an empty one) survives. Any existing entry with a new id is
-not duplicated; `not_linked` becomes the first group. Payload product ids and
+**replaces** by default (`payload.replace !== false`): `selected_mockups` is
+normalised whether the BFF returns the keyed object or an array, only the new
+ids are selected, every group keeps its `group_key`, `label` and `variant_ids`
+but loses its old `mockup_ids`, and `not_linked` becomes the first group. That
+is what removes Printify's generated/default mockups. `replace: false` opts
+back into the old dedupe/prepend merge, and an older payload with no flag is
+treated as replacement. Payload product ids and
 mockup ids must match `[A-Za-z0-9_-]{1,64}` and image URLs must be `https://`,
 so a tampered clipboard payload cannot inject a `javascript:`/`data:` URL.
-If the layout cannot be read (or a 200 is malformed), it asks before replacing.
-Each request has a 30 s abort timeout; it backs off on 429 and runs at most two
-products at once. No token leaves printify.com.
+If the layout cannot be read (or a 200 is malformed), the bookmarklet asks
+before replacing; the extension cannot ask in a background tab, so it skips
+that product and reports why. Each request has a 30 s abort timeout; it backs
+off on 429 and runs at most two products at once. No token leaves printify.com.
 
 A `javascript:` URL has all ASCII newlines/tabs removed before execution, so
 the bookmarklet source must never contain `//` line comments - they would
@@ -218,15 +223,21 @@ newline-stripped source the browser runs.
 
 **The companion extension (`extension/`) automates the last step.** It is a
 local Chrome/Edge MV3 unpacked prototype that loads on `printify.com`,
-`etsy.com` and the app origins. Its content script announces itself
-(`<html data-mockup-studio-ext="1">` + `mockup-studio:extension-ready`); on
-`mockup-studio:apply-request` the service worker opens the first product in a
-background printify.com tab, `chrome.scripting.executeScript` runs the SAME
-apply logic as the bookmarklet in the isolated world (same origin, cookies and
-`localStorage`, `credentials:"include"`), closes the tab, and answers via
+`etsy.com` and the app origins. Its content script announces itself with
+`<html data-mockup-studio-ext="1" data-mockup-studio-ext-protocol="2"
+data-mockup-studio-ext-etsy="1" data-mockup-studio-ext-version="1.2.0">` plus
+`mockup-studio:extension-ready`; on `mockup-studio:apply-request` the service
+worker opens the first product in a background printify.com tab,
+`chrome.scripting.executeScript` runs the SAME apply logic as the bookmarklet in
+the isolated world (same origin, cookies and `localStorage`,
+`credentials:"include"`), closes the tab, and answers via
 `mockup-studio:apply-result`/`apply-error`. No `chrome.storage`, no remote code,
 no API key in the extension, no payload persisted - it is held in memory for
-one run. It has a second job: when the app has no working Etsy keystring, it
+one run. **Protocol 2 is required** (replacement apply + Etsy research). An
+installed build that only sets the old marker is reported as "reload the
+extension" and is never used for one-click apply or Etsy, so it cannot silently
+merge mockups or leave the app waiting for an answer. It has a second job: when
+the app has no working Etsy keystring, it
 opens `etsy.com/search?q=...` in a background tab, injects
 `extension/etsy-research.js`, returns the public titles/prices/URLs and closes
 the tab (see the Etsy section below). `extension/protocol.md` is the contract;
@@ -481,7 +492,15 @@ mockups and finally a live product.
     a shorter selection. The payload is applied through the companion extension
     (one click) or the clipboard/bookmarklet bridge (only a printify.com tab
     can write it). It then STOPS at `updated`: the products are updated in
-    Printify and still unpublished. *Publish* is a
+    Printify and still unpublished. **A copy/price-only Send is a fast path.**
+    When the product exists and the exact selection (ordered mockup ids plus
+    render fingerprints, recorded only after a successful apply) still matches,
+    Send stops after the product `PUT`: no render, no upload, no selection
+    write. The dialog says "Update details only", and the applied signature is
+    stored in `session.listingMockupsApplied`. A changed image, order, render
+    fingerprint or product id falls back to the full pipeline. Listing images'
+    extension apply records the same signature, so Listing preview can fast-path
+    after a send from either page. *Publish* is a
     second, explicit click on **Publish now**, which calls
     `POST /api/printify/publish` with `{confirm:true, productId, shopId}` and is
     only reachable after the selection was applied, so the shop cannot receive
@@ -544,8 +563,8 @@ mockups and finally a live product.
   from the print areas.
   The Send dialog is **one press plus the final step**. It uploads, copies the
   payload automatically, and shows a 3-step indicator (images uploaded →
-  payload copied → render the selection). When the companion extension is
-  loaded the final step is a TRUE one-click: the dialog dispatches
+  payload copied → render the selection). When a protocol-2 companion extension
+  is loaded the final step is a TRUE one-click: the dialog dispatches
   `mockup-studio:apply-request` with the payload object, and the extension
   (`extension/`) opens the product in a BACKGROUND printify.com tab, applies the
   selection with the user's own session, closes the tab, and reports back through
@@ -558,7 +577,9 @@ mockups and finally a live product.
   marker/listener, `apply-request`, `apply-result`/`apply-error`), so the
   extension is offered there too instead of only the bookmarklet. Its apply
   step ends at "updated in Printify" and never publishes; only a separate
-  **Publish now** click calls `/api/printify/publish`.
+  **Publish now** click calls `/api/printify/publish`. Both paths send
+  `replace: true`, so the app's images are the product's whole mockup
+  selection and Printify's generated mockups are removed.
 - **`/printify-bookmarklet`** is the install page. It is intentionally outside
   the sidebar: it is a utility page opened from the Send dialog, not another
   work surface.
@@ -1120,11 +1141,11 @@ position pickers here:
   rotated with `npx wrangler secret put PRINTIFY_API_KEY`. A visitor can also
   paste their own key in **Settings → API connections**.
 - **The mockup-selection write is proven by contract, not by a live session.**
-  The upload endpoint, the BFF GET/PUT shape, the merge order and the
-  bookmarklet are implemented and unit-tested, but CI has no Printify web
+  The upload endpoint, the BFF GET/PUT shape, the replacement/merge body and
+  the bookmarklet are implemented and unit-tested, but CI has no Printify web
   session. Run the bookmarklet once on a throwaway product before trusting it
-  for a batch. Also rotate any Printify token that was pasted into a chat;
-  treat it as exposed.
+  for a batch, and check that Printify's generated mockups are gone. Also
+  rotate any Printify token that was pasted into a chat; treat it as exposed.
 - **AI is provider-aware.** `src/lib/ai/providers.ts` is the isomorphic registry
   of 14 providers (NVIDIA NIM, OpenRouter, Groq, Cerebras,
   Together, Google Gemini, Mistral, DeepSeek, Fireworks, xAI, OpenAI, Anthropic,
@@ -1305,7 +1326,15 @@ position pickers here:
   `etsy.com/search?q=...` page in a background tab in the USER'S browser, reads
   the listing cards, and returns titles/prices/URLs. That path cannot read tags,
   so it returns `topTags: []` and says so; nothing is scraped server-side, and
-  no Etsy credential or query reaches Mockup Studio's server. It does not create
+  no Etsy credential or query reaches Mockup Studio's server. The query is
+  extracted from the request (`etsyQueryFromText`), so "research Etsy for cat mug
+  keywords" searches `cat mug`, not the whole sentence; a request with no
+  searchable words falls back to `trending`. The extension polls the tab (up to
+  six checks), scrolls between attempts to mount lazy cards, stops early on
+  Etsy's own no-results page, and reports page diagnostics (title, URL, anchor
+  counts, a short page-text sample) instead of a bare "no cards". An old
+  extension build is reported as "reload" immediately rather than waiting 45 s
+  for a reply it cannot send. It does not create
   an Etsy listing or connect an Etsy shop, because v3 submission needs OAuth app
   registration. Settings shows the keystring card **enabled** with a Test
   research button; the card says read-only and never implies that research is a

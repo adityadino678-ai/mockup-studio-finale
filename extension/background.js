@@ -59,6 +59,10 @@ var LOAD_POLL_MS = 250;
 var SETTLE_MS = 1500;
 var ETSY_LOAD_TIMEOUT_MS = 25000;
 var ETSY_SETTLE_MS = 1500;
+/* Etsy's grid can render after `status === "complete"`. Poll, scroll, and give
+   the cards several chances before reporting "no cards". */
+var ETSY_POLL_ATTEMPTS = 6;
+var ETSY_POLL_MS = 1200;
 
 /* The payload for the apply that is running right now, in memory only. */
 var pendingPayload = null;
@@ -156,6 +160,28 @@ function closeTab(tabId) {
       void chrome.runtime.lastError;
     });
   } catch (e) {}
+}
+
+/**
+ * Scrolls the Etsy tab once, which is what makes lazy-loaded cards mount.
+ *
+ * The injected function is self-contained for the same reason as
+ * `scrapeEtsySearch`: `executeScript({ func })` serialises only its source.
+ */
+async function nudgeEtsyScroll(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      world: "ISOLATED",
+      func: function () {
+        var step = Math.max(500, Math.floor((window.innerHeight || 800) * 0.9));
+        window.scrollBy(0, step);
+        return { y: window.scrollY, height: document.documentElement.scrollHeight };
+      },
+    });
+  } catch (e) {
+    /* A closed tab or a restricted page: the next poll will report it. */
+  }
 }
 
 /* ------------------------------------------------------------------- injecting */
@@ -275,6 +301,52 @@ async function handleApply(payload, requestId) {
 
 /* -------------------------------------------------------------- etsy research */
 
+/**
+ * An honest message when the page yielded no cards.
+ *
+ * "No results" is a different situation from "the page never rendered", and
+ * the user can act on them differently. The diagnostics are deliberately
+ * short: a page title, a URL and the first page-text fragment, never a dump.
+ */
+function etsyNoCardsMessage(page, attempts) {
+  var diag = (page && page.diagnostics) || {};
+  var checks = Math.min(attempts + 1, ETSY_POLL_ATTEMPTS);
+  var title =
+    page && page.pageTitle ? ' ("' + String(page.pageTitle).slice(0, 120) + '")' : "";
+  var url = page && page.url ? " URL: " + String(page.url).slice(0, 180) + "." : "";
+  var body = diag.bodyText
+    ? ' Page text starts: "' + String(diag.bodyText).slice(0, 220) + '"'
+    : "";
+
+  if (diag.noResults) {
+    return (
+      "Etsy returned no results for this search. Try a broader or differently worded query." +
+      url +
+      body
+    );
+  }
+  if (!diag.listingAnchorCount) {
+    return (
+      "The Etsy search page loaded" +
+      title +
+      " but no listing links appeared after " +
+      checks +
+      " check(s). Etsy may still be rendering, may be showing a verification wall, or may have changed its markup. Open etsy.com in a normal tab, finish any check, then try again." +
+      url +
+      body
+    );
+  }
+  return (
+    "Etsy showed " +
+    diag.listingAnchorCount +
+    " listing link(s) but no complete listing card could be read after " +
+    checks +
+    " check(s). Open etsy.com once and try again." +
+    url +
+    body
+  );
+}
+
 function normaliseEtsyCards(listings) {
   if (!Array.isArray(listings)) return [];
   var out = [];
@@ -350,17 +422,31 @@ async function handleEtsyResearch(query, requestId) {
           "). Open etsy.com in this browser, then try again.",
       };
     }
-    /* Etsy's search page is server-rendered, but give the cards a moment to
-       settle before reading them. */
+    /* Etsy's search page is server-rendered, but the grid can still mount
+       after `complete`. Poll, scroll to trigger lazy cards, and only report
+       "no cards" after several honest attempts. */
     await sleep(ETSY_SETTLE_MS);
 
-    var injected = await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      world: "ISOLATED",
-      func: scrapeEtsySearch,
-    });
-    var frame = injected && injected[0];
-    var page = frame && frame.result;
+    var page = null;
+    var attempts = 0;
+    for (; attempts < ETSY_POLL_ATTEMPTS; attempts++) {
+      var injected = await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: "ISOLATED",
+        func: scrapeEtsySearch,
+      });
+      var frame = injected && injected[0];
+      page = frame && frame.result;
+      if (!page || page.ok !== true) break;
+      if (page.blocked) break;
+      if (Array.isArray(page.listings) && page.listings.length > 0) break;
+      if (page.diagnostics && page.diagnostics.noResults) break;
+      if (attempts < ETSY_POLL_ATTEMPTS - 1) {
+        await nudgeEtsyScroll(tabId);
+        await sleep(ETSY_POLL_MS);
+      }
+    }
+
     if (!page || page.ok !== true) {
       return {
         ok: false,
@@ -373,6 +459,11 @@ async function handleEtsyResearch(query, requestId) {
     }
 
     var cards = normaliseEtsyCards(page.listings);
+    if (!cards.length) {
+      var why = etsyNoCardsMessage(page, attempts);
+      log("Etsy research found no cards.");
+      return { ok: false, requestId: requestId, error: why };
+    }
     log("Etsy research finished: " + cards.length + " card(s).");
     return { ok: true, requestId: requestId, cards: cards };
   } catch (error) {

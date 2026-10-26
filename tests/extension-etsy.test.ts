@@ -23,6 +23,16 @@ interface ScrapeResult {
   url: string;
   blocked: string;
   listings: ScrapedCard[];
+  diagnostics: {
+    anchorCount: number;
+    listingAnchorCount: number;
+    cardCount: number;
+    bodyLength: number;
+    bodyText: string;
+    noResults: boolean;
+    hasResultsRoot: boolean;
+    readyState: string;
+  };
 }
 
 function loadScraper() {
@@ -124,6 +134,36 @@ describe("scrapeEtsySearch", () => {
 
     expect(result.listings.map((listing) => listing.title)).toEqual(["Real"]);
   });
+
+  it("reports Etsy's own no-results page instead of a generic failure", () => {
+    document.body.innerHTML = `
+      <main data-search-results>
+        <h1>No results found</h1>
+        <p>Try a different search or check your spelling.</p>
+      </main>
+    `;
+
+    const result = loadScraper().scrapeEtsySearch();
+
+    expect(result.listings).toEqual([]);
+    expect(result.diagnostics.noResults).toBe(true);
+    expect(result.diagnostics.hasResultsRoot).toBe(true);
+    expect(result.diagnostics.anchorCount).toBe(0);
+  });
+
+  it("explains an empty page with counts and a page-text sample", () => {
+    document.body.innerHTML = "<main><p>Loading results…</p></main>";
+
+    const result = loadScraper().scrapeEtsySearch();
+
+    expect(result.listings).toEqual([]);
+    expect(result.diagnostics.noResults).toBe(false);
+    expect(result.diagnostics.hasResultsRoot).toBe(false);
+    expect(result.diagnostics.anchorCount).toBe(0);
+    expect(result.diagnostics.listingAnchorCount).toBe(0);
+    expect(result.diagnostics.bodyText).toContain("Loading results");
+    expect(result.diagnostics.bodyLength).toBeGreaterThan(0);
+  });
 });
 
 describe("extension files", () => {
@@ -142,9 +182,28 @@ describe("extension files", () => {
   it("asks for Etsy host permission", () => {
     const manifest = JSON.parse(read("manifest.json")) as {
       host_permissions: string[];
+      version: string;
     };
     expect(manifest.host_permissions).toContain("https://*.etsy.com/*");
     expect(manifest.host_permissions).toContain("https://etsy.com/*");
+    expect(manifest.version).toBe("1.2.0");
+  });
+
+  it("announces protocol 2 and the Etsy capability", () => {
+    const content = read("content-app.js");
+    expect(content).toContain("data-mockup-studio-ext-protocol");
+    expect(content).toContain("data-mockup-studio-ext-etsy");
+    expect(content).toContain("var PROTOCOL = 2");
+    expect(content).toContain("protocol: PROTOCOL");
+    expect(content).toContain("etsy: true");
+  });
+
+  it("polls and scrolls the Etsy tab before reporting no cards", () => {
+    const background = read("background.js");
+    expect(background).toContain("ETSY_POLL_ATTEMPTS");
+    expect(background).toContain("nudgeEtsyScroll");
+    expect(background).toContain("etsyNoCardsMessage");
+    expect(background).toContain("diagnostics.noResults");
   });
 
   it("wires the Etsy message and page events", () => {

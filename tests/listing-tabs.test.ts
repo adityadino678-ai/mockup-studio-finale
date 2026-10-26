@@ -464,6 +464,9 @@ describe("the Printify bridge payload", () => {
 
     expect(payload.source).toBe("mockup-studio");
     expect(payload.version).toBe(1);
+    // Replacement is the default: Printify's generated mockups must not survive
+    // a Send. The bookmarklet and the extension both read this flag.
+    expect(payload.replace).toBe(true);
     expect(countBridgeImages(payload)).toBe(3);
     const raw = bridgePayloadJson(payload);
     expect(raw).toContain('"productId": "p1"');

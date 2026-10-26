@@ -38,6 +38,11 @@ import { getAssetBlob, logActivity } from "@/lib/db/repo";
 import { authedFetch } from "@/lib/client/integrations";
 import { mockupImageForUpload } from "@/lib/client/mockup-upload";
 import { Link, navigate } from "@/lib/client/nav";
+import {
+  extensionOutdated,
+  extensionReady as companionExtensionReady,
+  extensionReloadMessage,
+} from "@/lib/client/extension";
 import { AssetThumb } from "@/components/asset-thumb";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent } from "@/components/ui/card";
@@ -73,6 +78,7 @@ import {
   renderListingMockup,
 } from "@/lib/printify/listing-render";
 import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
+import { appliedMockupRecord } from "@/lib/printify/listing-mockups";
 import {
   bridgePayloadJson,
   buildBridgePayload,
@@ -101,6 +107,7 @@ import type {
   Design,
   Mockup,
   Placement,
+  StudioListingMockupsApplied,
   StudioListingRender,
   StudioProductResult,
   StudioSession,
@@ -330,6 +337,8 @@ export function ListingImagesView() {
    * when it is absent the app keeps the clipboard + bookmarklet path.
    */
   const [extensionReady, setExtensionReady] = React.useState(false);
+  /** An old build is present but merges instead of replacing, so it is not used. */
+  const [extensionOld, setExtensionOld] = React.useState(false);
   /** True while the extension is applying the selection inside Printify. */
   const [extensionApplying, setExtensionApplying] = React.useState(false);
   /**
@@ -356,6 +365,14 @@ export function ListingImagesView() {
   // while it runs, the final save must use that newer state, not the snapshot
   // captured at click time.
   const sessionRef = React.useRef(session);
+  /**
+   * The signatures of the products prepared by the current Send. They are
+   * written to the session only after the extension reports a fully successful
+   * apply, so a failed or partial apply never makes the preview skip images.
+   */
+  const appliedSignaturesRef = React.useRef<
+    Record<string, StudioListingMockupsApplied>
+  >({});
   React.useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -1120,6 +1137,7 @@ export function ListingImagesView() {
     }
 
     setSending(true);
+    appliedSignaturesRef.current = {};
     setSendProgress({ done: 0, total: targets.length, label: "Preparing images…" });
     // Same reason as Save & render: a listing still on the default selection
     // must send the tiles the page showed, not an empty list.
@@ -1203,6 +1221,18 @@ export function ListingImagesView() {
           }
           if (shopId == null || !Number.isFinite(shopId) || shopId <= 0) {
             throw new Error("Printify did not return the shop for this product");
+          }
+          const signatureImages = images.flatMap((image) => {
+            const entry = currentEntry(image);
+            return entry
+              ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
+              : [];
+          });
+          if (signatureImages.length === images.length) {
+            appliedSignaturesRef.current[listing.listingId] = appliedMockupRecord(
+              result.remoteProductId,
+              signatureImages,
+            );
           }
           prepared.push({
             shopId,
@@ -1308,21 +1338,20 @@ export function ListingImagesView() {
    * Its content script marks the document and announces itself once, so both
    * the first render and a later load (the user installed it and reloaded) are
    * covered. Without it the dialog keeps the clipboard + bookmarklet steps.
+   *
+   * A build older than protocol 2 is deliberately not used: it merges the
+   * mockups instead of replacing them. The dialog says "reload" and keeps the
+   * (new) bookmarklet path.
    */
   React.useEffect(() => {
-    const mark = () => {
-      if (
-        typeof document !== "undefined" &&
-        document.documentElement.getAttribute("data-mockup-studio-ext") === "1"
-      ) {
-        setExtensionReady(true);
-      }
+    const sync = () => {
+      setExtensionReady(companionExtensionReady());
+      setExtensionOld(extensionOutdated());
     };
-    mark();
-    const onReady = () => setExtensionReady(true);
-    window.addEventListener("mockup-studio:extension-ready", onReady as EventListener);
+    sync();
+    window.addEventListener("mockup-studio:extension-ready", sync as EventListener);
     return () =>
-      window.removeEventListener("mockup-studio:extension-ready", onReady as EventListener);
+      window.removeEventListener("mockup-studio:extension-ready", sync as EventListener);
   }, []);
 
   /** Listen for the extension's answer to a one-click apply. */
@@ -1343,6 +1372,20 @@ export function ListingImagesView() {
         .map((result) => `${result.id}: ${result.error ?? "not applied"}`);
       setBridgeApplied({ done, total: results.length, failures });
       if (detail.ok && failures.length === 0) {
+        /*
+         * Record exactly what was applied. Listing preview uses this to skip
+         * re-uploading the same images when only the copy or price changes.
+         * A partial apply records nothing, so the next Send stays safe.
+         */
+        const records = appliedSignaturesRef.current;
+        if (Object.keys(records).length > 0) {
+          update({
+            listingMockupsApplied: {
+              ...(sessionRef.current.listingMockupsApplied ?? {}),
+              ...records,
+            },
+          });
+        }
         toast.success(
           `Applied ${done} product${results.length === 1 ? "" : "s"} in Printify.`,
         );
@@ -2008,6 +2051,11 @@ export function ListingImagesView() {
               </div>
             )}
 
+            {extensionOld && (
+              <p className="rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                {extensionReloadMessage()}
+              </p>
+            )}
             <div className="space-y-1.5 rounded-md border border-border-subtle px-3 py-2">
               <p className="text-[12px] font-medium text-ink">
                 {extensionReady ? "Or use the bookmarklet" : "2. Copy the payload"}

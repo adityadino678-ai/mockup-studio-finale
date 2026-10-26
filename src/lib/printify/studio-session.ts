@@ -12,6 +12,7 @@
 import { getSetting, setSetting } from "@/lib/db/schema";
 import type {
   StudioInkPair,
+  StudioListingMockupsApplied,
   StudioListingRender,
   StudioPlacement,
   StudioProductResult,
@@ -62,6 +63,7 @@ export function emptySession(): StudioSession {
     listingImages: {},
     listingImageCleared: {},
     listingRenders: {},
+    listingMockupsApplied: {},
     updatedAt: Date.now(),
   };
 }
@@ -130,6 +132,31 @@ function clearedRecord(value: unknown): Record<string, true> {
   if (!value || typeof value !== "object") return out;
   for (const [listingId, raw] of Object.entries(value)) {
     if (listingId && raw === true) out[listingId] = true;
+  }
+  return out;
+}
+
+function appliedMockupRecord(
+  value: unknown,
+): Record<string, StudioListingMockupsApplied> {
+  const out: Record<string, StudioListingMockupsApplied> = {};
+  if (!value || typeof value !== "object") return out;
+  for (const [listingId, raw] of Object.entries(value)) {
+    if (!listingId || !raw || typeof raw !== "object") continue;
+    const entry = raw as Partial<StudioListingMockupsApplied>;
+    if (
+      typeof entry.productId !== "string" ||
+      !entry.productId ||
+      typeof entry.signature !== "string" ||
+      !entry.signature
+    ) {
+      continue;
+    }
+    out[listingId] = {
+      productId: entry.productId,
+      signature: entry.signature,
+      appliedAt: finiteNumber(entry.appliedAt) ?? 0,
+    };
   }
   return out;
 }
@@ -271,6 +298,7 @@ export async function loadSession(): Promise<StudioSession> {
     listingImages: imageSelectionRecord(stored.listingImages),
     listingImageCleared: clearedRecord(stored.listingImageCleared),
     listingRenders: renderRecord(stored.listingRenders),
+    listingMockupsApplied: appliedMockupRecord(stored.listingMockupsApplied),
     // UI memory for the Mockups panel's per-design tabs. A non-empty string
     // survives; anything else (including a deleted id, which the panel itself
     // re-validates against the live tables) is dropped.
@@ -345,6 +373,11 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
       changed = true;
     }
   }
+  const listingMockupsApplied = { ...(session.listingMockupsApplied ?? {}) };
+  if (designId in listingMockupsApplied) {
+    delete listingMockupsApplied[designId];
+    changed = true;
+  }
 
   if (changed) {
     await saveSession({
@@ -357,6 +390,7 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
       listingImageCleared,
       listingPrices,
       listingRenders,
+      listingMockupsApplied,
     });
   }
 
@@ -457,6 +491,7 @@ export function remapListingState(
     listingImageCleared: move(session.listingImageCleared),
     listingPrices: move(session.listingPrices),
     listingRenders,
+    listingMockupsApplied: move(session.listingMockupsApplied),
   };
 }
 

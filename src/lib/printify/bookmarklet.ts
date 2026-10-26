@@ -33,7 +33,7 @@ try{
  if(csrf)headers['X-XSRF-TOKEN']=csrf;
  const total=payload.products.reduce((sum,p)=>sum+((p.uploads&&p.uploads.length)||0),0);
  const list=payload.products.map(p=>'• '+p.productTitle+' ('+p.productId+') — '+((p.uploads&&p.uploads.length)||0)+' image'+(((p.uploads&&p.uploads.length)||0)===1?'':'s')).join('\\n');
- if(!window.confirm('Apply '+total+' mockup image'+(total===1?'':'s')+' to '+payload.products.length+' Printify product'+(payload.products.length===1?'':'s')+'?\\n\\n'+list+'\\n\\nExisting selections are kept and the new images become the main images.'))return;
+ if(!window.confirm('Apply '+total+' mockup image'+(total===1?'':'s')+' to '+payload.products.length+' Printify product'+(payload.products.length===1?'':'s')+'?\\n\\n'+list+'\\n\\nThe new images REPLACE each product\\'s current mockup selection, including Printify\\'s generated mockups. The groups and their variant ids are kept.'))return;
  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  const call=async(url,opts)=>{
   const controller=new AbortController();
@@ -72,6 +72,11 @@ try{
   }
   const existingSelected=rawSelected.filter(e=>e&&typeof e.id==='string'&&e.id);
   const existingGroups=layout&&Array.isArray(layout.groups)?layout.groups:[];
+  /* The app sends replace:true so its images are the product's WHOLE mockup
+     selection. That is what removes Printify's generated mockups. An older
+     payload without the flag still replaces, matching the extension; only an
+     explicit false keeps the old merge. */
+  const replace=payload.replace!==false;
   const newIds=[...new Set(uploads.map(u=>u.mockupId))];
   const newSet=new Set(newIds);
   const newEntries=[];
@@ -82,15 +87,17 @@ try{
    newEntries.push({id:u.mockupId,src:u.src,type:'UPLOADED',ownership:'MPL'});
   }
   const selected=[...newEntries];
-  const seen=new Set(newIds);
-  for(const e of existingSelected){
-   if(seen.has(e.id))continue;
-   seen.add(e.id);
-   const clean={id:e.id};
-   if(typeof e.src==='string')clean.src=e.src;
-   if(typeof e.type==='string')clean.type=e.type;
-   if(typeof e.ownership==='string')clean.ownership=e.ownership;
-   selected.push(clean);
+  if(!replace){
+   const seen=new Set(newIds);
+   for(const e of existingSelected){
+    if(seen.has(e.id))continue;
+    seen.add(e.id);
+    const clean={id:e.id};
+    if(typeof e.src==='string')clean.src=e.src;
+    if(typeof e.type==='string')clean.type=e.type;
+    if(typeof e.ownership==='string')clean.ownership=e.ownership;
+    selected.push(clean);
+   }
   }
   const cleanGroup=g=>({
    group_key:typeof g.group_key==='string'?g.group_key:'',
@@ -100,9 +107,11 @@ try{
   });
   const existingClean=existingGroups.filter(g=>g&&typeof g==='object').map(cleanGroup).filter(g=>g.group_key);
   const existingNot=existingClean.find(g=>g.group_key==='not_linked');
-  const mergedIds=[...newIds,...(existingNot?existingNot.mockup_ids:[]).filter(id=>!newSet.has(id))];
+  const mergedIds=replace?newIds:[...newIds,...(existingNot?existingNot.mockup_ids:[]).filter(id=>!newSet.has(id))];
   const notLinked={group_key:'not_linked',label:'not_linked',variant_ids:existingNot?existingNot.variant_ids:[],mockup_ids:[...new Set(mergedIds)]};
-  const groups=[notLinked,...existingClean.filter(g=>g.group_key!=='not_linked')];
+  /* Replacement keeps every group's identity and variant partition but drops
+     its old mockup ids, so no generated/default mockup survives. */
+  const groups=[notLinked,...existingClean.filter(g=>g.group_key!=='not_linked').map(g=>replace?Object.assign({},g,{mockup_ids:[]}):g)];
   const url=base+'/selected-mockups';
   for(let attempt=0;attempt<4;attempt++){
    const res=await call(url,{method:'PUT',headers,body:JSON.stringify({groups,selected_mockups:selected})});

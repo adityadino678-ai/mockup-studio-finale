@@ -529,6 +529,21 @@ export interface StudioListingRender {
   source?: "mockups" | "listing";
 }
 
+/**
+ * The exact image selection last applied to a listing's Printify product.
+ *
+ * It is the fast-path guard for Send: when the listing's ordered mockups and
+ * their render fingerprints still hash to this signature, the product already
+ * has those pixels, so a copy/price-only Send must not upload or re-apply
+ * them. A changed image, order or product id produces a different signature
+ * and falls back to the full upload/apply path.
+ */
+export interface StudioListingMockupsApplied {
+  productId: string;
+  signature: string;
+  appliedAt: number;
+}
+
 export interface StudioSession {
   blueprintId?: number;
   printProviderId?: number;
@@ -617,6 +632,14 @@ export interface StudioSession {
    * file, mockup, print area or placement invalidates only that one render.
    */
   listingRenders?: Record<string, StudioListingRender>;
+  /**
+   * The last successful mockup apply, per listing.
+   *
+   * Recorded only after the selection was actually applied in Printify (the
+   * extension reported success, or the user confirmed the bookmarklet step).
+   * It lets Send skip re-uploading unchanged images for copy/price updates.
+   */
+  listingMockupsApplied?: Record<string, StudioListingMockupsApplied>;
   updatedAt: number;
 }
 

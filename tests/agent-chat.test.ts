@@ -27,7 +27,13 @@ import {
   confirmSavePlacement,
   executeTool,
 } from "@/lib/client/tools";
-import { agentTool, parseToolArguments, routeIntent, toOpenAiTools } from "@/lib/ai/tools";
+import {
+  agentTool,
+  etsyQueryFromText,
+  parseToolArguments,
+  routeIntent,
+  toOpenAiTools,
+} from "@/lib/ai/tools";
 import { loadSession, saveSession } from "@/lib/printify/studio-session";
 import { db } from "@/lib/db/schema";
 import type { ChatMessage, StudioSession } from "@/types/domain";
@@ -363,11 +369,28 @@ describe("agent tools", () => {
     expect(String(routed?.args.topic)).toContain("background");
   });
 
-  it("carries the query into etsy_research args", () => {
+  it("carries a clean search query into etsy_research args", () => {
     const routed = routeIntent("research Etsy for cat mug keywords");
     expect(routed?.name).toBe("etsy_research");
-    expect(String(routed?.args.query)).toContain("Etsy");
-    expect(String(routed?.args.query).length).toBeLessThanOrEqual(200);
+    // The sentence is a request, not a search term. Etsy would return nothing
+    // useful for "research Etsy for cat mug keywords".
+    expect(routed?.args.query).toBe("cat mug");
+    expect(String(routed?.args.query)).not.toContain("Etsy");
+    expect(String(routed?.args.query).length).toBeLessThanOrEqual(120);
+  });
+
+  it("extracts only the searchable words from an Etsy request", () => {
+    expect(etsyQueryFromText("research Etsy for cat mug keywords")).toBe("cat mug");
+    expect(etsyQueryFromText("search Etsy for personalized gifts")).toBe("personalized gifts");
+    expect(etsyQueryFromText("check the Etsy market for cat mugs")).toBe("cat mugs");
+    expect(etsyQueryFromText("look up competitors selling cat mugs on Etsy")).toBe("cat mugs");
+    expect(etsyQueryFromText("compare competitors for a mother's day mug")).toBe(
+      "mother's day mug",
+    );
+    // Nothing searchable is left, so use a real fallback term rather than "".
+    expect(etsyQueryFromText("what's trending on Etsy")).toBe("trending");
+    expect(etsyQueryFromText("Etsy trends")).toBe("trending");
+    expect(etsyQueryFromText("cat mug")).toBe("cat mug");
   });
 });
 

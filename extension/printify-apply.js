@@ -25,8 +25,14 @@
  *     being summarised in an alert.
  *
  * Everything else - endpoints, headers, the 30s abort, the 401 Bearer retry,
- * the 429 backoff, the two-at-a-time loop, the dedupe/prepend merge, the group
- * cleaning and the `not_linked` group - is the bookmarklet's logic verbatim.
+ * the 429 backoff, the two-at-a-time loop, the group cleaning and the
+ * `not_linked` group - is the bookmarklet's logic.
+ *
+ * The payload's `replace` flag (the app sends true) makes the uploads the
+ * product's WHOLE selection: Printify's generated/default mockups and any
+ * earlier selection are removed from every group, while the groups themselves
+ * and their variant ids are preserved. `replace: false` keeps the old
+ * dedupe/prepend merge.
  * ------------------------------------------------------------------------- */
 
 "use strict";
@@ -168,6 +174,7 @@ function applyMockups(payload) {
         const existingSelected = rawSelected.filter((e) => e && typeof e.id === "string" && e.id);
         const existingGroups = layout && Array.isArray(layout.groups) ? layout.groups : [];
 
+        const replace = payload.replace !== false;
         const newIds = [...new Set(uploads.map((u) => u.mockupId))];
         const newSet = new Set(newIds);
         const newEntries = [];
@@ -178,15 +185,17 @@ function applyMockups(payload) {
           newEntries.push({ id: u.mockupId, src: u.src, type: "UPLOADED", ownership: "MPL" });
         }
         const selected = [...newEntries];
-        const seen = new Set(newIds);
-        for (const e of existingSelected) {
-          if (seen.has(e.id)) continue;
-          seen.add(e.id);
-          const clean = { id: e.id };
-          if (typeof e.src === "string") clean.src = e.src;
-          if (typeof e.type === "string") clean.type = e.type;
-          if (typeof e.ownership === "string") clean.ownership = e.ownership;
-          selected.push(clean);
+        if (!replace) {
+          const seen = new Set(newIds);
+          for (const e of existingSelected) {
+            if (seen.has(e.id)) continue;
+            seen.add(e.id);
+            const clean = { id: e.id };
+            if (typeof e.src === "string") clean.src = e.src;
+            if (typeof e.type === "string") clean.type = e.type;
+            if (typeof e.ownership === "string") clean.ownership = e.ownership;
+            selected.push(clean);
+          }
         }
 
         const cleanGroup = (g) => ({
@@ -202,17 +211,27 @@ function applyMockups(payload) {
           .map(cleanGroup)
           .filter((g) => g.group_key);
         const existingNot = existingClean.find((g) => g.group_key === "not_linked");
-        const mergedIds = [
-          ...newIds,
-          ...(existingNot ? existingNot.mockup_ids : []).filter((id) => !newSet.has(id)),
-        ];
+        const mergedIds = replace
+          ? newIds
+          : [
+              ...newIds,
+              ...(existingNot ? existingNot.mockup_ids : []).filter((id) => !newSet.has(id)),
+            ];
         const notLinked = {
           group_key: "not_linked",
           label: "not_linked",
           variant_ids: existingNot ? existingNot.variant_ids : [],
           mockup_ids: [...new Set(mergedIds)],
         };
-        const groups = [notLinked, ...existingClean.filter((g) => g.group_key !== "not_linked")];
+        /* Replacement keeps every group's identity and variant partition but
+           drops its old mockup ids. That is what removes Printify's generated
+           mockups without losing the product's group configuration. */
+        const groups = [
+          notLinked,
+          ...existingClean
+            .filter((g) => g.group_key !== "not_linked")
+            .map((g) => (replace ? Object.assign({}, g, { mockup_ids: [] }) : g)),
+        ];
 
         const url = base + "/selected-mockups";
         for (let attempt = 0; attempt < 4; attempt++) {

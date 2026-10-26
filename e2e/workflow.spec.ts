@@ -2078,7 +2078,12 @@ test.describe("core workflow", () => {
     // content script, and answers an apply request with a per-product result.
     await page.addInitScript(() => {
       const mark = () => {
+        // Protocol 2 is what the page requires: replacement apply + Etsy
+        // research. A marker-only build is treated as an old extension.
         document.documentElement?.setAttribute("data-mockup-studio-ext", "1");
+        document.documentElement?.setAttribute("data-mockup-studio-ext-protocol", "2");
+        document.documentElement?.setAttribute("data-mockup-studio-ext-etsy", "1");
+        document.documentElement?.setAttribute("data-mockup-studio-ext-version", "1.2.0");
       };
       if (document.documentElement) mark();
       else document.addEventListener("DOMContentLoaded", mark);

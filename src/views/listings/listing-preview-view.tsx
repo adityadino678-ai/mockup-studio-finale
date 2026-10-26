@@ -34,8 +34,15 @@
 // into a publish: applying the selection ends at "updated in Printify", and
 // publishing is a second, deliberate click.
 //
-// The session is read LIVE (the Studio and the agent write the same blob) and
-// this page never writes it: browsing a preview must not change the batch.
+// The session is read LIVE (the Studio and the agent write the same blob).
+// Browsing a preview never changes the batch; the only write is the applied
+// mockup signature recorded AFTER an explicit successful apply, so the next
+// copy/price-only Send can skip the image stage.
+//
+// Send has a fast path: when the product already has exactly the selected
+// mockups (same order, same render fingerprints, same product id), it updates
+// the product copy/price and stops. It does not re-render, re-upload or
+// rewrite Printify's selection for a title/tag/price edit.
 // ---------------------------------------------------------------------------
 
 import * as React from "react";
@@ -44,6 +51,11 @@ import { toast } from "sonner";
 import { db, getSetting, setSetting } from "@/lib/db/schema";
 import { getAssetBlob, logActivity } from "@/lib/db/repo";
 import { authedFetch, loadIntegrations } from "@/lib/client/integrations";
+import {
+  extensionOutdated,
+  extensionReady as companionExtensionReady,
+  extensionReloadMessage,
+} from "@/lib/client/extension";
 import { mockupImageForUpload } from "@/lib/client/mockup-upload";
 import { confirmPrintifyProduct } from "@/lib/client/tools";
 import { fetchVariants } from "@/lib/printify/catalog-client";
@@ -76,8 +88,15 @@ import {
   renderTemplate,
   renderTitle,
   RESULTS_KEY,
+  saveSession,
 } from "@/lib/printify/studio-session";
 import { isListingRenderFresh, listingImageFingerprint } from "@/lib/printify/listing-render";
+import {
+  appliedMockupRecord,
+  listingMockupSignature,
+  mockupsAlreadyApplied,
+  withAppliedMockups,
+} from "@/lib/printify/listing-mockups";
 import {
   bridgePayloadJson,
   buildBridgePayload,
@@ -102,6 +121,7 @@ import type {
   ListingDraft,
   Mockup,
   Placement,
+  StudioListingMockupsApplied,
   StudioListingRender,
   StudioProductResult,
   StudioSession,
@@ -282,6 +302,17 @@ interface PipelineState {
   payload?: string;
   /** The same payload as an object, for the extension's one-click apply. */
   payloadData?: PrintifyBridgePayload;
+  /**
+   * True when the run skipped the image stage because the listing's mockups
+   * were already applied. The dialog explains that only copy/price changed.
+   */
+  fastPath?: boolean;
+  /**
+   * What to persist once the apply succeeds: one signature per prepared
+   * listing. Recorded at apply time, never at upload time, because an upload
+   * alone does not change Printify's selection.
+   */
+  appliedSignatures?: Record<string, StudioListingMockupsApplied>;
 }
 
 /** The extension's per-product answer to one-click apply. */
@@ -717,6 +748,44 @@ export function ListingPreviewView() {
     [session, mockupsById, placementsByKey, effectiveIdsFor, adoptionIndex],
   );
 
+  /**
+   * The signature of what this listing would upload right now.
+   *
+   * Undefined when any selected image has no current render: a partial set is
+   * never sent, and it must never look "already applied" either.
+   */
+  const signatureFor = React.useCallback(
+    (listing: StudioListing, productId: string): string | undefined => {
+      const images: Array<{ mockupId: string; fingerprint: string }> = [];
+      for (const image of selectionFor(listing)) {
+        const entry = currentEntry(image);
+        if (!entry) return undefined;
+        images.push({ mockupId: image.mockup.id, fingerprint: entry.fingerprint });
+      }
+      if (images.length === 0) return undefined;
+      return listingMockupSignature(productId, images);
+    },
+    [selectionFor, currentEntry],
+  );
+
+  /**
+   * True when the product already has exactly these images applied.
+   *
+   * This is the fast-path guard: a copy/price-only Send can stop after the
+   * product PUT instead of re-rendering, re-uploading and rewriting the
+   * selection. A missing record falls back to the full path.
+   */
+  const mockupsCurrentFor = React.useCallback(
+    (listing: StudioListing, productId: string): boolean =>
+      mockupsAlreadyApplied(
+        session,
+        listing.listingId,
+        productId,
+        signatureFor(listing, productId),
+      ),
+    [session, signatureFor],
+  );
+
   // --- the copy --------------------------------------------------------------
   const copyFor = React.useCallback(
     (listing: StudioListing): ListingCopy => {
@@ -975,6 +1044,8 @@ export function ListingPreviewView() {
   // session. It has no publish call, and this page never turns its answer into
   // one: a successful apply ends at "updated in Printify", unpublished.
   const [extensionReady, setExtensionReady] = React.useState(false);
+  /** An old build is present but merges instead of replacing, so it is not used. */
+  const [extensionOld, setExtensionOld] = React.useState(false);
   const [extensionApplying, setExtensionApplying] = React.useState(false);
   const [applied, setApplied] = React.useState<AppliedState | null>(null);
   const applyRequestId = React.useRef<string | null>(null);
@@ -987,21 +1058,20 @@ export function ListingPreviewView() {
    * Its content script marks the document and announces itself once, so both
    * the first render and a later load (the user installed it and reloaded) are
    * covered. Without it the dialog keeps the clipboard + bookmarklet steps.
+   *
+   * A build older than protocol 2 is deliberately not used: it merges the
+   * mockups instead of replacing them. The dialog says "reload" and keeps the
+   * (new) bookmarklet path.
    */
   React.useEffect(() => {
-    const mark = () => {
-      if (
-        typeof document !== "undefined" &&
-        document.documentElement.getAttribute("data-mockup-studio-ext") === "1"
-      ) {
-        setExtensionReady(true);
-      }
+    const sync = () => {
+      setExtensionReady(companionExtensionReady());
+      setExtensionOld(extensionOutdated());
     };
-    mark();
-    const onReady = () => setExtensionReady(true);
-    window.addEventListener("mockup-studio:extension-ready", onReady as EventListener);
+    sync();
+    window.addEventListener("mockup-studio:extension-ready", sync as EventListener);
     return () =>
-      window.removeEventListener("mockup-studio:extension-ready", onReady as EventListener);
+      window.removeEventListener("mockup-studio:extension-ready", sync as EventListener);
   }, []);
 
   /** Listen for the extension's answer to a one-click apply. */
@@ -1349,6 +1419,50 @@ export function ListingPreviewView() {
         });
       }
 
+      /*
+       * The fast path: the product exists and this exact selection (ordered
+       * mockups + render fingerprints) is already applied. A title, tag or
+       * price edit must not re-render, re-upload or rewrite Printify's
+       * selection. The product PUT above is the whole job.
+       *
+       * A new product, a changed image/order, or no recorded apply falls
+       * through to the full batch path below.
+       */
+      if (!createdHere && mockupsCurrentFor(listing, productId)) {
+        patchStep("images", {
+          status: "skipped",
+          detail:
+            "Skipped — the selected images and their renders are unchanged since the last apply. Nothing was uploaded.",
+        });
+        patchStep("mockups", {
+          status: "skipped",
+          detail:
+            "Skipped — Printify already has this exact mockup selection from the last apply.",
+        });
+        patchStep("publish", {
+          status: pipeline.intent === "publish" ? "pending" : "skipped",
+          detail:
+            "Not run. The product is updated in Printify and still unpublished — publishing is the separate button below.",
+        });
+        setPipeline((prev) =>
+          prev
+            ? {
+                ...prev,
+                phase: "updated",
+                productId,
+                createdHere: false,
+                fastPath: true,
+                payload: undefined,
+                payloadData: undefined,
+              }
+            : prev,
+        );
+        toast.success(
+          "Updated in Printify. The mockups were already current, so no images were re-uploaded.",
+        );
+        return;
+      }
+
       // (b) upload this listing's current renders.
       const selected = selectionFor(listing);
       const images = selected.filter((image) => Boolean(currentEntry(image)));
@@ -1372,6 +1486,19 @@ export function ListingPreviewView() {
       // so one extension click applies every design's mockups. A listing with
       // no product, no current render, or a partial render set is skipped with
       // its reason - it is never sent a shorter selection.
+      const appliedSignatures: Record<string, StudioListingMockupsApplied> = {};
+      const activeSignature = signatureFor(listing, productId);
+      if (activeSignature) {
+        appliedSignatures[listing.listingId] = appliedMockupRecord(
+          productId,
+          selectionFor(listing).flatMap((image) => {
+            const entry = currentEntry(image);
+            return entry
+              ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
+              : [];
+          }),
+        );
+      }
       const prepared: PrintifyBridgeProduct[] = [
         {
           shopId: uploaded.shopId,
@@ -1411,6 +1538,18 @@ export function ListingPreviewView() {
             expectedTitle: linkedOther.title,
           });
           included.add(linkedOther.productId);
+          const otherSignature = signatureFor(other, linkedOther.productId);
+          if (otherSignature) {
+            appliedSignatures[other.listingId] = appliedMockupRecord(
+              linkedOther.productId,
+              otherImages.flatMap((image) => {
+                const entry = currentEntry(image);
+                return entry
+                  ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
+                  : [];
+              }),
+            );
+          }
           prepared.push({
             shopId: otherUploaded.shopId,
             productId: linkedOther.productId,
@@ -1465,6 +1604,7 @@ export function ListingPreviewView() {
               createdHere,
               payload: json,
               payloadData: payload,
+              appliedSignatures,
             }
           : prev,
       );
@@ -1515,6 +1655,25 @@ export function ListingPreviewView() {
     });
     setPipeline((prev) => (prev ? { ...prev, phase: "updated" } : prev));
     toast.success("Updated in Printify. The product is still unpublished.");
+
+    /*
+     * Remember exactly what was applied, so the next copy/price-only Send can
+     * stop after the product PUT. Load the latest blob first: another tab may
+     * have written a placement or a selection while the apply was running.
+     */
+    const records = pipeline.appliedSignatures;
+    if (records && Object.keys(records).length > 0) {
+      void (async () => {
+        try {
+          const latest = await loadSession();
+          await saveSession(withAppliedMockups(latest, records));
+        } catch {
+          toast.warning(
+            "The mockups were applied, but the local fast-update record could not be saved. The next Send will upload the images again.",
+          );
+        }
+      })();
+    }
   };
 
   /** Hands the payload to the extension: one click, in the background. */
@@ -1660,6 +1819,15 @@ export function ListingPreviewView() {
   const pipelineLinked = pipelineListing
     ? productsByListing.get(pipelineListing.listingId)
     : undefined;
+  /**
+   * The confirm dialog tells the truth about what the click will do. The run
+   * re-checks this before uploading, so a live edit while the dialog is open
+   * cannot skip an image update.
+   */
+  const pipelineMockupsCurrent =
+    !!pipelineListing &&
+    !!pipelineLinked?.productId &&
+    mockupsCurrentFor(pipelineListing, pipelineLinked.productId);
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-8">
@@ -2196,6 +2364,13 @@ export function ListingPreviewView() {
                       ? `${targetShop.title || "Untitled shop"} (#${targetShop.id})`
                       : "not resolved"}
                   </p>
+                  {pipelineMockupsCurrent && (
+                    <p className="rounded-md bg-sage-soft px-2 py-1 text-[11px] text-forest">
+                      These exact mockups were already applied to this product. Send will
+                      update only the title, description, tags and price — no image is
+                      re-rendered, re-uploaded or re-applied.
+                    </p>
+                  )}
                   {!pipelineLinked &&
                     pipelineListing &&
                     Math.abs(placementFor(session, pipelineListing.designId).scale - 1) > 0.001 && (
@@ -2230,9 +2405,11 @@ export function ListingPreviewView() {
 
               {pipeline.phase === "confirm" && (
                 <p className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
-                  {pipeline.intent === "send"
-                    ? "This run creates the draft, uploads the images and applies the mockups. It does NOT publish: the product stays an unpublished draft in Printify."
-                    : "The product is created as an unpublished draft first. Publishing is the last, separate click, so a failure before it leaves nothing live."}
+                  {pipelineMockupsCurrent
+                    ? "The images are unchanged, so this run only updates the product copy and price. It does NOT publish: the product stays an unpublished draft in Printify."
+                    : pipeline.intent === "send"
+                      ? "This run creates the draft, uploads the images and applies the mockups. It does NOT publish: the product stays an unpublished draft in Printify."
+                      : "The product is created as an unpublished draft first. Publishing is the last, separate click, so a failure before it leaves nothing live."}
                 </p>
               )}
 
@@ -2288,6 +2465,11 @@ export function ListingPreviewView() {
                     </div>
                   )}
 
+                  {extensionOld && (
+                    <p className="rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                      {extensionReloadMessage()}
+                    </p>
+                  )}
                   <div className="space-y-1.5">
                     <p className="text-[12px] font-medium text-ink">
                       {extensionReady ? "Or use the bookmarklet" : "1. Copy the payload"}
@@ -2360,9 +2542,10 @@ export function ListingPreviewView() {
                   </p>
                   <p className="font-mono text-[11px]">{pipeline.productId}</p>
                   <p className="text-[11px]">
-                    The draft now has this listing&apos;s images and mockup selection. Nothing was
-                    published, so it is not on your shop yet. Check it on Printify, then press
-                    Publish now when you want it live.
+                    {pipeline.fastPath
+                      ? "Only the title, description, tags and price changed. The mockups were already current, so nothing was re-uploaded or re-applied. Nothing was published."
+                      : "The draft now has this listing's images and mockup selection. Nothing was published, so it is not on your shop yet."}{" "}
+                    Check it on Printify, then press Publish now when you want it live.
                   </p>
                 </div>
               )}
@@ -2428,7 +2611,11 @@ export function ListingPreviewView() {
                     </Button>
                     <Button size="sm" onClick={() => void startRun()} disabled={publishing}>
                       <Sparkles className="h-3.5 w-3.5" />{" "}
-                      {pipelineLinked ? "Update & upload" : "Create & upload"}
+                      {pipelineMockupsCurrent
+                        ? "Update details only"
+                        : pipelineLinked
+                          ? "Update & upload"
+                          : "Create & upload"}
                     </Button>
                   </>
                 ) : pipeline.phase === "awaiting-mockups" ? (

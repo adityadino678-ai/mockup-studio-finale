@@ -519,7 +519,98 @@ const PRODUCT_WORDS = [
 
 function detectProductType(text: string): string {
   const lower = text.toLowerCase();
-  return PRODUCT_WORDS.find((word) => lower.includes(word)) ?? "";
+  return (
+    PRODUCT_WORDS.find((word) => {
+      // Whole words only. A substring test made "what's" contain "hat" and
+      // "mugs" fail to match "mug" only by accident of ordering.
+      const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(^|[^a-z])${escaped}(s|es)?([^a-z]|$)`, "i").test(lower);
+    }) ?? ""
+  );
+}
+
+/**
+ * Words that describe the RESEARCH REQUEST, not the thing to search for.
+ *
+ * "research Etsy for cat mug keywords" must become "cat mug", not the whole
+ * sentence: Etsy's API and the browser fallback both treat the query as a
+ * literal search string, so a sentence returns nothing useful.
+ */
+const ETSY_QUERY_NOISE = new Set([
+  "etsy",
+  "market",
+  "marketplace",
+  "competitor",
+  "competitors",
+  "competition",
+  "research",
+  "search",
+  "check",
+  "scan",
+  "analyse",
+  "analyze",
+  "compare",
+  "look",
+  "up",
+  "find",
+  "get",
+  "show",
+  "whats",
+  "selling",
+  "trending",
+  "trends",
+  "trend",
+  "popular",
+  "keywords",
+  "keyword",
+  "tags",
+  "tag",
+  "seo",
+  "pricing",
+  "prices",
+  "price",
+  "listing",
+  "listings",
+  "for",
+  "on",
+  "in",
+  "about",
+  "of",
+  "the",
+  "a",
+  "an",
+  "me",
+  "please",
+  "some",
+  "any",
+  "current",
+  "top",
+]);
+
+/**
+ * Extracts the searchable part of an Etsy request.
+ *
+ * It is deliberately conservative: only request words are dropped, so
+ * "personalized gifts" and "cat mug" survive intact. If nothing is left
+ * ("what's trending on Etsy?"), it falls back to a product type from the
+ * message, then to "trending" - a real search term rather than an empty query.
+ */
+export function etsyQueryFromText(text: string): string {
+  const words = String(text ?? "")
+    .replace(/[“”"]/g, " ")
+    .replace(/[?!.,;:()[\]{}]/g, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+
+  const kept = words.filter((word) => {
+    const key = word.toLowerCase().replace(/[’']/g, "");
+    return key.length > 0 && !ETSY_QUERY_NOISE.has(key);
+  });
+
+  const query = kept.join(" ").replace(/\s+/g, " ").trim();
+  const fallback = detectProductType(text) || "trending";
+  return (query || fallback).slice(0, 120);
 }
 
 function detectPriceCents(text: string): number | undefined {
@@ -552,7 +643,7 @@ export function routeIntent(text: string): RoutedIntent | null {
       case "explain_howto":
         return { name: rule.name, args: { topic: clean.slice(0, 200) } };
       case "etsy_research":
-        return { name: rule.name, args: { query: clean.slice(0, 200) } };
+        return { name: rule.name, args: { query: etsyQueryFromText(clean) } };
       case "draft_listing":
         return { name: rule.name, args: { concept: clean.slice(0, 200) } };
       case "create_printify_product": {

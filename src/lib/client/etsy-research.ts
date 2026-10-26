@@ -15,6 +15,11 @@
 
 import { authedFetch } from "@/lib/client/integrations";
 import {
+  companionExtension,
+  etsyExtensionReady,
+  extensionReloadMessage,
+} from "@/lib/client/extension";
+import {
   buildEtsyBrowserResearch,
   type EtsyBrowserCard,
 } from "@/lib/etsy/browser-research";
@@ -22,13 +27,7 @@ import type { EtsyResearch, EtsyResearchResponse } from "@/types/etsy";
 
 const EXTENSION_TIMEOUT_MS = 45_000;
 
-/** True when the companion extension's content script has marked the page. */
-export function etsyExtensionReady(): boolean {
-  return (
-    typeof document !== "undefined" &&
-    document.documentElement.getAttribute("data-mockup-studio-ext") === "1"
-  );
-}
+export { etsyExtensionReady };
 
 interface EtsyExtensionDetail {
   requestId?: string;
@@ -132,6 +131,18 @@ export async function researchEtsy(query: string): Promise<EtsyResearch> {
     apiError = data?.error ?? `Etsy API research failed (HTTP ${response.status}).`;
   } catch (error) {
     apiError = error instanceof Error ? error.message : "Etsy API research failed.";
+  }
+
+  /*
+   * An installed-but-old extension marks the page but cannot answer this
+   * request. Waiting 45 s for a reply that cannot come is what looked like
+   * "Etsy research does nothing", so say what to do immediately.
+   */
+  const extension = companionExtension();
+  if (extension.present && !etsyExtensionReady()) {
+    throw new Error(
+      `${apiError ?? "Etsy API research is not configured."} ${extensionReloadMessage()}`,
+    );
   }
 
   if (etsyExtensionReady()) {
