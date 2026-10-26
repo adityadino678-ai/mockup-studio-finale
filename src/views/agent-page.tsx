@@ -34,7 +34,7 @@ import {
   touchConversation,
 } from "@/lib/client/chat";
 import { CONFIRM_TOOL_RUNNERS, executeTool } from "@/lib/client/tools";
-import { AGENT_TOOL_NAMES, parseToolArguments, routeIntent } from "@/lib/ai/tools";
+import { AGENT_TOOL_NAMES, argsLookTruncated, parseToolArguments, routeIntent } from "@/lib/ai/tools";
 import { createCallTracker, MAX_IDENTICAL_CALLS, MAX_TURN_STEPS } from "@/lib/ai/step-limits";
 import {
   favoriteKey,
@@ -65,7 +65,7 @@ import { cn } from "@/lib/utils";
 
 // Mirror the server's output budgets (src/lib/server/ai.ts) so a truncated
 // reasoning reply can be retried with more room.
-const DEFAULT_BUDGET = 2000;
+const DEFAULT_BUDGET = 4000;
 const REASONING_BUDGET = 8000;
 const MAX_ESCALATED_BUDGET = 16000;
 
@@ -439,6 +439,26 @@ export function AgentPage() {
             return;
           }
 
+          // Detect truncated tool-call JSON: the model emitted a tool call but
+          // the output budget cut it off mid-arguments. Retry with a larger
+          // budget instead of treating it as an empty call.
+          const truncatedCall = callsToRun.find((call) =>
+            argsLookTruncated(call.function.arguments),
+          );
+          if (truncatedCall) {
+            turnMaxTokens = Math.min(
+              MAX_ESCALATED_BUDGET,
+              Math.max(turnMaxTokens * 2, DEFAULT_BUDGET),
+            );
+            if (debug) {
+              logDebug(
+                "turn",
+                `truncated tool-call arguments for ${truncatedCall.function.name} — retrying with maxTokens ${turnMaxTokens}`,
+              );
+            }
+            continue;
+          }
+
           const toolParts: MessagePart[] = [];
           let awaitingConfirm = false;
           for (const call of callsToRun) {
@@ -655,7 +675,11 @@ export function AgentPage() {
 
   const onConfirmTool = React.useCallback(
     async (messageId: string, call: ToolCallData) => {
-      if (!activeId || busyRef.current) return;
+      if (!activeId) return;
+      if (busyRef.current) {
+        setError("Still working on the previous step — please wait, then confirm again.");
+        return;
+      }
       const runner = CONFIRM_TOOL_RUNNERS[call.name];
       if (!runner) {
         await patchToolCall(messageId, call.id, {
@@ -676,7 +700,7 @@ export function AgentPage() {
       });
       await runTurn(activeId);
     },
-    [activeId, runTurn],
+    [activeId, runTurn, setError],
   );
 
   const onCancelTool = React.useCallback(

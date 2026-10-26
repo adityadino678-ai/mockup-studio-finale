@@ -107,7 +107,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "save_listing_details",
     description:
-      "WRITE the listing details into the user's saved listing drafts: title, description, tags and/or price. This is the counterpart of draft_listing — use it after you have written the copy, when the user asks to save, apply, set or update listing details. It updates the listing the user names, or every listing in the batch when no design is named. Nothing is written until the user confirms.",
+      "WRITE the listing details into the user's saved listing drafts: title, description, tags and/or price. This is the counterpart of draft_listing — use it after you have written the copy, when the user asks to save, apply, set or update listing details. Use `items` to write UNIQUE copy to every listing in one call (one title/description/tags/price per listing). Omit `items` and `design` to write the same copy to every listing in the batch. Nothing is written until the user confirms.",
     confirm: true,
     parameters: {
       type: "object",
@@ -133,6 +133,36 @@ export const AGENT_TOOLS: AgentTool[] = [
           type: "integer",
           description:
             "Price in CENTS, e.g. 2499. Prefer this when you already have an exact cent value.",
+        },
+        items: {
+          type: "array",
+          description:
+            "Multiple listings to update in one call, each with its own copy. Use this to write unique SEO title/description/tags/price for every listing at once. When present, top-level design/title/description/tags/price/priceCents are ignored.",
+          items: {
+            type: "object",
+            properties: {
+              design: {
+                type: "string",
+                description: "Design or listing name to update.",
+              },
+              title: { type: "string", description: "The listing title to save." },
+              description: { type: "string", description: "The listing description to save." },
+              tags: {
+                type: "array",
+                items: { type: "string" },
+                description: "Listing tags. Capped at 13 tags of 20 characters.",
+              },
+              price: {
+                type: "number",
+                description: "Price in DOLLARS, e.g. 24.99.",
+              },
+              priceCents: {
+                type: "integer",
+                description: "Price in CENTS, e.g. 2499.",
+              },
+            },
+            required: ["design"],
+          },
         },
       },
       required: [],
@@ -377,6 +407,19 @@ export function parseToolArguments(raw: string | undefined): Record<string, unkn
       : {};
   } catch {
     return {};
+  }
+}
+
+/** True when the raw arguments string looks like a tool call that was cut off
+ * mid-JSON (non-empty, but not valid JSON). The caller can retry with a larger
+ * output budget instead of treating it as an empty call. */
+export function argsLookTruncated(raw: string | undefined): boolean {
+  if (!raw || !raw.trim()) return false;
+  try {
+    JSON.parse(raw);
+    return false;
+  } catch {
+    return true;
   }
 }
 

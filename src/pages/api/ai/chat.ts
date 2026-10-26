@@ -30,10 +30,11 @@ Read-only tools (run freely):
   keywords). It returns IDEAS and saves nothing. Use it for titles, descriptions, tags, keywords, or
   "write me a listing".
 Confirm-gated tools (each prepares an action — nothing is created until the user clicks Create):
-- save_listing_details(design?, title?, description?, tags?, price?, priceCents?): WRITE listing
+- save_listing_details(design?, title?, description?, tags?, price?, priceCents?, items?): WRITE listing
   details into the user's saved listing drafts. This is the tool to call when the user says "save",
   "apply", "set", or "update" a title, description, tags or price. Omit design to write every listing
-  in the batch. It saves locally; it does not send to Printify or publish.
+  in the batch. Use items to write UNIQUE copy to every listing in one call — each item names a
+  listing and its own title/description/tags/price. It saves locally; it does not send to Printify or publish.
 - create_batch_job(designs?, mockups?, variant?, skipExisting?): batch-render every design × mockup.
 - create_mockup_render(design?, mockup?, ink?, behindMockup?): merge ONE design onto ONE mockup. If the
   mockup has a print area, the render uses that area and the Printify Studio placement, exactly like

@@ -999,6 +999,88 @@ describe("save_listing_details", () => {
     expect(unknown.error).toContain("No listing matches");
     expect(await db.listingDrafts.count()).toBe(0);
   });
+
+  it("proposes unique copy per listing via items", async () => {
+    await seed();
+    const result = await executeTool("save_listing_details", {
+      items: [
+        { design: "Sunset", title: "Golden Hour Tee", tags: ["sunset", "gift"], price: 24.99 },
+        { design: "Moon", title: "Night Sky Tee", tags: ["moon", "night"], priceCents: 1999 },
+      ],
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation?.payload).toMatchObject({
+      items: [
+        {
+          listingId: "d1",
+          designName: "Sunset",
+          title: "Golden Hour Tee",
+          tags: ["sunset", "gift"],
+          priceCents: 2499,
+        },
+        {
+          listingId: "d2",
+          designName: "Moon",
+          title: "Night Sky Tee",
+          tags: ["moon", "night"],
+          priceCents: 1999,
+        },
+      ],
+    });
+    expect(await db.listingDrafts.count()).toBe(0);
+  });
+
+  it("writes unique copy per listing via items and pins untouched prices", async () => {
+    await seed();
+    await db.listingDrafts.put({
+      id: "draft-moon",
+      title: "Moon keeps this",
+      description: "Moon description",
+      tags: ["moon"],
+      priceCents: 1999,
+      designId: "d2",
+      imageAssetIds: ["img-moon"],
+      imageSelectionLocked: true,
+      status: "local-draft",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    const result = await confirmSaveListingDetails({
+      items: [
+        { listingId: "d1", title: "Golden Hour Tee", priceCents: 2499 },
+        { listingId: "d2", title: "Night Sky Tee", tags: ["moon", "night"] },
+      ],
+    });
+    expect(result.error).toBeUndefined();
+
+    const sunset = (await db.listingDrafts.where("designId").equals("d1").toArray())[0];
+    expect(sunset.title).toBe("Golden Hour Tee");
+    expect(sunset.priceCents).toBe(2499);
+
+    const moon = await db.listingDrafts.get("draft-moon");
+    expect(moon?.title).toBe("Night Sky Tee");
+    expect(moon?.tags).toEqual(["moon", "night"]);
+    expect(moon?.priceCents).toBe(1999);
+    expect(moon?.imageSelectionLocked).toBe(true);
+
+    const session = await loadSession();
+    expect(session.priceMode).toBe("custom");
+    expect(session.listingPrices?.d1).toBe(2499);
+    expect(session.listingPrices?.d2).toBe(1999);
+  });
+
+  it("items call skips unknown designs and reports errors", async () => {
+    await seed();
+    const result = await executeTool("save_listing_details", {
+      items: [
+        { design: "Sunset", title: "Golden Hour Tee" },
+        { design: "Nope", title: "Unknown Tee" },
+      ],
+    });
+    expect(result.error).toContain("No listing matches “Nope”");
+    expect(await db.listingDrafts.count()).toBe(0);
+  });
 });
 
 describe("patchToolCall", () => {

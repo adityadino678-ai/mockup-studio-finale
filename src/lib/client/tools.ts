@@ -509,9 +509,169 @@ async function listingTargets(designArg: unknown): Promise<
   return { ok: true, session, listings, targets };
 }
 
+/** One listing's fields within a batch items call. */
+interface ListingItemFields {
+  listingId: string;
+  designName: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  priceCents?: number;
+}
+
+/** Parses a single batch item's price, mirroring priceCentsFromArgs. */
+function itemPriceCents(item: Record<string, unknown>): { cents?: number; error?: string } {
+  const hasCents =
+    item.priceCents !== undefined && item.priceCents !== null && item.priceCents !== "";
+  const hasPrice = item.price !== undefined && item.price !== null && item.price !== "";
+  if (hasCents) {
+    const value = Number(item.priceCents);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { error: "priceCents must be a positive number of cents, e.g. 2499." };
+    }
+    return { cents: Math.round(value) };
+  }
+  if (hasPrice) {
+    const value = Number(item.price);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { error: "price must be a positive dollar amount, e.g. 24.99." };
+    }
+    return { cents: Math.round(value * 100) };
+  }
+  return {};
+}
+
 async function proposeSaveListingDetails(args: Record<string, unknown>): Promise<ToolExecResult> {
-  const resolved = await listingTargets(args.design);
+  const resolved = await listingTargets(undefined);
   if (!resolved.ok) return resolved.result;
+
+  // ---- Batch items: unique copy per listing --------------------------------
+  const itemsArg = args.items;
+  if (Array.isArray(itemsArg) && itemsArg.length > 0) {
+    const byName = new Map(resolved.listings.map((l) => [l.designName.toLowerCase(), l]));
+    const byId = new Map(resolved.listings.map((l) => [l.listingId.toLowerCase(), l]));
+    const targets: ListingItemFields[] = [];
+    const errors: string[] = [];
+
+    for (const raw of itemsArg) {
+      if (!raw || typeof raw !== "object") {
+        errors.push("Each item must be an object with a design name.");
+        continue;
+      }
+      const item = raw as Record<string, unknown>;
+      const wanted = String(item.design ?? "").trim();
+      if (!wanted) {
+        errors.push("Each item needs a design name.");
+        continue;
+      }
+      const listing =
+        byId.get(wanted.toLowerCase()) ?? byName.get(wanted.toLowerCase());
+      if (!listing) {
+        errors.push(`No listing matches “${wanted}”.`);
+        continue;
+      }
+
+      const title =
+        item.title === undefined || item.title === null
+          ? undefined
+          : String(item.title).trim();
+      if (title === "") {
+        errors.push(`The title for “${wanted}” is empty.`);
+        continue;
+      }
+      const description =
+        item.description === undefined || item.description === null
+          ? undefined
+          : String(item.description);
+      const tags = Array.isArray(item.tags)
+        ? parseTags(item.tags.map((tag) => String(tag)))
+        : undefined;
+      const price = itemPriceCents(item);
+      if (price.error) {
+        errors.push(`“${wanted}”: ${price.error}`);
+        continue;
+      }
+      if (
+        title === undefined &&
+        description === undefined &&
+        tags === undefined &&
+        price.cents === undefined
+      ) {
+        errors.push(`“${wanted}”: give at least one of title, description, tags or price.`);
+        continue;
+      }
+
+      targets.push({
+        listingId: listing.listingId,
+        designName: listing.designName,
+        ...(title !== undefined ? { title } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(tags !== undefined ? { tags } : {}),
+        ...(price.cents !== undefined ? { priceCents: price.cents } : {}),
+      });
+    }
+
+    if (errors.length) {
+      return {
+        summary: "Batch save had problems",
+        error: errors.join(" "),
+      };
+    }
+    if (!targets.length) {
+      return {
+        summary: "Nothing to write",
+        error:
+          "Give save_listing_details at least one item with a design name and one of title, description, tags or price.",
+      };
+    }
+
+    const fieldsSummary = targets
+      .map((t) => {
+        const parts: string[] = [];
+        if (t.title !== undefined) parts.push(`title "${t.title}"`);
+        if (t.description !== undefined) parts.push("description");
+        if (t.tags !== undefined) parts.push(`${t.tags.length} tag${t.tags.length === 1 ? "" : "s"}`);
+        if (t.priceCents !== undefined) parts.push(`$${(t.priceCents / 100).toFixed(2)}`);
+        return `“${t.designName}”: ${parts.join(", ") || "(nothing)"}`;
+      })
+      .join("; ");
+
+    const hasAnyPrice = targets.some((t) => t.priceCents !== undefined);
+    return {
+      summary: `Ready to write unique copy to ${targets.length} listing${targets.length === 1 ? "" : "s"}`,
+      confirmation: {
+        detail: `Write per-listing copy: ${fieldsSummary}. This updates the local listing drafts${
+          hasAnyPrice ? " and listing prices" : ""
+        }; it does not send anything to Printify or publish it.`,
+        payload: {
+          items: targets,
+        },
+      },
+    };
+  }
+
+  // ---- Single listing or all listings (existing behaviour) -----------------
+  const designTarget = args.design;
+  const targetListings = designTarget
+    ? resolved.listings.filter((listing) =>
+        [listing.listingId, listing.designId, listing.designName]
+          .map((value) => value.toLowerCase())
+          .some(
+            (value) =>
+              value === String(designTarget).toLowerCase() ||
+              value.includes(String(designTarget).toLowerCase()),
+          ),
+      )
+    : resolved.listings;
+
+  if (!targetListings.length) {
+    return {
+      summary: `No listing matches “${String(designTarget)}”`,
+      error: `No listing matches that name. Available listings: ${resolved.listings
+        .map((listing) => listing.designName)
+        .join(", ")}.`,
+    };
+  }
 
   const title =
     args.title === undefined || args.title === null ? undefined : String(args.title).trim();
@@ -545,7 +705,7 @@ async function proposeSaveListingDetails(args: Record<string, unknown>): Promise
     };
   }
 
-  const names = resolved.targets.map((listing) => listing.designName);
+  const names = targetListings.map((listing) => listing.designName);
   const fields = [
     title !== undefined ? "title" : "",
     description !== undefined ? "description" : "",
@@ -554,15 +714,15 @@ async function proposeSaveListingDetails(args: Record<string, unknown>): Promise
   ].filter(Boolean);
 
   return {
-    summary: `Ready to write ${fields.join(", ")} to ${resolved.targets.length} listing${
-      resolved.targets.length === 1 ? "" : "s"
+    summary: `Ready to write ${fields.join(", ")} to ${targetListings.length} listing${
+      targetListings.length === 1 ? "" : "s"
     }`,
     confirmation: {
       detail: `Write ${fields.join(", ")} to ${names.join(", ")}. This updates the local listing drafts${
         price.cents !== undefined ? " and the listing price" : ""
       }; it does not send anything to Printify or publish it.`,
       payload: {
-        listingIds: resolved.targets.map((listing) => listing.listingId),
+        listingIds: targetListings.map((listing) => listing.listingId),
         ...(title !== undefined ? { title } : {}),
         ...(description !== undefined ? { description } : {}),
         ...(tags !== undefined ? { tags } : {}),
@@ -578,6 +738,133 @@ export async function confirmSaveListingDetails(
   const resolved = await listingTargets(undefined);
   if (!resolved.ok) return resolved.result;
 
+  const blueprints = (await loadCachedBlueprints()) ?? [];
+  const productName = catalogProductName(blueprints, resolved.session.blueprintId);
+
+  // ---- Batch items: unique copy per listing --------------------------------
+  const itemsArg = payload.items;
+  if (Array.isArray(itemsArg) && itemsArg.length > 0) {
+    const idIndex = new Map(resolved.listings.map((l) => [l.listingId, l]));
+    const savedItems: Array<{ listingId: string; designName: string; title?: string; description?: string; tags?: string[]; priceCents?: number }> = [];
+    let hasAnyPrice = false;
+
+    for (const raw of itemsArg) {
+      if (!raw || typeof raw !== "object") continue;
+      const item = raw as Record<string, unknown>;
+      const listingId = String(item.listingId ?? "").trim();
+      const listing = idIndex.get(listingId);
+      if (!listing) continue;
+
+      const title =
+        item.title === undefined || item.title === null ? undefined : String(item.title);
+      const description =
+        item.description === undefined || item.description === null
+          ? undefined
+          : String(item.description);
+      const tags = Array.isArray(item.tags)
+        ? parseTags(item.tags.map((tag) => String(tag)))
+        : undefined;
+      const price = itemPriceCents(item);
+      if (price.error) continue;
+      if (price.cents !== undefined) hasAnyPrice = true;
+
+      savedItems.push({ listingId, designName: listing.designName, title, description, tags, priceCents: price.cents });
+    }
+
+    if (!savedItems.length) {
+      return {
+        summary: "The listings changed",
+        error: "Those listings are no longer in the batch. Open the Studio, check the selection, and ask again.",
+      };
+    }
+
+    // Moving to custom prices must not change any other listing.
+    let nextSession = resolved.session;
+    if (hasAnyPrice) {
+      const listingPrices: Record<string, number> = {
+        ...(resolved.session.listingPrices ?? {}),
+      };
+      for (const listing of resolved.listings) {
+        if (!savedItems.some((s) => s.listingId === listing.listingId)) {
+          listingPrices[listing.listingId] = priceForListing(
+            resolved.session,
+            listing.listingId,
+          );
+        }
+      }
+      for (const item of savedItems) {
+        if (item.priceCents !== undefined) {
+          listingPrices[item.listingId] = item.priceCents;
+        } else {
+          listingPrices[item.listingId] = priceForListing(resolved.session, item.listingId);
+        }
+      }
+      nextSession = {
+        ...resolved.session,
+        priceMode: "custom",
+        priceCents: resolved.session.priceCents ?? 1999,
+        listingPrices,
+      };
+    }
+
+    let saved = 0;
+    for (const item of savedItems) {
+      const target = idIndex.get(item.listingId);
+      if (!target) continue;
+      const rows = await db.listingDrafts
+        .where("designId")
+        .equals(target.listingId)
+        .toArray();
+      const existing = rows.sort((a, b) => a.updatedAt - b.updatedAt)[rows.length - 1];
+
+      const currentTitle =
+        existing?.title ??
+        renderTitle(resolved.session.titleTemplate, target.designName, productName);
+      const currentDescription =
+        existing?.description ??
+        renderTemplate(
+          resolved.session.descriptionTemplate,
+          target.designName,
+          productName,
+          "",
+          5000,
+        );
+      const currentTags = existing?.tags ?? parseTags(resolved.session.tags);
+
+      const perDesignSession: StudioSession = {
+        ...nextSession,
+        titleTemplate: item.title ?? currentTitle,
+        descriptionTemplate: item.description ?? currentDescription,
+        tags: item.tags ?? currentTags,
+        category: existing?.category ?? (resolved.session.category ?? "").trim(),
+        quantity: existing?.quantity ?? resolved.session.quantity,
+        updatedAt: Date.now(),
+      };
+
+      await saveStudioListingDrafts({
+        session: perDesignSession,
+        listings: [target],
+        productName,
+        lockSelection: false,
+        copyMode: "regenerate",
+      });
+      saved++;
+    }
+
+    if (hasAnyPrice) await saveSession(nextSession);
+
+    return {
+      summary: `Saved listing details for ${saved} listing${saved === 1 ? "" : "s"}`,
+      result: {
+        saved,
+        listingIds: savedItems.map((s) => s.listingId),
+        designNames: savedItems.map((s) => s.designName),
+        note: "Saved to the local listing drafts. Nothing was sent to Printify or published.",
+      },
+    };
+  }
+
+  // ---- Single listing or all listings (existing behaviour) -----------------
   const ids = Array.isArray(payload.listingIds)
     ? payload.listingIds.map((id) => String(id))
     : [];
@@ -603,9 +890,6 @@ export async function confirmSaveListingDetails(
   if (price.error) {
     return { summary: "Could not read the price", error: price.error };
   }
-
-  const blueprints = (await loadCachedBlueprints()) ?? [];
-  const productName = catalogProductName(blueprints, resolved.session.blueprintId);
 
   // Moving the batch to "custom" prices must not change any other listing.
   // Pin every active listing that is not being written to its current value.
