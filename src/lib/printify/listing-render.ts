@@ -50,11 +50,16 @@ function stableValue(value: unknown): unknown {
 /**
  * Everything that changes the pixels, and nothing that does not.
  *
- * This is the ONE source of the render fingerprint (version 3): the listing
+ * This is the ONE source of the render fingerprint (version 4): the listing
  * path calls it, `resolveRenderPlanWithFingerprint` calls it, and the value it
  * returns is what `renderComposition` stores as `renderFp` on the asset.
  *
- * Version 3 fixes the two ways the same pixels could hash differently:
+ * Version 4 invalidates renders made before the clip transform was undone in
+ * the right order in `compose.ts`. Every render of a ROTATED frame used to be
+ * displaced by `2·|c|·sin(φ/2)`, so those pixels are wrong even though their
+ * inputs were not; the version bump is what stops them being adopted as fresh.
+ *
+ * Version 3 fixed the two ways the same pixels could hash differently:
  *
  *   * the print area is resolved for THIS design (`printAreaOf(mockup,
  *     designId)`), so a per-design override is what gets hashed rather than
@@ -97,7 +102,7 @@ export function computeRenderFingerprint(params: {
     params.behindMockup ?? (area ? area.clipMode === "behind-garment" : false);
   return JSON.stringify(
     stableValue({
-      version: 3,
+      version: 4,
       designAssetId: params.designAssetId,
       mockup: {
         assetId: params.mockup.assetId,

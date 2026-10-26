@@ -56,8 +56,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 470 unit tests
-npm run test:e2e      # 33 acceptance tests (local dev server)
+npm run test          # 484 unit tests
+npm run test:e2e      # 34 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -420,9 +420,12 @@ mockups and finally a live product.
   (`printAreaOf(mockup, designId)`), and the hashed `behindMockup` is the
   EFFECTIVE compositing mode: the area's `clipMode` when an area exists, the
   saved placement flag otherwise. `label`, `source`, `reference` and
-  `updatedAt` are deliberately excluded. The fingerprint is `version: 3`;
+  `updatedAt` are deliberately excluded. The fingerprint is `version: 4`;
   changing it invalidates existing renders once, which is the intended cost of
-  fixing the old over-broad hash.
+  fixing the old over-broad hash. Version 4 exists because every render of a
+  ROTATED frame made before the clip-transform fix was displaced (see the
+  compositor trap below), so those pixels had to stop being adoptable even
+  though their inputs were unchanged.
 - **Downloads** build a ZIP of the current renders only, in click order. The
   Export Center uses `listing.imageAssetIds` in order when
   `imageSelectionLocked` is true, and falls back to every render when it is
@@ -975,6 +978,15 @@ position pickers here:
   was briefly treated as a top-left, the design was cut to a quarter of the
   area. The path restores the canvas transform after `clip()`, or the design
   is drawn rotated by the clip.
+- **The clip transform must be undone in REVERSE order.** `drawPlacement`
+  applies `T(c)·R(φ)` to build the clip, so the inverse is `R(−φ)·T(−c)`.
+  Undoing it as `T(−c)·R(−φ)` leaves `T(c − R(φ)·c)` behind — a pure
+  translation of `2·|c|·sin(φ/2)`, measured from the PHOTO's origin, not the
+  frame's centre. At 4° that is ~50 px on a 1000 px mockup, which is exactly
+  the "design slid slightly right" report: the Konva preview was right and
+  every saved render was wrong. It cannot be a `save()`/`restore()` pair,
+  because `restore()` pops the clip with the transform. `tests/draw-placement.test.ts`
+  pins the CTM the design is drawn under, for several clip rotations.
 - **react-konva re-applies props on every render.** The group's position,
   rotation and scale, the artwork's geometry and the handle's position are
   all set IMPERATIVELY; only committed values (the frame's size) come from

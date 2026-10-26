@@ -77,8 +77,15 @@ export function drawPlacement(
     if (rad) ctx.rotate(rad);
     ctx.rect(-clip.width / 2, -clip.height / 2, clip.width, clip.height);
     ctx.clip();
-    ctx.translate(-clip.x, -clip.y);
+    // Undo the clip transform in the REVERSE order it was applied: the inverse
+    // of T(c)·R(φ) is R(−φ)·T(−c), not T(−c)·R(−φ). Undoing it in the forward
+    // order leaves T(c − R(φ)·c) behind - a pure translation of the design by
+    // 2·|c|·sin(φ/2), which is tens of pixels at a few degrees and grows with
+    // the frame's distance from the photo's origin. That is what slid a
+    // rotated frame's artwork away from the preview. The clip itself must stay,
+    // so this cannot be a save()/restore() pair: restore() pops the clip too.
     if (rad) ctx.rotate(-rad);
+    ctx.translate(-clip.x, -clip.y);
   }
   ctx.translate(cx, cy);
   if (t.rotation % 360 !== 0) {

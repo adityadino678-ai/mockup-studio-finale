@@ -225,9 +225,9 @@ describe("computeRenderFingerprint", () => {
     } = {},
   ) => computeRenderFingerprint({ designAssetId: "art", mockup: m, placement: place, ...extra });
 
-  it("is version 3", () => {
-    expect(JSON.parse(fpOf(areaMockup())).version).toBe(3);
-    expect(JSON.parse(fpOf(mockup("m1", "tshirt"))).version).toBe(3);
+  it("is version 4", () => {
+    expect(JSON.parse(fpOf(areaMockup())).version).toBe(4);
+    expect(JSON.parse(fpOf(mockup("m1", "tshirt"))).version).toBe(4);
   });
 
   it("hashes the design's own area, so two designs on one mockup differ", () => {
