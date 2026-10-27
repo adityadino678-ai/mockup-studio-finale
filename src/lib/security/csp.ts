@@ -46,10 +46,10 @@ export function cspHeader(nonce: string): string {
   return [
     `default-src 'self'`,
     `script-src 'nonce-${nonce}' 'strict-dynamic' https:`,
-    `style-src 'self' 'unsafe-inline'`, // Tailwind inline styles are dynamic
+    `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`, // Tailwind inline styles + Google Fonts CSS
     `img-src 'self' data: blob: https:`,
     `connect-src ${ALLOWED_CONNECT_SRC}`,
-    `font-src 'self'`,
+    `font-src 'self' https://fonts.gstatic.com`,
     `object-src 'none'`,
     `base-uri 'self'`,
     `frame-ancestors 'none'`,

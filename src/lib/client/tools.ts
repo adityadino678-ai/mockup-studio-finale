@@ -560,11 +560,11 @@ async function proposeSaveListingDetails(args: Record<string, unknown>): Promise
       }
       const item = raw as Record<string, unknown>;
       const wanted = String(item.design ?? "").trim();
-      if (!wanted) {
-        errors.push("Each item needs a design name.");
+      const wantedId = String(item.listingId ?? "").trim();
+      if (!wanted && !wantedId) {
+        errors.push("Each item needs a design name or listing id.");
         continue;
       }
-      const wantedId = String(item.listingId ?? "").trim();
       const listing = wantedId
         ? byId.get(wantedId.toLowerCase())
         : byId.get(wanted.toLowerCase()) ?? byName.get(wanted.toLowerCase());

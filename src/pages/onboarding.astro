@@ -1,0 +1,12 @@
+---
+// Onboarding (post-signup): skippable, resumable, gated by a local flag.
+// Renders the onboarding wizard as a React island.
+import AppLayout from "@/layouts/AppLayout.astro";
+import { OnboardingRoute } from "@/routes/OnboardingRoute";
+---
+
+<AppLayout>
+  <main>
+    <OnboardingRoute client:visible />
+  </main>
+</AppLayout>
