@@ -40,6 +40,9 @@ export default defineConfig({
       AI_BASE_URL: envField.string(optionalSecret),
       AI_MODEL: envField.string(optionalSecret),
       OPENAI_API_KEY: envField.string(optionalSecret),
+      SUPABASE_URL: envField.string(optionalSecret),
+      SUPABASE_ANON_KEY: envField.string(optionalSecret),
+      SUPABASE_SERVICE_ROLE: envField.string(optionalSecret),
     },
   },
   vite: {

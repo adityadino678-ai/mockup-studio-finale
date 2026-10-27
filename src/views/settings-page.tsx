@@ -41,12 +41,16 @@ import {
   HardDrive,
   KeyRound,
   Loader2,
+  LogIn,
+  LogOut,
   RefreshCw,
   Search,
   Server,
   Settings as SettingsIcon,
   Sparkles,
   Trash2,
+  User,
+  UserPlus,
 } from "lucide-react";
 
 interface IntegrationStatus {
@@ -92,7 +96,76 @@ export function SettingsPage() {
   const [etsyTesting, setEtsyTesting] = React.useState(false);
   const [etsyResult, setEtsyResult] = React.useState<TestResult | null>(null);
 
-  const counts = useLiveQuery(async () => {
+  // ---- Supabase auth (email/password only) ----
+const [authUser, setAuthUser] = React.useState<{ id: string; email: string } | null>(null);
+const [authLoading, setAuthLoading] = React.useState(false);
+const [authError, setAuthError] = React.useState<string | null>(null);
+const [authMode, setAuthMode] = React.useState<"signin" | "signup">("signin");
+const [supabaseConfigured, setSupabaseConfigured] = React.useState<boolean | null>(null);
+
+const checkSupabase = async () => {
+  try {
+    const res = await fetch("/api/auth/me");
+    setSupabaseConfigured(res.ok);
+    if (res.ok) {
+      const data = await res.json();
+      setAuthUser(data.user);
+    }
+  } catch {
+    setSupabaseConfigured(false);
+  }
+};
+
+const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  const formData = new FormData(e.currentTarget);
+  const email = formData.get("email") as string;
+  const password = formData.get("password") as string;
+  setAuthLoading(true);
+  setAuthError(null);
+  try {
+    const { signIn } = await import("@/lib/auth/session");
+    await signIn(email, password);
+    setAuthLoading(false);
+    await checkSupabase();
+    toast.success("Signed in");
+  } catch (e) {
+    setAuthLoading(false);
+    setAuthError(e instanceof Error ? e.message : "Sign in failed");
+    toast.error(e instanceof Error ? e.message : "Sign in failed");
+  }
+};
+
+const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  const formData = new FormData(e.currentTarget);
+  const email = formData.get("email") as string;
+  const password = formData.get("password") as string;
+  const fullName = formData.get("full_name") as string;
+  setAuthLoading(true);
+  setAuthError(null);
+  try {
+    const { signUp } = await import("@/lib/auth/session");
+    await signUp(email, password, fullName);
+    setAuthLoading(false);
+    toast.success("Account created — please sign in");
+    setAuthMode("signin");
+  } catch (e) {
+    setAuthLoading(false);
+    setAuthError(e instanceof Error ? e.message : "Sign up failed");
+    toast.error(e instanceof Error ? e.message : "Sign up failed");
+  }
+};
+
+const handleSignOut = async () => {
+  const { signOut } = await import("@/lib/auth/session");
+  await signOut();
+  setAuthUser(null);
+  setSupabaseConfigured(false);
+  toast.success("Signed out");
+};
+
+const counts = useLiveQuery(async () => {
     const [designs, mockups, assets, renders, templates] = await Promise.all([
       db.designs.count(),
       db.mockups.count(),
@@ -121,6 +194,7 @@ export function SettingsPage() {
       }
     });
     void refreshStatus();
+    void checkSupabase();
     void loadIntegrations().then((c) => {
       setConfig(c);
       // Show any previously fetched model list immediately.
@@ -401,6 +475,113 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Supabase auth card */}
+      {supabaseConfigured !== null && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {authUser ? (
+                <LogOut className="h-4 w-4 text-forest" />
+              ) : (
+                <LogIn className="h-4 w-4 text-forest" />
+              )}
+              Account
+            </CardTitle>
+            <CardDescription>
+              Sign in with email to sync your designs, mockups and listings to Supabase.
+              Optional — the app works fully without an account.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!supabaseConfigured && (
+              <div className="rounded-md border border-border-subtle bg-surface-muted p-3 text-[13px] text-ink-muted">
+                Supabase is not configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY to server
+                secrets to enable account sync.
+              </div>
+            )}
+            {supabaseConfigured && !authUser && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button
+                    onClick={() => setAuthMode("signin")}
+                    className={`px-4 py-2 rounded-md border border-border-strong transition-colors ${
+                      authMode === "signin" ? "bg-surface-muted text-ink" : "text-ink-muted hover:bg-surface-muted"
+                    }`}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    onClick={() => setAuthMode("signup")}
+                    className={`px-4 py-2 rounded-md border border-border-strong transition-colors ${
+                      authMode === "signup" ? "bg-surface-muted text-ink" : "text-ink-muted hover:bg-surface-muted"
+                    }`}
+                  >
+                    Create account
+                  </button>
+                </div>
+                <form onSubmit={authMode === "signin" ? handleSignIn : handleSignUp} className="space-y-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="auth-email">Email</Label>
+                    <Input
+                      id="auth-email"
+                      type="email"
+                      required
+                      className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="auth-password">Password</Label>
+                    <Input
+                      id="auth-password"
+                      type="password"
+                      required
+                      minLength={8}
+                      className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+                    />
+                  </div>
+                  {authMode === "signup" && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="auth-full-name">Full name (optional)</Label>
+                      <Input
+                        id="auth-full-name"
+                        type="text"
+                        className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+                      />
+                    </div>
+                  )}
+                  {authError && (
+                    <p className="text-[12px] text-danger">{authError}</p>
+                  )}
+                  <Button type="submit" disabled={authLoading} className="w-full">
+                    {authLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      authMode === "signin" ? <LogIn className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />
+                    )}
+                    {authLoading ? "Signing in…" : authMode === "signin" ? "Sign in" : "Create account"}
+                  </Button>
+                </form>
+              </>
+            )}
+            {supabaseConfigured && authUser && (
+              <div className="flex items-center justify-between space-y-2 sm:space-y-0 sm:flex-row">
+                <div className="flex items-center gap-3">
+                  <User className="h-4 w-4 text-forest" />
+                  <div>
+                    <div className="text-sm font-medium text-ink">{authUser.email}</div>
+                    <div className="text-[12px] text-ink-muted">Signed in to Supabase</div>
+                  </div>
+                </div>
+                <Button variant="outline" onClick={handleSignOut} disabled={authLoading} size="sm">
+                  {authLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />}
+                  Sign out
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
