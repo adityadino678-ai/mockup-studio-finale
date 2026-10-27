@@ -3,6 +3,18 @@ import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { createPrintifyClient, isSalesChannelConnected, PrintifyError } from "@/lib/server/printify";
 
+function sameOriginRequest(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * GET /api/printify/shops
  *
@@ -25,6 +37,9 @@ interface ShopRow {
 }
 
 export const GET: APIRoute = async ({ request }) => {
+  if (!sameOriginRequest(request)) {
+    return json({ error: "Cross-site requests are not allowed on this endpoint." }, 403);
+  }
   const creds = credentialsFromRequest(request);
   const client = createPrintifyClient(creds.printify?.apiKey);
 

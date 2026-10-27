@@ -4,6 +4,7 @@ import { aiConfig, outputTokenBudget, streamChat, type AiMessage } from "@/lib/s
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { encodeSse } from "@/lib/ai/sse";
 import { toOpenAiTools } from "@/lib/ai/tools";
+import { validateBody } from "@/lib/security/validation";
 
 export const prerender = false;
 
@@ -88,12 +89,11 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
-  let body: ChatRequest;
-  try {
-    body = (await request.json()) as ChatRequest;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/ai/chat", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
+  const body = validation.data as unknown as ChatRequest;
 
   const history = Array.isArray(body.messages) ? body.messages.filter(isMessage) : [];
   if (!history.some((m) => m.role === "user")) {

@@ -7,6 +7,17 @@ import {
   type PrintifyBlueprint,
   type PrintifyBlueprintDetail,
 } from "@/lib/server/printify";
+function sameOriginRequest(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
 
 function fail(error: unknown) {
   if (error instanceof PrintifyError) {
@@ -99,6 +110,9 @@ async function putInCatalogueCache(url: URL, response: Response): Promise<void> 
 }
 
 export const GET: APIRoute = async ({ url, request }) => {
+  if (!sameOriginRequest(request)) {
+    return json({ error: "Cross-site requests are not allowed on this endpoint." }, 403);
+  }
   const creds = credentialsFromRequest(request);
   const client = createPrintifyClient(creds.printify?.apiKey);
 

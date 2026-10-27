@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { AiNotConfiguredError, aiConfig, complete, parseJsonLoose } from "@/lib/server/ai";
 import { credentialsFromRequest } from "@/lib/server/creds";
+import { validateBody } from "@/lib/security/validation";
 
 interface SeoResearchInput {
   query?: string;
@@ -64,12 +65,12 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
-  let body: SeoRequest;
-  try {
-    body = (await request.json()) as SeoRequest;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/ai/seo", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
+  const body = validation.data as unknown as SeoRequest;
+
   if (!body.niche?.trim()) {
     return json({ error: "A niche or concept is required" }, 400);
   }

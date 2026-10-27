@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { AiNotConfiguredError, complete } from "@/lib/server/ai";
 import { credentialsFromRequest } from "@/lib/server/creds";
+import { validateBody } from "@/lib/security/validation";
 
 export const prerender = false;
 
@@ -14,12 +15,11 @@ export const POST: APIRoute = async ({ request }) => {
   const creds = credentialsFromRequest(request);
   if (!creds.ai) return json({ configured: false, error: "AI provider is not configured." }, 503);
 
-  let body: TitleRequest;
-  try {
-    body = (await request.json()) as TitleRequest;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/ai/title", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
+  const body = validation.data as unknown as TitleRequest;
   const prompt = (body.prompt ?? "").trim();
   if (!prompt) return json({ error: "A prompt is required" }, 400);
 

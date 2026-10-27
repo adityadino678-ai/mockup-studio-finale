@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { listModels } from "@/lib/server/ai";
 import { getProvider } from "@/lib/ai/providers";
+import { validateBody } from "@/lib/security/validation";
 
 // Live model-list fetch for a provider. Proxied through the server so the
 // browser never makes a cross-origin call (and CORS/keys stay out of the tab).
@@ -19,13 +20,39 @@ function clean(value: string | null | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function sameOriginRequest(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+
 export const POST: APIRoute = async ({ request }) => {
+  if (!sameOriginRequest(request)) {
+    return json({ error: "Cross-site requests are not allowed on this endpoint." }, 403);
+  }
+  const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (contentType !== "application/json" && contentType !== "") {
+    return json({ error: "Content-Type must be application/json" }, 415);
+  }
+
   let body: ModelsRequest = {};
   try {
     body = (await request.json()) as ModelsRequest;
   } catch {
     // Body is optional; the provider can also come from the x-ai-provider header.
   }
+
+  const validation = validateBody("POST /api/integrations/models", body);
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
+  }
+  body = validation.data as ModelsRequest;
 
   const headers = request.headers;
   const providerId = (body.provider ?? clean(headers.get("x-ai-provider")))?.trim();

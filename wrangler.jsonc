@@ -8,6 +8,13 @@
     "binding": "ASSETS",
     "directory": "./dist"
   },
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "rate_limit_kv",
+      "preview_id": "rate_limit_kv_preview"
+    }
+  ],
   "observability": {
     "enabled": true
   }

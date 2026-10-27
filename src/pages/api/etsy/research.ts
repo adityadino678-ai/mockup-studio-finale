@@ -1,8 +1,8 @@
 import type { APIRoute } from "astro";
-import { json } from "@/lib/server/env";
-import { credentialsFromRequest } from "@/lib/server/creds";
+import { json, serverEnv } from "@/lib/server/env";
 import { EtsyApiError, searchEtsyActiveListings } from "@/lib/server/etsy";
 import type { EtsyResearch, EtsyResearchResponse } from "@/types/etsy";
+import { validateBody } from "@/lib/security/validation";
 
 /**
  * A tiny in-isolate cache. The same query is often needed by several listings
@@ -86,23 +86,28 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ error: "The research request is too large" }, 413);
   }
 
-  let body: { query?: unknown };
-  try {
-    body = JSON.parse(raw) as { query?: unknown };
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/etsy/research", JSON.parse(raw));
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
+  const body = validation.data as { query?: unknown };
   const query = cleanQuery(body.query);
   if (!query) {
     return json({ error: "A research query of 2 to 120 characters is required" }, 400);
   }
 
-  const creds = credentialsFromRequest(request);
-  if (!creds.etsy) {
+  // The API path spends the operator's keystring and is server-side only: the
+  // browser-supplied `x-etsy-key` is intentionally not read here, so an exposed
+  // or rotated key in a visitor's Settings can never reach Etsy through this
+  // endpoint. When no server keystring is configured, or Etsy rejects it, the
+  // caller falls back to the companion extension (which reads the public
+  // search page in the user's own browser).
+  const apiKey = serverEnv.etsyApiKey();
+  if (!apiKey) {
     const payload: EtsyResearchResponse = {
       configured: false,
       error:
-        "Etsy research needs a developer keystring. Add one in Settings → API connections, or set ETSY_API_KEY on the server.",
+        "Etsy research needs a developer keystring. Set ETSY_API_KEY on the server (wrangler secret put ETSY_API_KEY), or use the companion extension, which reads the public Etsy search page in your own browser.",
     };
     return json(payload, 503);
   }
@@ -115,7 +120,7 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    const research = await searchEtsyActiveListings(creds.etsy.apiKey, query);
+    const research = await searchEtsyActiveListings(apiKey, query);
     remember(query, research);
     return json({ configured: true, research, cached: false } satisfies EtsyResearchResponse & {
       cached: boolean;

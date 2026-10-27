@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/server/printify";
+import { validateBody } from "@/lib/security/validation";
 
 interface MockupBridgeBody {
   /** Explicit confirmation: each image is uploaded twice on Printify's side. */
@@ -148,15 +149,11 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
-  let body: MockupBridgeBody;
-  try {
-    body = (await request.json()) as MockupBridgeBody;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/printify/mockups", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return json({ error: "Invalid JSON body" }, 400);
-  }
+  const body = validation.data as unknown as MockupBridgeBody;
 
   if (body.confirm !== true) {
     return json(

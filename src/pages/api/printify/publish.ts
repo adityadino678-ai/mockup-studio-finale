@@ -9,6 +9,7 @@ import {
   PrintifyError,
   salesChannelErrorMessage,
 } from "@/lib/server/printify";
+import { validateBody } from "@/lib/security/validation";
 
 interface PublishProductBody {
   /**
@@ -89,12 +90,11 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
-  let body: PublishProductBody;
-  try {
-    body = (await request.json()) as PublishProductBody;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/printify/publish", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
+  const body = validation.data as unknown as PublishProductBody;
 
   if (body.confirm !== true) {
     return json(

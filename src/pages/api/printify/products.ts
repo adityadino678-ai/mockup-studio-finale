@@ -3,6 +3,7 @@ import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/server/printify";
 import { clampPlacement } from "@/lib/printify/fit";
+import { validateBody } from "@/lib/security/validation";
 
 interface UpdateProductBody {
   /** Explicit user confirmation is required before anything changes remotely. */
@@ -118,7 +119,33 @@ function base64Bytes(base64: string): number {
 
 export const prerender = false;
 
+function sameOriginRequest(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+
 export const POST: APIRoute = async ({ request }) => {
+  if (!sameOriginRequest(request)) {
+    return json({ error: "Cross-site requests are not allowed on this endpoint." }, 403);
+  }
+  const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (contentType !== "application/json") {
+    return json({ error: "Content-Type must be application/json" }, 415);
+  }
+
+  const validation = validateBody("POST /api/printify/products", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
+  }
+  const body = validation.data as unknown as CreateProductBody;
+
   const creds = credentialsFromRequest(request);
   const client = createPrintifyClient(creds.printify?.apiKey);
 
@@ -130,13 +157,6 @@ export const POST: APIRoute = async ({ request }) => {
       },
       503,
     );
-  }
-
-  let body: CreateProductBody;
-  try {
-    body = (await request.json()) as CreateProductBody;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
   }
 
   if (body.confirm !== true) {
@@ -343,6 +363,20 @@ export const POST: APIRoute = async ({ request }) => {
  * publishes - publishing stays the separate `/api/printify/publish` call.
  */
 export const PUT: APIRoute = async ({ request }) => {
+  if (!sameOriginRequest(request)) {
+    return json({ error: "Cross-site requests are not allowed on this endpoint." }, 403);
+  }
+  const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (contentType !== "application/json") {
+    return json({ error: "Content-Type must be application/json" }, 415);
+  }
+
+  const validation = validateBody("PUT /api/printify/products", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
+  }
+  const body = validation.data as unknown as UpdateProductBody;
+
   const creds = credentialsFromRequest(request);
   const client = createPrintifyClient(creds.printify?.apiKey);
 
@@ -354,13 +388,6 @@ export const PUT: APIRoute = async ({ request }) => {
       },
       503,
     );
-  }
-
-  let body: UpdateProductBody;
-  try {
-    body = (await request.json()) as UpdateProductBody;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
   }
 
   if (body.confirm !== true) {

@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { AiNotConfiguredError, aiConfig, complete } from "@/lib/server/ai";
 import { credentialsFromRequest } from "@/lib/server/creds";
+import { validateBody } from "@/lib/security/validation";
 
 const SYSTEM_PROMPT = `You are the assistant inside Mockup Studio, a local-first print-on-demand workspace.
 
@@ -46,15 +47,11 @@ export const POST: APIRoute = async ({ request }) => {
   }
   const model = aiConfig(creds.ai).model;
 
-  let body: AssistantRequest;
-  try {
-    body = (await request.json()) as AssistantRequest;
-  } catch {
-    return json({ error: "Invalid JSON body" }, 400);
+  const validation = validateBody("POST /api/ai/assistant", await request.json());
+  if (!validation.success) {
+    return json({ error: validation.error }, 400);
   }
-  if (!body.question?.trim()) {
-    return json({ error: "A question is required" }, 400);
-  }
+  const body = validation.data as unknown as AssistantRequest;
 
   const ctx = body.context ?? {};
   const contextLine = [
