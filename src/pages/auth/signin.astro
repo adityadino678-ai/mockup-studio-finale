@@ -1,0 +1,60 @@
+---
+import { PageHeader } from "@/components/layout/page-header";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { LogIn, Mail } from "lucide-react";
+---
+
+<main class="mx-auto max-w-md p-8">
+  <PageHeader
+    title="Sign in"
+    description="Welcome back to Mockup Studio. Sign in to sync your designs to Supabase."
+  />
+
+  <Card className="mt-6">
+    <CardHeader>
+      <CardTitle className="flex items-center gap-2">
+        <LogIn className="h-4 w-4 text-forest" /> Sign in
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="space-y-3">
+      <form id="signin-form" class="space-y-3">
+        <div class="space-y-1.5">
+          <Label htmlFor="email">Email</Label>
+          <input
+            id="email"
+            type="email"
+            required
+            placeholder="you@example.com"
+            autocomplete="email"
+            class="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+          />
+        </div>
+        <div class="space-y-1.5">
+          <Label htmlFor="password">Password</Label>
+          <input
+            id="password"
+            type="password"
+            required
+            minlength={8}
+            autocomplete="current-password"
+            class="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
+          />
+        </div>
+        <Button type="submit" className="w-full flex items-center justify-center gap-2">
+          <Mail className="h-4 w-4" /> Sign in
+        </Button>
+      </form>
+      <p id="signin-message" class="text-[12px] text-ink-muted text-center"></p>
+    </CardContent>
+  </Card>
+
+  <p class="mt-6 text-[13px] text-ink-muted text-center">
+    Don't have an account?{" "}
+    <a href="/auth/signup" class="text-forest underline font-medium">
+      Create one &rarr;
+    </a>
+  </p>
+  <script src="/auth-forms.js" is:inline></script>
+</main>

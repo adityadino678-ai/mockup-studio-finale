@@ -11,8 +11,7 @@
   "kv_namespaces": [
     {
       "binding": "RATE_LIMIT_KV",
-      "id": "rate_limit_kv",
-      "preview_id": "rate_limit_kv_preview"
+      "id": "0b70483f48924acf82e9c6a242647816"
     }
   ],
   "observability": {
