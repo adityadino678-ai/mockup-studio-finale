@@ -1,10 +1,9 @@
-import { test, expect, chromium } from "@playwright/test";
+import { test, expect, chromium, type Browser } from "@playwright/test";
 
 const BASE_URL = process.env.BASE_URL || "https://mockup-studio.adityadino678.workers.dev";
-const CDP_ENDPOINT = "ws://127.0.0.1:9233/devtools/browser/...";
 
 test.describe("W8 Brave Browser Autopilot — 8 scenarios", () => {
-  let browser;
+  let browser: Browser;
 
   test.beforeAll(async () => {
     // Connect to Brave via CDP
