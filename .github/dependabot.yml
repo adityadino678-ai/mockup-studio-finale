@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Keep npm dependencies up to date with auto-created pull requests.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "dependabot"
+    groups:
+      "radix-ui":
+        patterns:
+          - "@radix-ui/*"
+      "astro":
+        patterns:
+          - "astro"
+          - "@astrojs/*"
+
+  # Keep GitHub Actions dependencies up to date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "dependabot"

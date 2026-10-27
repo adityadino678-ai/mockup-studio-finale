@@ -1,0 +1,17 @@
+# CODEOWNERS — Mockup Studio
+#
+# Defines who is responsible for which parts of the repository. Used by GitHub
+# to auto-request reviews on pull requests.
+#
+# Pattern reference: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-codeowners
+
+# Default owner for everything — the repository owner.
+* @adityadino678-ai
+
+# CI/CD, repository settings, and DevOps-owned files are owned by the GitHub/DevOps agent.
+.github/ @adityadino678-ai
+CODEOWNERS @adityadino678-ai
+.env.example @adityadino678-ai
+playwright.config.ts @adityadino678-ai
+.astro/ @adityadino678-ai
+wrangler.jsonc @adityadino678-ai
