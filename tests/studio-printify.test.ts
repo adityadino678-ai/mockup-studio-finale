@@ -343,7 +343,63 @@ describe("the variant partition", () => {
     expect(plan.groups.every((group) => group.colors.length > 0)).toBe(true);
     expect(plan.groups[plan.groups.length - 1].colors.length).toBeGreaterThan(0);
   });
+});
 
+describe("the variant partition - safe absorber", () => {
+  const SIZES = ["S", "M", "L"];
+  // 5 dark colours all marked for white ink, 2 plain colours, and one
+  // catalogue colour that no group names (a catalogue extra the UI can never
+  // select). That extra must NOT land on the white-ink group - white ink on
+  // a light garment is invisible.
+  const PLAIN = ["Solid White", "Natural"];
+  const WHITE_INK = ["Solid Black", "Navy", "Charcoal", "Forest", "Maroon"];
+  const EXTRA = "Heather Grey";
+  const COLOURS = [...PLAIN, ...WHITE_INK, EXTRA];
+  const CATALOGUE: CatalogVariant[] = COLOURS.flatMap((colour, colourIndex) =>
+    SIZES.map((size, sizeIndex) => ({
+      id: 30000 + colourIndex * 10 + sizeIndex,
+      title: `${colour} / ${size}`,
+      options: { color: colour, size },
+    })),
+  );
+  const index = buildCatalogueIndex(CATALOGUE);
+  const GROUPS: ProductColourGroups = {
+    plain: PLAIN,
+    ink: WHITE_INK,
+    blackInk: [],
+  };
+  const PLAN = planDesignColours(
+    { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+    GROUPS,
+  );
+
+  it("absorbs catalogue extras into the plain group, never the white-ink group", () => {
+    const partition = buildPartition(
+      index,
+      PLAN.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+    );
+
+    const whiteGroup = partition.groups.find((g) => g.ink === "white");
+    const plainGroup = partition.groups.find((g) => g.ink === "main");
+
+    // The white-ink group holds exactly the 5 dark colours' variants.
+    const inkVariantIds = WHITE_INK.flatMap((c) => index.variantIds.get(c) ?? []);
+    expect(whiteGroup!.variantIds).toEqual([...inkVariantIds].sort((a, b) => a - b));
+
+    // The plain group is complete: its own colours plus the absorbed extra.
+    const plainVariantIds = PLAIN.flatMap((c) => index.variantIds.get(c) ?? []);
+    expect(plainGroup!.variantIds.length).toBeGreaterThan(plainVariantIds.length);
+
+    // Complete partition: every variant covered exactly once.
+    expect(partition.complete).toBe(true);
+    expect(partition.covered).toHaveLength(CATALOGUE.length);
+
+    // No unclaimed variant appended to the last (white-ink) group; the extra
+    // is reported as unclaimed instead.
+    const extraIds = index.variantIds.get(EXTRA) ?? [];
+    expect(whiteGroup!.variantIds).not.toEqual(expect.arrayContaining(extraIds));
+    expect(partition.unclaimed).toEqual([...extraIds].sort((a, b) => a - b));
+  });
 });
 
 describe("the print_areas payload", () => {

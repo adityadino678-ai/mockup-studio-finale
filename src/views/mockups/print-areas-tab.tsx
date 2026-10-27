@@ -42,7 +42,6 @@ import { presetsForCategory } from "@/lib/printify/presets";
 import { CATEGORY_SINGULAR } from "@/lib/mockups/categories";
 import { computeFit } from "@/lib/printify/fit";
 import {
-  areaAspect,
   areaCrop,
   areaInches,
   defaultFrame,
@@ -59,7 +58,6 @@ import {
 import { writeStudioPlacement } from "@/lib/mockups/resolve";
 import {
   applyPrintAreaToMockups,
-  printAreaScopeLabel,
   printAreaScopeTargets,
   type PrintAreaScope,
 } from "@/lib/mockups/propagate";
@@ -71,7 +69,7 @@ import { canRenderPrintFile, renderPrintFile } from "@/lib/mockups/print-file";
 import { renderComposition } from "@/lib/batch/runner";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { Checkbox, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/primitives";
 import { useListingCatalog } from "@/views/listings/listing-catalog";
 import type {
@@ -82,7 +80,7 @@ import type {
   StudioSession,
   Template,
 } from "@/types/domain";
-import { AlertTriangle, Crop, Download, ImagePlus, Layers, Loader2, Ruler, Save, Trash2 } from "lucide-react";
+import { Crop, Download, ImagePlus, Layers, Loader2, Trash2 } from "lucide-react";
 
 /** The crop windows offered as one-click presets. */
 const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
@@ -119,14 +117,14 @@ export function PrintAreasTab({
   const [cropMode, setCropMode] = React.useState(false);
   const [measuredPixels, setMeasuredPixels] = React.useState<number | null>(null);
   const [referenceInches, setReferenceInches] = React.useState("");
-  const [referenceOpen, setReferenceOpen] = React.useState(false);
+  const [_referenceOpen, _setReferenceOpen] = React.useState(false);
   const [applyTargets, setApplyTargets] = React.useState<string[]>([]);
   const [templateId, setTemplateId] = React.useState("");
   const [templateName, setTemplateName] = React.useState("");
-  const [presetValue, setPresetValue] = React.useState("");
-  const [customOpen, setCustomOpen] = React.useState(false);
-  const [customWidth, setCustomWidth] = React.useState("");
-  const [customHeight, setCustomHeight] = React.useState("");
+  const [_presetValue, setPresetValue] = React.useState("");
+  const [_customOpen, _setCustomOpen] = React.useState(false);
+  const [_customWidth, _setCustomWidth] = React.useState("");
+  const [_customHeight, _setCustomHeight] = React.useState("");
   /** The exact print area of the product selected in the Printify Studio. */
   const [studioArea, setStudioArea] = React.useState<PrintAreaOption | null>(null);
   /** True while the composed mockup is being written to storage. */
@@ -138,7 +136,7 @@ export function PrintAreasTab({
    * "place it on one photo, save, next design", so the default is every
    * mockup of the same product type; narrower or wider scopes are explicit.
    */
-  const [areaScope, setAreaScope] = React.useState<PrintAreaScope>("category");
+  const [areaScope, _setAreaScope] = React.useState<PrintAreaScope>("category");
   const lastMockupId = React.useRef<string | null>(null);
   /** The design the draft in `area` belongs to, so a tab switch reloads it. */
   const lastDesignId = React.useRef<string | null>(null);
@@ -283,7 +281,7 @@ export function PrintAreasTab({
         lastMockupId.current = mockup.id;
         setMeasuredPixels(null);
         setReferenceInches("");
-        setReferenceOpen(false);
+        _setReferenceOpen(false);
         setCropMode(false);
       }
       lastDesignId.current = designId;
@@ -503,7 +501,7 @@ export function PrintAreasTab({
   }, [dirty, area, persistArea]);
 
   /** The exact print area of the product selected in the Printify Studio. */
-  const useStudioArea = () => {
+  const _useStudioArea = () => {
     if (!studioArea || !session.blueprintId || !session.printProviderId) {
       toast.info("The Printify Studio has no product selected yet.");
       return;
@@ -523,7 +521,7 @@ export function PrintAreasTab({
     toast.success(`Using the Studio's print area (${studioArea.width}×${studioArea.height})`);
   };
 
-  const applyPreset = (presetId: string) => {
+  const _applyPreset = (presetId: string) => {
     const preset = categoryPresets.find((p) => p.id === presetId);
     if (!preset) return;
     applyAreaSize({
@@ -535,9 +533,9 @@ export function PrintAreasTab({
     setPresetValue("");
   };
 
-  const useManualSize = () => {
-    const w = Number(customWidth);
-    const h = Number(customHeight);
+  const _useManualSize = () => {
+    const w = Number(_customWidth);
+    const h = Number(_customHeight);
     if (!w || !h) {
       toast.error("Enter a width and a height in pixels.");
       return;
@@ -550,7 +548,7 @@ export function PrintAreasTab({
     });
   };
 
-  const saveArea = async () => {
+  const _saveArea = async () => {
     if (!mockup || !area) return;
     await persistArea(area, { notify: true });
   };
@@ -608,7 +606,7 @@ export function PrintAreasTab({
    * The per-design overrides in the Studio session are dropped, so every
    * design lands in the same spot inside this area.
    */
-  const setAsPlaceholder = async () => {
+  const _setAsPlaceholder = async () => {
     const next: StudioSession = {
       ...session,
       // Promote the placement on screen, not whatever the old fallback
@@ -625,7 +623,7 @@ export function PrintAreasTab({
   };
 
   // --- the reference ---------------------------------------------------------
-  const saveReference = () => {
+  const _saveReference = () => {
     if (!area || !measuredPixels || !referenceInches) return;
     const inches = Number(referenceInches);
     if (!inches || inches <= 0) {
@@ -645,7 +643,7 @@ export function PrintAreasTab({
     toast.success("Garment reference saved");
   };
 
-  const clearReference = () => {
+  const _clearReference = () => {
     if (!area) return;
     const { reference: _removed, ...rest } = area;
     setArea(rest);
@@ -956,15 +954,15 @@ export function PrintAreasTab({
   };
 
   // --- readouts --------------------------------------------------------------
-  const physical = area ? areaInches(area, mockupW, mockupH) : null;
-  const scopeCount =
+  const _physical = area ? areaInches(area, mockupW, mockupH) : null;
+  const _scopeCount =
     mockup && mockups ? printAreaScopeTargets(mockups, mockup, areaScope).length : 0;
-  const designSize =
+  const _designSize =
     area && placement && designMeta.w > 0
       ? designInches(placement.scale, designMeta.h / designMeta.w, area, mockupW, mockupH)
       : null;
 
-  const sourceLabel = (() => {
+  const _sourceLabel = (() => {
     const source = area?.source;
     if (!source) return "";
     if (source.kind === "studio") return `The Studio's product · ${source.position}`;
@@ -1103,25 +1101,17 @@ export function PrintAreasTab({
             ) : null}
             <Button
               size="sm"
-              onClick={saveArea}
-              disabled={!area}
-              title={`Save the area and apply it to ${printAreaScopeLabel(areaScope).toLowerCase()}`}
-            >
-              <Save className="h-3.5 w-3.5" /> Save area
-            </Button>
-            <Button
-              size="sm"
               variant="outline"
               onClick={saveRender}
               disabled={!area || !design || rendering}
-              title="Save the composed mockup and use it in Listing images"
+              title="Save the composed mockup on this mockup and use it in Listing images"
             >
               {rendering ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <ImagePlus className="h-3.5 w-3.5" />
               )}
-              Save render
+              Save on this mockup
             </Button>
           </div>
         </div>
@@ -1144,7 +1134,7 @@ export function PrintAreasTab({
                 onMeasure={(pixels) => {
                   setMeasuredPixels(pixels);
                   setMeasuring(false);
-                  setReferenceOpen(true);
+                  _setReferenceOpen(true);
                 }}
               />
             ) : (
@@ -1157,58 +1147,6 @@ export function PrintAreasTab({
           {/* --- the controls --- */}
           <div className="flex flex-col gap-3">
             <Card className="p-3">
-              <h4 className="mb-2 text-[11.5px] font-semibold uppercase tracking-wide text-ink-muted">
-                Print area
-              </h4>
-
-              {area ? (
-                <div className="mb-3 space-y-1 text-[12px]">
-                  <div className="flex justify-between">
-                    <span className="text-ink-muted">Size</span>
-                    <span className="font-medium">
-                      {area.areaWidth} × {area.areaHeight} px
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-ink-muted">Aspect</span>
-                    <span className="font-medium">{areaAspect(area).toFixed(3)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-ink-muted">From</span>
-                    <span className="font-medium">{sourceLabel}</span>
-                  </div>
-                </div>
-              ) : null}
-
-              {area ? (
-                <div className="mb-3">
-                  <Label htmlFor="area-scope" className="text-[11px] text-ink-muted">
-                    Apply this area to
-                  </Label>
-                  <Select
-                    value={areaScope}
-                    onValueChange={(value) =>
-                      setAreaScope(value === "this" ? "this" : value === "all" ? "all" : "category")
-                    }
-                  >
-                    <SelectTrigger id="area-scope" className="mt-1 h-8 w-full text-[12px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="this">This mockup only</SelectItem>
-                      <SelectItem value="category">
-                        All {mockup ? CATEGORY_SINGULAR[mockup.category] : "same-type"} mockups
-                      </SelectItem>
-                      <SelectItem value="all">All mockups</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="mt-1 text-[10.5px] text-ink-subtle">
-                    {scopeCount} mockup{scopeCount === 1 ? "" : "s"} · {printAreaScopeLabel(areaScope)}.
-                    The crop follows the frame; the inches reference stays per photo.
-                  </p>
-                </div>
-              ) : null}
-
               {/* The visible window: a folded shirt shows only part of the
                   area, so the design is cut at the fold. */}
               {area ? (
@@ -1261,223 +1199,6 @@ export function PrintAreasTab({
                   </p>
                 </div>
               ) : null}
-
-              <Button
-                size="sm"
-                variant="outline"
-                className="w-full"
-                onClick={useStudioArea}
-                disabled={!studioArea}
-                title={
-                  studioArea
-                    ? `The exact print area of the product selected in the Printify Studio`
-                    : "The Printify Studio has no product selected"
-                }
-              >
-                {studioArea
-                  ? `Use the Studio's area (${studioArea.width}×${studioArea.height})`
-                  : "No product selected in the Studio"}
-              </Button>
-
-              <div className="mt-2">
-                <Label className="text-[11px] text-ink-muted">
-                  Typical size for a {mockup ? CATEGORY_SINGULAR[mockup.category] : "mockup"}
-                </Label>
-                <Select
-                  value={presetValue}
-                  onValueChange={(v) => {
-                    if (v === "") return;
-                    if (v === "custom") {
-                      setCustomOpen(true);
-                      return;
-                    }
-                    applyPreset(v);
-                  }}
-                >
-                  <SelectTrigger id="area-preset" className="h-8 w-full">
-                    <SelectValue placeholder="Pick a size…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categoryPresets.map((preset) => (
-                      <SelectItem key={preset.id} value={preset.id}>
-                        {preset.label} · {preset.width}×{preset.height}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">Custom size…</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {customOpen ? (
-                <div className="mt-2 space-y-2">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <Label htmlFor="manual-w" className="text-[11px] text-ink-muted">
-                        Width px
-                      </Label>
-                      <Input
-                        id="manual-w"
-                        value={customWidth}
-                        onChange={(e) => setCustomWidth(e.target.value)}
-                        placeholder="4500"
-                        className="h-8"
-                        inputMode="numeric"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <Label htmlFor="manual-h" className="text-[11px] text-ink-muted">
-                        Height px
-                      </Label>
-                      <Input
-                        id="manual-h"
-                        value={customHeight}
-                        onChange={(e) => setCustomHeight(e.target.value)}
-                        placeholder="5400"
-                        className="h-8"
-                        inputMode="numeric"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={useManualSize}>
-                      Use this size
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setCustomOpen(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-
-              {area ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mt-2 w-full"
-                  onClick={setAsPlaceholder}
-                  title="Every design on this mockup lands in the same spot inside this area"
-                >
-                  Set as the placeholder for all designs
-                </Button>
-              ) : null}
-            </Card>
-
-            <Card className="p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <h4 className="text-[11.5px] font-semibold uppercase tracking-wide text-ink-muted">
-                  Garment reference
-                </h4>
-                {!referenceOpen ? (
-                  <Button size="sm" variant="ghost" onClick={() => setReferenceOpen(true)}>
-                    <Ruler className="h-3.5 w-3.5" /> Measure
-                  </Button>
-                ) : null}
-              </div>
-              {referenceOpen ? (
-                <div className="space-y-2">
-                  <p className="text-[11.5px] leading-relaxed text-ink-subtle">
-                    Optional. Draw a line across the garment, type its real width in inches, and the
-                    app can tell you the printed size.
-                  </p>
-                  {area?.reference ? (
-                    <div className="space-y-1 text-[12px]">
-                      <div className="flex justify-between">
-                        <span className="text-ink-muted">Real width</span>
-                        <span className="font-medium">{area.reference.inches} in</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-ink-muted">Scale</span>
-                        <span className="font-medium">
-                          {area.reference.pixelsPerInch.toFixed(1)} px / in
-                        </span>
-                      </div>
-                      {physical ? (
-                        <div className="flex justify-between">
-                          <span className="text-ink-muted">Area on shirt</span>
-                          <span className="font-medium">
-                            {physical.width.toFixed(1)} × {physical.height.toFixed(1)} in
-                          </span>
-                        </div>
-                      ) : null}
-                      {designSize ? (
-                        <div className="flex justify-between">
-                          <span className="text-ink-muted">Design prints at</span>
-                          <span className="font-medium">
-                            {designSize.width.toFixed(1)} × {designSize.height.toFixed(1)} in
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setMeasuring((v) => !v)}
-                    disabled={!area}
-                  >
-                    {measuring ? "Cancel measuring" : "Measure a line"}
-                  </Button>
-                  {measuredPixels ? (
-                    <div className="space-y-2 rounded-md bg-surface-muted p-2">
-                      <div className="text-[11.5px] text-ink-muted">
-                        Measured {measuredPixels} px in the photo.
-                      </div>
-                      <Input
-                        value={referenceInches}
-                        onChange={(e) => setReferenceInches(e.target.value)}
-                        placeholder="Real width in inches"
-                        className="h-8"
-                      />
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={saveReference}>
-                          Save reference
-                        </Button>
-                        {area?.reference ? (
-                          <Button size="sm" variant="ghost" onClick={clearReference}>
-                            Clear
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </Card>
-
-            <Card className="p-3">
-              <h4 className="mb-2 text-[11.5px] font-semibold uppercase tracking-wide text-ink-muted">
-                Compositing
-              </h4>
-              <div className="flex gap-1.5">
-                <Button
-                  size="sm"
-                  variant={area?.clipMode === "behind-garment" ? "outline" : "default"}
-                  disabled={!area}
-                  onClick={() => {
-                    if (!area) return;
-                    setArea({ ...area, clipMode: "area" });
-                    markAreaDirty();
-                  }}
-                >
-                  Clip to area
-                </Button>
-                <Button
-                  size="sm"
-                  variant={area?.clipMode === "behind-garment" ? "default" : "outline"}
-                  disabled={!area}
-                  onClick={() => {
-                    if (!area) return;
-                    setArea({ ...area, clipMode: "behind-garment" });
-                    markAreaDirty();
-                  }}
-                >
-                  Behind garment
-                </Button>
-              </div>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-subtle">
-                “Behind garment” draws the design under a transparent mockup PNG, so only the shirt
-                shows it.
-              </p>
             </Card>
 
             <Card className="p-3">
@@ -1529,24 +1250,12 @@ export function PrintAreasTab({
               </div>
               <p className="mt-2 text-[11.5px] leading-relaxed text-ink-subtle">
                 A template carries the area and the frame as a fraction of the photo. Tick mockups on
-                the left to apply it to them. <strong className="font-medium text-ink-muted">Save
-                area</strong> stores the frame; <strong className="font-medium text-ink-muted">Save
-                render</strong> saves the composed mockup and uses it in Listing images, and{" "}
+                the left to apply it to them. <strong className="font-medium text-ink-muted">Save on
+                this mockup</strong> saves the composed mockup and uses it in Listing images, and{" "}
                 <strong className="font-medium text-ink-muted">Render on every mockup</strong> does
                 the whole set for this design in one pass.
               </p>
             </Card>
-
-            {session.blueprintId && area?.source.kind === "studio" &&
-            area.source.blueprintId !== session.blueprintId ? (
-              <div className="flex items-start gap-2 rounded-md bg-warning-soft p-2.5 text-[12px] leading-relaxed text-warning">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  This area came from a different product than the one selected in the Printify
-                  Studio — the mockup would not match the product you actually list.
-                </span>
-              </div>
-            ) : null}
           </div>
         </div>
       </div>

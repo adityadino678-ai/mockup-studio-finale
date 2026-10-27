@@ -168,12 +168,20 @@ export function buildPartition(
   }
 
   const unclaimed = index.allVariantIds.filter((id) => !claimed.has(id));
-  // The absorber is the last group that actually holds variants - not simply
-  // the last group, because an ink group can legitimately end up empty (for
-  // example when the user marked every colour for the black ink).
+  // The absorber takes the catalogue extras that no group named. It must be a
+  // SAFE group - one whose artwork is harmless if ever enabled on a garment
+  // the user never chose. A "main" group prints the design's own artwork, so
+  // it is always safe. An ink group is not: white ink on a light garment (or
+  // black ink on a dark one) is invisible. Never absorb into the white-ink
+  // group. When there is no main group, fall back to the last group that
+  // holds variants.
+  const mainWithVariants = built.find(
+    (g) => g.ink === "main" && g.variantIds.length > 0,
+  );
   const lastWithVariants = built.filter((g) => g.variantIds.length > 0).pop();
-  if (lastWithVariants && unclaimed.length > 0) {
-    lastWithVariants.variantIds = [...lastWithVariants.variantIds, ...unclaimed].sort(
+  const absorber = mainWithVariants ?? lastWithVariants;
+  if (absorber && unclaimed.length > 0) {
+    absorber.variantIds = [...absorber.variantIds, ...unclaimed].sort(
       (a, b) => a - b,
     );
   }
