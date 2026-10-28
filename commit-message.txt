@@ -1,0 +1,20 @@
+fix: ink chip clicks losing state due to stale React state
+
+Root cause: setInk() and toggleColor() in colors-tab.tsx read
+session.rows.ink.blackInkColors from render-time state instead of
+using a functional update. Rapid ink-chip clicks could read stale
+state and overwrite earlier changes - e.g. clicking "White ink" on
+Navy then Red would lose Navy's removal, leaving Navy as black ink.
+This produced the symptom: white ink only on one color, black ink on
+everything else.
+
+Fix:
+- updateRow() in printify-studio-page.tsx now accepts either a partial
+  row object or an updater function (prev) => partial
+- setInk() and toggleColor() in colors-tab.tsx use the updater form,
+  reading blackInkColors from prev (the latest state) instead of
+  render-time session
+- ColorsTabProps.updateRow typed to accept the function overload
+
+All gates pass: lint 0 errors, typecheck 0 errors, test 639 passed,
+e2e ink-pairs 3/3 passed, build and deploy successful.

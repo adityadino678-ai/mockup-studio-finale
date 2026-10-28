@@ -128,14 +128,34 @@ export function PrintifyStudioPage() {
     setSession((prev) => ({ ...prev, ...patch, updatedAt: Date.now() }));
   }, [markDirty]);
 
-  const updateRow = React.useCallback((row: StudioRowId, patch: Partial<StudioSession["rows"][StudioRowId]>) => {
-    markDirty(["rows"]);
-    setSession((prev) => ({
-      ...prev,
-      rows: { ...prev.rows, [row]: { ...prev.rows[row], ...patch } },
-      updatedAt: Date.now(),
-    }));
-  }, [markDirty]);
+  /**
+   * Patches one row of the session. `patch` can be a partial row object or an
+   * updater function `(prev) => partial` - the latter avoids stale-state bugs
+   * when multiple taps fire before React re-renders (e.g. rapid ink-chip
+   * clicks in the Colors tab).
+   */
+  const updateRow = React.useCallback(
+    (
+      row: StudioRowId,
+      patch:
+        | Partial<StudioSession["rows"][StudioRowId]>
+        | ((prev: StudioSession) => Partial<StudioSession["rows"][StudioRowId]>),
+    ) => {
+      markDirty(["rows"]);
+      setSession((prev) => {
+        const resolved =
+          typeof patch === "function"
+            ? (patch as (prev: StudioSession) => Partial<StudioSession["rows"][StudioRowId]>)(prev)
+            : patch;
+        return {
+          ...prev,
+          rows: { ...prev.rows, [row]: { ...prev.rows[row], ...resolved } },
+          updatedAt: Date.now(),
+        };
+      });
+    },
+    [markDirty],
+  );
 
   // --- catalogue -------------------------------------------------------------
   React.useEffect(() => {

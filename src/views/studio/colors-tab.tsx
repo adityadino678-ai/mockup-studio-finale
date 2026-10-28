@@ -30,7 +30,12 @@ import { AlertTriangle, Package, Palette, Search, Sparkles } from "lucide-react"
 interface ColorsTabProps {
   session: StudioSession;
   update: (patch: Partial<StudioSession>) => void;
-  updateRow: (row: StudioRowId, patch: Partial<StudioSession["rows"][StudioRowId]>) => void;
+  updateRow: (
+    row: StudioRowId,
+    patch:
+      | Partial<StudioSession["rows"][StudioRowId]>
+      | ((prev: StudioSession) => Partial<StudioSession["rows"][StudioRowId]>),
+  ) => void;
   catalog: StudioCatalogState;
   hexFor: (name: string) => string;
   realHexes: Map<string, string[]>;
@@ -139,11 +144,13 @@ export function ColorsTab({
   const overCap = (row: StudioRowId) => rowVariantCount(row) > MAX_VARIANTS;
 
   const toggleColor = (row: StudioRowId, name: string) => {
-    const current = session.rows[row]?.colors ?? [];
-    const next = current.includes(name) ? current.filter((c) => c !== name) : [...current, name];
-    updateRow(row, {
-      colors: next,
-      blackInkColors: (session.rows[row]?.blackInkColors ?? []).filter((c) => next.includes(c)),
+    updateRow(row, (prev: StudioSession) => {
+      const current = prev.rows[row]?.colors ?? [];
+      const next = current.includes(name) ? current.filter((c) => c !== name) : [...current, name];
+      return {
+        colors: next,
+        blackInkColors: (prev.rows[row]?.blackInkColors ?? []).filter((c: string) => next.includes(c)),
+      };
     });
   };
 
@@ -171,10 +178,12 @@ export function ColorsTab({
   };
 
   const setInk = (name: string, ink: "black" | "white") => {
-    const black = new Set(session.rows.ink?.blackInkColors ?? []);
-    if (ink === "black") black.add(name);
-    else black.delete(name);
-    updateRow("ink", { blackInkColors: [...black] });
+    updateRow("ink", (prev: StudioSession) => {
+      const black = new Set(prev.rows.ink?.blackInkColors ?? []);
+      if (ink === "black") black.add(name);
+      else black.delete(name);
+      return { blackInkColors: [...black] };
+    });
   };
 
   /** Marks the dark colours for white ink and the light ones for black ink. */
