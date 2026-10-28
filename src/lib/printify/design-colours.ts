@@ -1,11 +1,24 @@
 // ---------------------------------------------------------------------------
 // Printing the designs on ONE product.
 //
-// A product has ONE set of colours, and the user splits them into two groups:
+// A product has ONE set of colours, and the user splits them across TWO
+// INDEPENDENT panels in the Colors tab:
 //
-//   plain - printed with ONE artwork (the design's main file)
-//   ink   - printed with the ink artwork: black ink on some of them, white
-//           ink on the rest
+//   plain - the "No ink variants" panel: the colours printed with ONE artwork
+//           (the design's main file)
+//   ink   - the "Has ink variants" panel: the colours printed with the ink
+//           artwork, BLACK ink on the colours marked black and WHITE ink on
+//           the rest
+//
+// THE PANEL IS THE WHOLE RULE. A design in the "No ink variants" row prints
+// only the colours of the plain panel; a design in the "Has ink variants" row
+// prints only the colours of the ink panel. Neither row reaches into the
+// other panel - that was the bug that put every shirt on the black-ink
+// design and left the white-ink design with one colour.
+//
+// A colour MAY sit in both panels on purpose: the two rows are different
+// products, so the plain design prints its main artwork on that colour while
+// the ink design prints its ink artwork. Both are correct; nothing is merged.
 //
 // WHICH DESIGN gets the ink artwork is the USER'S decision, not the app's.
 // The Designs tab gives every design a checkbox ("Ink variants"); the ids the
@@ -13,19 +26,13 @@
 // separates the two rows. Nothing here infers a pairing from the artwork on
 // file, from the product, or from the colours.
 //
+// WHICH COLOUR gets which ink is also the user's, set per colour with the
+// Black ink / White ink switch in the Colors tab (`session.rows.ink.blackInkColors`).
+//
 // Two UPLOADED designs can also be paired as one listing (`session.inkPairs`):
 // one supplies the black-ink artwork, the other the white-ink artwork. The
-// black half covers the plain and black-ink colours, the white half the rest,
-// and the pair creates ONE product. See `pairedColourGroups` below.
-//
-// The rule that stops a design printing on nothing:
-//
-//   A design the user PAIRED prints the ink artwork on the ink colours and
-//   its main artwork on the plain ones.
-//
-//   A design the user did NOT pair prints its MAIN artwork on every colour of
-//   the product. That is a choice, not a defect, so it is never reported as
-//   one - the design covers every colour.
+// black half covers the colours marked for black ink, the white half the rest
+// of the ink panel, and the pair creates ONE product. See `pairedColourGroups`.
 //
 // Every function here is pure, so the rule can be unit-tested without a
 // browser, a catalogue or a Printify account.
@@ -84,8 +91,8 @@ export interface DesignColourPlan {
    *
    * Empty means the design can serve this product as it stands. A missing
    * entry means the artwork would be invisible on those garments. It is only
-   * ever non-empty for a design the user PAIRED: an unpaired design prints
-   * its main artwork everywhere on purpose.
+   * ever non-empty for a design the user TICKED "Ink variants": an unticked
+   * design prints its main artwork on the plain panel on purpose.
    */
   missing: Array<{ ink: "black" | "white"; colors: string[] }>;
   /** True when the design contributes ink artwork to this product. */
@@ -117,16 +124,11 @@ function unique(values: string[]): string[] {
 /**
  * The product's colour groups, cleaned up.
  *
- * A colour cannot be in both groups, and the INK row wins: when the user
- * selects the same colour in both rows, it stays in the ink group and is
- * removed from the plain group. That is deliberate - the ink row is where the
- * user chose the artwork that colour prints with, so dropping it from the ink
- * group would silently print the MAIN artwork on a colour that has a chosen
- * ink. The colour still becomes a product variant either way; this only
- * decides WHICH artwork lands on it.
- *
- * Plain designs are unaffected: an unpaired design prints its main artwork on
- * every colour, so a colour moving out of `plain` does not lose anything.
+ * The two panels are INDEPENDENT, so a colour may appear in both and that is
+ * allowed: the plain row's design prints its main artwork there, the ink
+ * row's design prints its ink artwork. This normalisation only removes
+ * duplicates inside a panel and derives the black/white split from
+ * `blackInk`; it never moves a colour from one panel to the other.
  *
  * Only a colour that IS in the ink group can carry an ink. Anything else in
  * `blackInk` is ignored: it names a colour the product does not print with
@@ -138,11 +140,8 @@ export function normaliseColourGroups(groups: ProductColourGroups): {
   black: string[];
   white: string[];
 } {
-  // The ink row is authoritative for the overlap: every colour the user put
-  // there is kept, and the plain row only holds what the ink row does not.
   const ink = unique(groups.ink);
-  const inkSet = new Set(ink);
-  const plain = unique(groups.plain).filter((c) => !inkSet.has(c));
+  const plain = unique(groups.plain);
   const black = ink.filter((c) => groups.blackInk.includes(c));
   const white = ink.filter((c) => !groups.blackInk.includes(c));
   return { plain, ink, black, white };
@@ -150,17 +149,18 @@ export function normaliseColourGroups(groups: ProductColourGroups): {
 
 /** The counts the Design panel reports for a listing's colour plan. */
 export interface ColourGroupSummary {
-  /** Colours printed with the main artwork only. */
+  /** Colours printed with the main artwork only (the "No ink variants" panel). */
   plain: number;
   /** Ink colours printed with the black-ink artwork. */
   black: number;
   /** Ink colours printed with the white-ink artwork. */
   white: number;
-  /** Every colour of the product, counted exactly once. */
+  /** Every colour of the product, counted once (the union of both panels). */
   total: number;
   /**
-   * Colours the user put in BOTH rows. They are kept in the ink group; this
-   * list exists so the panel can say so instead of hiding the overlap.
+   * Colours the user put in BOTH panels. That is allowed and intentional:
+   * the plain design prints its main artwork there, the ink design prints its
+   * ink artwork. This list exists so the panel can say so out loud.
    */
   overlap: string[];
 }
@@ -169,8 +169,8 @@ export interface ColourGroupSummary {
  * The colour counts for the Design panel's summary line.
  *
  * It uses the same normalisation as the plan, so the numbers cannot disagree
- * with what will actually be created: plain + black + white is the whole
- * product, and a colour in both rows is counted once - in the ink group.
+ * with what will actually be created: black + white is the whole ink panel,
+ * plain is the whole plain panel, and `total` is the union of the two.
  */
 export function summariseColourGroups(groups: ProductColourGroups): ColourGroupSummary {
   const { plain, ink, black, white } = normaliseColourGroups(groups);
@@ -179,47 +179,50 @@ export function summariseColourGroups(groups: ProductColourGroups): ColourGroupS
     plain: plain.length,
     black: black.length,
     white: white.length,
-    total: plain.length + black.length + white.length,
-    overlap: unique(groups.plain).filter((c) => inkSet.has(c)),
+    total: unique([...plain, ...ink]).length,
+    overlap: plain.filter((c) => inkSet.has(c)),
   };
 }
 
 /**
  * What one design needs from one product.
  *
- * The groups are always a complete cover of the product's colours: every
- * colour of the product is printed by exactly one group of every design.
- * That is what stops a design from silently printing on nothing.
+ * THE PANEL DECIDES THE COLOURS. A design the user did not tick gets the
+ * plain panel only; a design the user ticked gets the ink panel only. A
+ * design therefore prints exactly the colours of ITS OWN panel - never the
+ * other panel's, and never "every colour of the product".
+ *
+ * An empty colour set is the caller's problem to report, not to paper over:
+ * `studioPlanProblems` blocks the batch when a design's own panel is empty,
+ * so nothing is ever created half-right.
  */
 export function planDesignColours(
   artwork: DesignInkArtwork,
   groups: ProductColourGroups,
 ): DesignColourPlan {
   const { plain, black, white } = normaliseColourGroups(groups);
-  const everything = unique([...plain, ...black, ...white]);
 
-  // Not paired: one artwork, every colour. This is the user's own choice, so
-  // nothing is missing and nothing is reported.
+  // Not ticked: ONE artwork, on the plain panel's colours and nowhere else.
   if (!artwork.hasInkPair) {
     return {
-      groups: everything.length > 0 ? [{ ink: "main", colors: everything }] : [],
+      groups: plain.length > 0 ? [{ ink: "main", colors: plain }] : [],
       missing: [],
       usesInkArtwork: false,
-      colors: everything,
+      colors: plain,
     };
   }
 
-  // Paired: the ink artwork is used where the product actually needs it.
+  // Ticked: the ink panel's colours, and never the plain panel's.
   const useBlack = artwork.hasBlackInk && black.length > 0;
   const useWhite = artwork.hasWhiteInk && white.length > 0;
 
-  // Everything the ink artwork does not cover prints with the main artwork:
-  // the plain colours, and any ink colour this design has no artwork for.
+  // Any ink colour this design has no artwork for prints with the MAIN
+  // artwork - which is what the user is warned about, not silently given.
   const mainColors = unique([
-    ...plain,
     ...(useBlack ? [] : black),
     ...(useWhite ? [] : white),
   ]);
+  const colors = unique([...black, ...white]);
 
   const planGroups: Array<{ ink: DesignInk; colors: string[] }> = [];
   if (mainColors.length > 0) planGroups.push({ ink: "main", colors: mainColors });
@@ -234,7 +237,7 @@ export function planDesignColours(
     groups: planGroups,
     missing,
     usesInkArtwork: useBlack || useWhite,
-    colors: everything,
+    colors,
   };
 }
 
@@ -253,9 +256,9 @@ export function isInkPair(inkPairIds: readonly string[], designId: string): bool
 
 /** Two designs that print as one product. */
 export interface DesignInkPair {
-  /** Printed on the plain colours and the colours marked for black ink. */
+  /** Printed on the colours marked for black ink. */
   blackInkDesignId: string;
-  /** Printed on the remaining ink colours. */
+  /** Printed on the remaining colours of the ink panel. */
   whiteInkDesignId: string;
 }
 
@@ -328,16 +331,18 @@ export function withoutInkPair(
 /**
  * The colours a pair covers, split between its two artworks.
  *
- * The black-ink design covers the plain colours AND the colours the user
- * marked for black ink; the white-ink design covers the rest of the ink
- * colours. Together they cover every colour of the product exactly once.
+ * Both halves live in the INK panel, so the pair takes that panel and only
+ * that panel: the black-ink design covers the colours the user marked for
+ * black ink, the white-ink design the rest of the ink panel. The plain
+ * panel belongs to the no-ink-variants designs and is deliberately NOT
+ * handed to either half.
  */
 export function pairedColourGroups(groups: ProductColourGroups): {
   black: string[];
   white: string[];
 } {
-  const { plain, black, white } = normaliseColourGroups(groups);
-  return { black: unique([...plain, ...black]), white };
+  const { black, white } = normaliseColourGroups(groups);
+  return { black, white };
 }
 
 /**
@@ -397,13 +402,13 @@ export interface InkArtworkProblem {
  * The paired designs whose ink artwork does not cover the product's ink
  * colours.
  *
- * A paired design with no black-ink artwork on a colour the user marked for
+ * A ticked design with no black-ink artwork on a colour the user marked for
  * the black ink prints the main artwork there, which is usually invisible on
  * a dark garment. This is the check that says so in plain words instead of
  * letting the partition fail with "132 variants are not in any group".
  *
- * Unpaired designs are never reported: printing the main artwork everywhere
- * is what the user asked for by leaving the box unticked.
+ * Unticked designs are never reported: printing the main artwork on the
+ * plain panel is what the user asked for by leaving the box unticked.
  */
 export function inkArtworkProblems<T extends SeparableDesign>(
   designs: T[],

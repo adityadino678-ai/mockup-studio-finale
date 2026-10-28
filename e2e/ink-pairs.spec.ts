@@ -29,9 +29,86 @@ async function resetWorkspace(page: Page) {
   await page.reload();
 }
 
+/**
+ * Patch the stored Studio session through IndexedDB, from a page that does
+ * NOT read it, so nothing can save over the seeded value before the Studio
+ * loads it. Mirrors the helper in `workflow.spec.ts`.
+ */
+async function setStudioSession(page: Page, patch: Record<string, unknown>) {
+  await page.goto("/mockups");
+  await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.evaluate(async (changes) => {
+    const db: IDBDatabase = await new Promise((res) => {
+      const r = indexedDB.open("mockup-studio");
+      r.onsuccess = () => res(r.result);
+    });
+    const read = await new Promise<{ value?: Record<string, unknown> } | undefined>((res) => {
+      const rq = db
+        .transaction(["settings"], "readonly")
+        .objectStore("settings")
+        .get("printifyStudio:session");
+      rq.onsuccess = () => res(rq.result);
+    });
+    const session = { ...((read?.value ?? {}) as Record<string, unknown>), ...changes };
+    await new Promise<void>((res) => {
+      const tx = db.transaction(["settings"], "readwrite");
+      tx.objectStore("settings").put({ key: "printifyStudio:session", value: session });
+      tx.oncomplete = () => res();
+    });
+  }, patch);
+
+  await page.goto("/printify-studio");
+  await expect(page.getByRole("link", { name: "Printify Studio", exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await resetWorkspace(page);
 });
+
+/**
+ * Stub the four `/api/printify/catalog` shapes the Studio calls.
+ *
+ * Without a valid Printify key the real endpoint answers 503 and the page
+ * flips `configured` to false, which swaps the whole Colors tab for a
+ * "Printify is not connected" card. The ink split readout lives in those
+ * panels, so the test must keep the catalogue configured and hand back the
+ * three colours its session seeds (White, Black, Navy). Installed before the
+ * first navigation so `configured` never flips.
+ */
+async function mockCatalog(page: Page) {
+  const colours = ["White", "Black", "Navy"];
+  const variants = colours.flatMap((color, ci) =>
+    ["S", "M", "L"].map((size, si) => ({
+      id: 1000 + ci * 10 + si,
+      title: `${color} / ${size}`,
+      options: { color, size },
+      available: true,
+    })),
+  );
+
+  await page.route("**/api/printify/catalog*", async (route) => {
+    const url = new URL(route.request().url());
+    const body = url.searchParams.get("providers")
+      ? { configured: true, providers: [{ id: 30, title: "Provider 30" }] }
+      : url.searchParams.has("colors")
+        ? { configured: true, source: "none", colors: [], sizes: [], variants: [] }
+        : url.searchParams.has("provider")
+          ? { configured: true, variants }
+          : {
+              configured: true,
+              blueprints: [{ id: 6, title: "T-Shirt", brand: "Gildan", model: "5000" }],
+            };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
 
 test("two designs can be paired as one listing, with a black-ink and a white-ink half", async ({
   page,
@@ -102,6 +179,45 @@ test("two designs can be paired as one listing, with a black-ink and a white-ink
   await expect(page.getByText("Has ink variants (2)")).toBeVisible();
   await page.getByRole("button", { name: /Pair for one listing/ }).click();
   await expect(page.locator("[data-ink-pair-role]")).toHaveCount(2);
+});
+
+test("the ink split readout changes when a colour's ink chip is flipped", async ({ page }) => {
+  await mockCatalog(page);
+  await page.goto("/printify-studio");
+  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({ timeout: 30_000 });
+  await page.setInputFiles("input[type=file]", [fixture("design-a.png")]);
+  await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
+
+  // Tick the design into the ink row so the ink panel applies to it.
+  await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+  await expect(page.getByText("Has ink variants (1)")).toBeVisible();
+
+  // Seed the ink panel directly: one black-ink colour, one white-ink colour.
+  // The readout is derived from this state, so a chip flip must move a colour
+  // between the two halves.
+  await setStudioSession(page, {
+    blueprintId: 6,
+    printProviderId: 30,
+    rows: {
+      plain: { colors: ["White"], blackInkColors: [] },
+      ink: { colors: ["Black", "Navy"], blackInkColors: ["Black"] },
+    },
+  });
+  await page.getByRole("tab", { name: "Colors" }).click();
+
+  const readout = page.getByText(/Black ink: .* White ink:/);
+  await expect(readout).toContainText("Black ink: 1 colour (Black)");
+  await expect(readout).toContainText("White ink: 1 colour (Navy)");
+
+  // Flip Navy to black ink: the split must follow, not stay stale.
+  await page.getByRole("button", { name: "Navy: print with black ink" }).click();
+  await expect(readout).toContainText("Black ink: 2 colours (Black and Navy)");
+  await expect(readout).toContainText("White ink: 0 colours");
+
+  // And back to white ink, so the readout tracks the chip both ways.
+  await page.getByRole("button", { name: "Navy: print with white ink" }).click();
+  await expect(readout).toContainText("Black ink: 1 colour (Black)");
+  await expect(readout).toContainText("White ink: 1 colour (Navy)");
 });
 
 test("the adjustment preview clips the artwork to the print area", async ({ page }) => {

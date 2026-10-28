@@ -748,29 +748,54 @@ and both call `removeBackgrounds`, which uses `removeBackgroundAuto`.
 removal used to operate on an already-transparent image - which cannot work,
 and reported "little was removed" every time.
 
-## The ink split is the user's tick, not a guess
+## The ink split is the user's two panels, not a guess
 
-`src/lib/printify/design-colours.ts` owns this. A product has ONE set of
-colours, split into two groups: `plain` (one artwork) and `ink` (the ink
-artwork, black on some colours and white on the rest).
+`src/lib/printify/design-colours.ts` owns this. There are TWO independent colour
+panels, and each design row reads ONLY from its own panel:
 
-WHICH design is printed with the ink artwork is the user's decision, stored
-as `session.inkPairIds` and set by the **"Ink variants" checkbox on every
-design card** - the Designs tab and the Design panel draw the same card, so
-the two tabs cannot disagree:
+- **No ink variants** (`plain`): a design in this row prints exactly the colours
+  selected in that panel, with one artwork. It never inherits the ink panel's
+  colours.
+- **Has ink variants** (`ink`): a design in this row prints exactly the colours
+  selected in that panel, with its ink artwork — black ink on the colours marked
+  **Black ink**, white ink on the rest. It never inherits the plain panel's
+  colours.
 
-- Ticked: the design prints its ink artwork on the ink colours and its main
-  artwork on the plain ones. If the ink artwork is missing, that IS reported
-  ("this design has no white-ink artwork, so on Black and Navy it would print
-  with the main artwork").
-- Unticked: the design prints its main artwork on EVERY colour of the
-  product. That is a choice, not a defect, so it is never reported - and the
+The two panels are deliberately independent, and a colour selected in BOTH is
+allowed and intentional: the plain row prints it with the plain artwork, the ink
+row with the ink artwork. There is no merge and no stripping. `planDesignColours`
+therefore returns the plain panel for an unticked design and the ink panel for a
+ticked one — never a union, never a product-wide set.
+
+WHICH design uses the ink artwork is still the user's decision, stored as
+`session.inkPairIds` and set by the **"Ink variants" checkbox on every design
+card** - the Designs tab and the Design panel draw the same card, so the two
+tabs cannot disagree:
+
+- Ticked: the design moves to the ink row and prints the ink panel's colours with
+  its ink artwork. If the ink artwork is missing, that IS reported.
+- Unticked: the design stays in the plain row and prints the plain panel's
+  colours. That is a choice, not a defect, so it is never reported - and the
   box is the only thing that moves a design between the two rows.
 
-The rule that matters: **a design always covers every colour of the
-product.** The old code took the design's colour set from the group its ink
-assets happened to match, so a design whose group was empty printed on
-nothing and the only clue was "132 variant(s) are not in any group".
+**An empty panel is a blocked Create, not an automatic fix.** When a design's
+own panel holds no colours it would create a product with no colours at all,
+which Printify refuses. `emptyPanelProblems(plan)` names the design and the
+panel ("…no colours are selected in the 'Has ink variants' panel of Colors…")
+and blocks the Create button. Nothing is moved between panels automatically.
+
+**`StudioDesignPlan.inkTicked` exists because `row` is not the tick.** The
+`row` field is the DISPLAY row and falls back to `"plain"` when a ticked design
+has no ink artwork to use, so the empty-panel message branches on `inkTicked`
+(the user's actual tick), not on `row`.
+
+**The partition's safe absorber prefers `main`, then `black`, then the last
+group with variants.** `buildPartition` completes the partition over the whole
+catalogue, so unclaimed variants land inside one group while staying disabled
+(`is_enabled: false` via `resolveVariantIds`). An ink-ticked design's plan has
+no `main` group (the panels are independent), so the absorber falls back to
+`black` — never `white`, because white ink on a light garment is invisible and
+must never be the group that swallows leftovers.
 
 Two things were removed on purpose; do not bring them back:
 
@@ -1183,16 +1208,25 @@ position pickers here:
   (API first, browser-extension fallback). Eight write: `create_batch_job`,
   `create_printify_product`, `create_mockup_render`, `save_placement`,
   `create_ink_variant`, `remove_background`, `save_chat_image`, and
-  `save_listing_details`. Every writing tool is marked `confirm` and **writes
-  nothing** until the user clicks Create on the tool card; only then does
-  `src/lib/client/tools.ts` run the real work through `CONFIRM_TOOL_RUNNERS`
-  (`confirmBatchJob`, `confirmPrintifyProduct`, `confirmMockupRender`,
-  `confirmSavePlacement`, `confirmInkVariant`, `confirmRemoveBackground`,
-  `confirmSaveChatImage`, `confirmSaveListingDetails`). `save_listing_details`
+  `save_listing_details`.
+  **Every local write runs immediately; only `create_printify_product` needs a
+  click.** `executeTool()` (in `src/lib/client/tools.ts`) runs the propose step
+  to VALIDATE the arguments, then — for every tool except the one in
+  `CLICK_GATED_TOOLS` (`create_printify_product`) — immediately calls its
+  `CONFIRM_TOOL_RUNNERS` entry with the proposed payload and returns the result.
+  The user's own words ("save the price", "remove the background") are the
+  approval. Printify product creation is the exception because it uploads
+  artwork and spends the operator's key, so it still returns a pending
+  `confirmation` for the tool card's Create button. The transcript shows an
+  **Approve all** button when two or more Printify confirmations are pending,
+  so a bulk turn is one press instead of N identical clicks. `save_listing_details`
   is the write counterpart of `draft_listing`: it writes the title, description,
   tags and/or price into the local `listingDrafts` (and `session.listingPrices`
   when a price is present), so the agent can actually change what will be sent,
-  not just return copy ideas. `etsy_research` tries `/api/etsy/research` first
+  not just return copy ideas. `routeIntent()`'s keyword fallback routes
+  save/set/update/update-style phrasing to `save_listing_details` (extracting a
+  price and any clearly-quoted title) and keeps `draft_listing` for ideation
+  only, so a "save my listing" request reaches the tool that writes. `etsy_research` tries `/api/etsy/research` first
   and only falls back to the extension when that endpoint is missing or fails. `create_printify_product` auto-resolves the blueprint
   from a product type (catalog keyword search), then a print provider and up to
   100 variants, but never invents ids — with no product type it asks. `create_ink_variant`

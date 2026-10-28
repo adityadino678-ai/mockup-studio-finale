@@ -1854,49 +1854,82 @@ export async function confirmPrintifyProduct(payload: Record<string, unknown>): 
 // Dispatch
 // ---------------------------------------------------------------------------
 
+/**
+ * The one tool that still needs a click. It uploads artwork and spends the
+ * operator's Printify key, so it is gated no matter what it writes.
+ */
+const CLICK_GATED_TOOLS = new Set(["create_printify_product"]);
+
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   ctx?: ToolContext,
 ): Promise<ToolExecResult> {
   try {
-    switch (name) {
-      case "explain_howto":
-        return explainHowto(args);
-      case "summarize_workspace":
-        return await summarizeWorkspace();
-      case "list_library":
-        return await listLibrary(args);
-      case "browse_printify_catalog":
-        return await browsePrintifyCatalog(args);
-      case "etsy_research":
-        return await etsyResearch(args);
-      case "draft_listing":
-        return await draftListing(args);
-      case "save_listing_details":
-        return await proposeSaveListingDetails(args);
-      case "create_batch_job":
-        return await proposeBatchJob(args);
-      case "create_mockup_render":
-        return await proposeMockupRender(args);
-      case "save_placement":
-        return await proposeSavePlacement(args);
-      case "create_ink_variant":
-        return await proposeInkVariant(args);
-      case "remove_background":
-        return await proposeRemoveBackground(args);
-      case "save_chat_image":
-        return await proposeSaveChatImage(args, ctx);
-      case "create_printify_product":
-        return await proposePrintifyProduct(args, ctx);
-      default:
-        return { summary: `Unknown tool “${name}”`, error: `No tool named ${name}.` };
+    const proposed = await runToolProposal(name, args, ctx);
+    // Every local write runs itself. The propose step exists to VALIDATE the
+    // arguments and describe the write; the user's own words ("save the
+    // price", "remove the background") are the approval. Only Printify spend
+    // stays click-gated. The old behaviour returned a confirmation for all
+    // eight, which meant the agent asked permission for a browser-local write
+    // on every single call.
+    if (proposed.confirmation && !CLICK_GATED_TOOLS.has(name)) {
+      const runner = CONFIRM_TOOL_RUNNERS[name];
+      if (runner) {
+        const ran = await runner(proposed.confirmation.payload, ctx);
+        return {
+          ...ran,
+          // Keep the human-readable "what this will do" text on the card, but
+          // the call already ran, so there is no pending confirmation left.
+          result: ran.result ?? { detail: proposed.confirmation.detail },
+        };
+      }
     }
+    return proposed;
   } catch (error) {
     return {
       summary: `${name} failed`,
       error: error instanceof Error ? error.message : "Tool execution failed.",
     };
+  }
+}
+
+async function runToolProposal(
+  name: string,
+  args: Record<string, unknown>,
+  ctx?: ToolContext,
+): Promise<ToolExecResult> {
+  switch (name) {
+    case "explain_howto":
+      return explainHowto(args);
+    case "summarize_workspace":
+      return await summarizeWorkspace();
+    case "list_library":
+      return await listLibrary(args);
+    case "browse_printify_catalog":
+      return await browsePrintifyCatalog(args);
+    case "etsy_research":
+      return await etsyResearch(args);
+    case "draft_listing":
+      return await draftListing(args);
+    case "save_listing_details":
+      return await proposeSaveListingDetails(args);
+    case "create_batch_job":
+      return await proposeBatchJob(args);
+    case "create_mockup_render":
+      return await proposeMockupRender(args);
+    case "save_placement":
+      return await proposeSavePlacement(args);
+    case "create_ink_variant":
+      return await proposeInkVariant(args);
+    case "remove_background":
+      return await proposeRemoveBackground(args);
+    case "save_chat_image":
+      return await proposeSaveChatImage(args, ctx);
+    case "create_printify_product":
+      return await proposePrintifyProduct(args, ctx);
+    default:
+      return { summary: `Unknown tool “${name}”`, error: `No tool named ${name}.` };
   }
 }
 

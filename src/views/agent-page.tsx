@@ -714,6 +714,39 @@ export function AgentPage() {
     [],
   );
 
+  /**
+   * Approves every waiting Printify product in one press. A bulk turn can
+   * stack one confirm card per design, and clicking N identical Create
+   * buttons is exactly the approval fatigue this whole auto-run change is
+   * meant to remove. Anything that is NOT a click-gated tool is left alone —
+   * those already ran themselves.
+   */
+  const onConfirmAll = React.useCallback(async () => {
+    if (!activeId || busyRef.current) return;
+    const pending: Array<{ messageId: string; call: ToolCallData }> = [];
+    for (const message of messages) {
+      for (const part of message.parts) {
+        if (part.type === "tool" && part.call.status === "pending") {
+          pending.push({ messageId: message.id, call: part.call });
+        }
+      }
+    }
+    for (const { messageId, call } of pending) {
+      const runner = CONFIRM_TOOL_RUNNERS[call.name];
+      if (!runner) continue;
+      await patchToolCall(messageId, call.id, { status: "running", summary: "Working…" });
+      const ctx = { attachments: await attachmentsFromConversation(activeId) };
+      const exec = await runner(call.args, ctx);
+      await patchToolCall(messageId, call.id, {
+        status: exec.error ? "error" : "done",
+        summary: exec.summary,
+        result: exec.result,
+        error: exec.error,
+      });
+    }
+    if (pending.length) await runTurn(activeId);
+  }, [activeId, messages, runTurn]);
+
   const stop = React.useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -839,6 +872,7 @@ export function AgentPage() {
           error={error}
           onConfirmTool={(id, call) => void onConfirmTool(id, call)}
           onCancelTool={(id, call) => void onCancelTool(id, call)}
+          onConfirmAll={() => void onConfirmAll()}
           onContinue={
             canContinue && activeId
               ? () => {

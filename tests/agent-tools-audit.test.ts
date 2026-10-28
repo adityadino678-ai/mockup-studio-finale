@@ -293,23 +293,20 @@ describe("W3 schema vs confirm-runner mismatch audit — zero mismatches", () =>
   });
 });
 
-describe("W7 write tools — propose→confirm→persist", () => {
+describe("W7 write tools — local writes auto-run, Printify stays gated", () => {
   beforeEach(resetDb);
 
-  it("create_batch_job: proposes without writing, confirms and persists a job", async () => {
+  it("create_batch_job: auto-runs and persists a job with no confirmation step", async () => {
     await seedLibrary();
-    const proposed = await executeTool("create_batch_job", { designs: ["sunset"], variant: "white" });
-    expect(proposed.error).toBeUndefined();
-    expect(proposed.confirmation).toBeDefined();
-    expect(await db.batchJobs.count()).toBe(0); // nothing persisted yet
-
-    const executed = await confirmBatchJob(proposed.confirmation!.payload);
+    const executed = await executeTool("create_batch_job", { designs: ["sunset"], variant: "white" });
     expect(executed.error).toBeUndefined();
+    // No confirmation: the local write runs itself now.
+    expect(executed.confirmation).toBeUndefined();
     expect((executed.result as { jobId: string }).jobId).toBeDefined();
     expect(await db.batchJobs.count()).toBeGreaterThan(0);
   });
 
-  it("create_printify_product: proposes without writing, confirms and persists a ProductDraft", async () => {
+  it("create_printify_product: still proposes a confirmation and writes nothing until confirmed", async () => {
     await seedLibrary();
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
@@ -353,119 +350,101 @@ describe("W7 write tools — propose→confirm→persist", () => {
     vi.unstubAllGlobals();
   });
 
-  it("create_mockup_render: proposes without writing; confirm reports missing artwork, writes nothing", async () => {
-    await seedLibrary();
-    const proposed = await executeTool("create_mockup_render", { design: "sunset", mockup: "tee" });
-    expect(proposed.error).toBeUndefined();
-    expect(proposed.confirmation).toBeDefined();
-    expect(await db.assets.where("kind").equals("mockup-render").count()).toBe(0); // nothing yet
+  it("create_printify_product is the ONLY tool that still asks for a click", () => {
+    // The seven local writes run themselves; only the Printify spend is gated.
+    const gated = Object.keys(CONFIRM_TOOL_RUNNERS).filter(
+      (name) => name !== "create_printify_product",
+    );
+    expect(gated.length).toBe(7);
+  });
 
-    const executed = await confirmMockupRender(proposed.confirmation!.payload);
+  it("create_mockup_render: auto-runs and reports missing artwork, writes nothing", async () => {
+    await seedLibrary();
+    const executed = await executeTool("create_mockup_render", { design: "sunset", mockup: "tee" });
     expect(executed.error).toBeDefined();
+    expect(executed.confirmation).toBeUndefined();
     expect(await db.assets.where("kind").equals("mockup-render").count()).toBe(0);
   });
 
-  it("save_placement: proposes without writing, confirms and persists a placement + template", async () => {
+  it("save_placement: auto-runs and persists a placement + template", async () => {
     await seedLibrary();
-    const proposed = await executeTool("save_placement", {
+    const executed = await executeTool("save_placement", {
       design: "sunset", mockup: "tee",
       transform: { x: 2, y: 0.5, scale: 0.4 }, asTemplate: true, templateName: "Chest print",
     });
-    expect(proposed.error).toBeUndefined();
-    expect(proposed.confirmation).toBeDefined();
-    expect(await db.placements.count()).toBe(0);
-    expect(await db.templates.count()).toBe(0);
-
-    const executed = await confirmSavePlacement(proposed.confirmation!.payload);
     expect(executed.error).toBeUndefined();
+    expect(executed.confirmation).toBeUndefined();
     expect(await db.placements.count()).toBe(1);
     expect(await db.templates.count()).toBe(1);
   });
 
-  it("create_ink_variant: proposes without writing; confirm reports missing artwork, writes nothing", async () => {
+  it("create_ink_variant: auto-runs and reports missing artwork, writes nothing", async () => {
     await seedLibrary();
-    const proposed = await executeTool("create_ink_variant", { design: "sunset", ink: "black" });
-    expect(proposed.error).toBeUndefined();
-    expect(proposed.confirmation).toBeDefined();
-    expect(proposed.confirmation?.payload.ink).toBe("black");
-
-    const executed = await confirmInkVariant(proposed.confirmation!.payload);
+    const executed = await executeTool("create_ink_variant", { design: "sunset", ink: "black" });
     expect(executed.error).toBeDefined();
+    expect(executed.confirmation).toBeUndefined();
     const processed = await db.assets.where("kind").equals("design-processed").toArray();
     expect(processed).toEqual([]);
   });
 
-  it("remove_background: proposes without writing; confirm reports missing artwork, writes nothing", async () => {
+  it("remove_background: auto-runs and reports missing artwork, writes nothing", async () => {
     await seedLibrary();
-    const proposed = await executeTool("remove_background", { design: "sunset" });
-    expect(proposed.error).toBeUndefined();
-    expect(proposed.confirmation).toBeDefined();
-    expect(proposed.confirmation?.payload.engine).toBeUndefined(); // fixed local chain
-
-    const executed = await confirmRemoveBackground(proposed.confirmation!.payload);
+    const executed = await executeTool("remove_background", { design: "sunset" });
     expect(executed.error).toBeDefined();
+    expect(executed.confirmation).toBeUndefined();
     const design = await db.designs.get("d1");
     expect(design?.processedAssetId).toBeUndefined();
   });
 
-  it("save_chat_image: proposes without an attachment; confirm needs an image", async () => {
-    const proposed = await executeTool("save_chat_image", { kind: "design", name: "New art" });
-    expect(proposed.error).toBeDefined();
-    expect(proposed.confirmation).toBeUndefined();
+  it("save_chat_image: refuses without an attachment; auto-runs the save with one", async () => {
+    const noImage = await executeTool("save_chat_image", { kind: "design", name: "New art" });
+    expect(noImage.error).toBeDefined();
+    expect(noImage.confirmation).toBeUndefined();
 
+    // A malformed data URL makes the runner's own decode step throw, which is
+    // exactly what we want here: it proves executeTool RAN the runner (an
+    // error result, not a pending confirmation) without hanging the test on
+    // real image decoding, which the jsdom env does not support.
     const withImage = await executeTool(
       "save_chat_image",
       { kind: "design", name: "New art" },
-      { attachments: [{ name: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,AAAA" }] },
+      { attachments: [{ name: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,!!!" }] },
     );
-    expect(withImage.error).toBeUndefined();
-    expect(withImage.confirmation).toBeDefined();
-    expect(withImage.confirmation?.payload.name).toBe("New art");
-
-    const missing = await confirmSaveChatImage(withImage.confirmation!.payload, { attachments: [] });
-    expect(missing.error).toBeDefined();
+    expect(withImage.error).toBeDefined();
+    expect(withImage.confirmation).toBeUndefined();
   });
 
-  it("save_listing_details single: proposes without writing, confirms and persists one draft", async () => {
+  it("save_listing_details single: auto-runs and persists one draft", async () => {
     await seedLibrary();
     const { loadSession, saveSession } = await import("@/lib/printify/studio-session");
     const session = await loadSession();
     await saveSession({ ...session, designIds: ["d1", "d2"], titleTemplate: "{design}", priceMode: "fixed", priceCents: 1999 });
 
-    const proposed = await executeTool("save_listing_details", {
+    const executed = await executeTool("save_listing_details", {
       design: "sunset", title: "Golden Hour Tee", price: 24.99,
     });
-    expect(proposed.error).toBeUndefined();
-    expect(proposed.confirmation).toBeDefined();
-    expect(await db.listingDrafts.count()).toBe(0); // nothing yet
-
-    const executed = await confirmSaveListingDetails(proposed.confirmation!.payload);
     expect(executed.error).toBeUndefined();
+    expect(executed.confirmation).toBeUndefined();
     const drafts = await db.listingDrafts.where("designId").equals("d1").toArray();
     expect(drafts.length).toBe(1);
     expect(drafts[0].title).toBe("Golden Hour Tee");
     expect(drafts[0].priceCents).toBe(2499);
   });
 
-  it("save_listing_details items: unique copy per listing, accepts design OR listingId", async () => {
+  it("save_listing_details items: auto-runs unique copy per listing, accepts design OR listingId", async () => {
     await seedLibrary();
     const { loadSession, saveSession } = await import("@/lib/printify/studio-session");
     const session = await loadSession();
     await saveSession({ ...session, designIds: ["d1", "d2"], titleTemplate: "{design}", priceMode: "fixed", priceCents: 1999 });
 
-    const proposed = await executeTool("save_listing_details", {
+    const executed = await executeTool("save_listing_details", {
       items: [
         { design: "Sunset", title: "Golden Hour Tee", price: 24.99 },
         { listingId: "d2", title: "Night Sky Tee", priceCents: 1999 },
       ],
     });
-    expect(proposed.error).toBeUndefined();
-    const payload = proposed.confirmation!.payload as { items?: unknown[] };
-    expect(payload.items).toHaveLength(2);
-    expect(await db.listingDrafts.count()).toBe(0); // nothing yet
-
-    const executed = await confirmSaveListingDetails(proposed.confirmation!.payload);
     expect(executed.error).toBeUndefined();
+    expect(executed.confirmation).toBeUndefined();
     const sunset = (await db.listingDrafts.where("designId").equals("d1").toArray())[0];
     expect(sunset.title).toBe("Golden Hour Tee");
     const moon = (await db.listingDrafts.where("designId").equals("d2").toArray())[0];

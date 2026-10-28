@@ -35,8 +35,9 @@ export const ROW_LABELS: Record<StudioRowId, string> = {
 
 export const ROW_HINTS: Record<StudioRowId, string> = {
   plain:
-    'These designs print one artwork on every colour. Tick "Ink variants" on a card to move it to the other row.',
-  ink: 'These designs also print their ink artwork on the ink colours. Tick "Ink variants" on a card to move it here.',
+    "Designs in this row print ONLY the colours selected in this panel, with one artwork. Tick \u201cInk variants\u201d on a card to move it to the other row.",
+  ink:
+    "Designs in this row print ONLY the colours selected in this panel, with the ink artwork. Tick \u201cInk variants\u201d on a card to move it here.",
 };
 
 export function emptyRowState(): StudioRowState {

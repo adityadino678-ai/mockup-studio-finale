@@ -24,31 +24,38 @@ import type { ProductColourGroups, SeparableDesign } from "@/lib/printify/design
 // file or from the product - the tests below pin that the tick is the only
 // thing that decides.
 //
-// The rules that matter most:
+// The two colour panels are INDEPENDENT, and that is the whole rule:
 //
-//   A design the user did NOT pair prints its MAIN artwork on every colour of
-//   the product, and is never reported as "missing ink" - that is a choice,
-//   not a defect.
+//   A design the user did NOT tick prints its MAIN artwork on the "No ink
+//   variants" panel's colours and on NOTHING else.
 //
-//   A design the user DID pair prints the ink artwork on the ink colours and
-//   its main artwork on the plain ones, and is reported when its ink artwork
-//   cannot cover them.
+//   A design the user DID tick prints the "Has ink variants" panel's colours
+//   and on NOTHING else: the black-ink colours with its black artwork, the
+//   rest with its white artwork. It is reported when its ink artwork cannot
+//   cover them.
 //
-// Why "every colour exactly once" is pinned so hard: Printify REWRITES an
-// incomplete partition and then prints the WRONG artwork on the variants it
-// silently appended, so a design that covers a colour twice - or not at all -
-// is a real production bug, not a cosmetic one.
+// A colour may sit in BOTH panels on purpose - the two rows are different
+// products, so each prints it with its own artwork. Nothing is merged and
+// nothing is stripped.
+//
+// Why "exactly once" is still pinned so hard: Printify REWRITES an incomplete
+// partition and then prints the WRONG artwork on the variants it silently
+// appended, so a design that covers a colour twice - or the WRONG panel's
+// colours - is a real production bug, not a cosmetic one.
 // ---------------------------------------------------------------------------
 
-/** A product with a plain group, a black-ink group and a white-ink group. */
+/** A product with a plain panel, a black-ink half and a white-ink half. */
 const PRODUCT: ProductColourGroups = {
   plain: ["White", "Natural"],
   ink: ["Black", "Navy", "Red"],
   blackInk: ["Black", "Navy"],
 };
 
-/** Every colour of the product, in the order the plan reports them. */
-const PRODUCT_COLOURS = ["White", "Natural", "Black", "Navy", "Red"];
+/** The colours the plain panel owns. */
+const PLAIN_COLOURS = ["White", "Natural"];
+
+/** The colours the ink panel owns, black first then white. */
+const INK_COLOURS = ["Black", "Navy", "Red"];
 
 /** A product whose ink colours are ALL white-ink. */
 const WHITE_INK_ONLY: ProductColourGroups = {
@@ -88,36 +95,34 @@ function hasDuplicates(colors: string[]): boolean {
 }
 
 describe("normaliseColourGroups", () => {
-  it("keeps a colour that is in both groups in the INK group", () => {
-    // "B" was put in both rows. The ink row is authoritative: the user chose
-    // an ink artwork for it there, so it must not be quietly moved to the
-    // plain row and printed with the main artwork instead. It is counted
-    // once - in the ink group - so nothing is lost and nothing is printed
-    // twice.
+  it("keeps a colour that is in BOTH panels in both panels", () => {
+    // "B" was put in both panels on purpose. The two rows are different
+    // products, so the plain design prints its main artwork on B and the ink
+    // design prints its ink artwork there. Nothing is stripped from either
+    // panel - stripping is exactly what put every shirt on the black-ink
+    // design and left the white-ink design with one colour.
     const normalised = normaliseColourGroups({
       plain: ["A", "B"],
       ink: ["B", "C"],
       blackInk: ["C"],
     });
 
-    expect(normalised.plain).toEqual(["A"]);
+    expect(normalised.plain).toEqual(["A", "B"]);
     expect(normalised.ink).toEqual(["B", "C"]);
     expect(normalised.black).toEqual(["C"]);
     expect(normalised.white).toEqual(["B"]);
-    // Together the groups still cover every colour exactly once.
-    expect([...normalised.plain, ...normalised.ink].sort()).toEqual(["A", "B", "C"]);
   });
 
-  it("splits a colour that is in both rows by the ink it was marked with", () => {
-    // "B" is in both rows AND marked for the black ink. It moves to the black
-    // half - not dropped, and not left in plain.
+  it("splits the ink panel by the ink each colour was marked with", () => {
+    // "B" is in both panels AND marked for the black ink. Inside the ink
+    // panel it belongs to the black half; the plain panel keeps it untouched.
     const normalised = normaliseColourGroups({
       plain: ["A", "B"],
       ink: ["B", "C"],
       blackInk: ["B"],
     });
 
-    expect(normalised.plain).toEqual(["A"]);
+    expect(normalised.plain).toEqual(["A", "B"]);
     expect(normalised.black).toEqual(["B"]);
     expect(normalised.white).toEqual(["C"]);
   });
@@ -183,10 +188,15 @@ const FOUR_AND_FOUR: ProductColourGroups = {
   blackInk: ["Solid Black", "Navy", "Charcoal", "Forest"],
 };
 
-const FOUR_AND_FOUR_COLOURS = [
-  ...FOUR_AND_FOUR.plain,
-  ...FOUR_AND_FOUR.blackInk,
-  ...FOUR_AND_FOUR.ink.filter((c) => !FOUR_AND_FOUR.blackInk.includes(c)),
+const FOUR_AND_FOUR_INK = [
+  "Solid Black",
+  "Navy",
+  "Charcoal",
+  "Forest",
+  "Red",
+  "Burgundy",
+  "Maroon",
+  "Mustard",
 ];
 
 describe("planDesignColours - four black-ink and four white-ink colours", () => {
@@ -206,11 +216,26 @@ describe("planDesignColours - four black-ink and four white-ink colours", () => 
     );
     // No ink colour was silently dropped from the plan.
     for (const colour of FOUR_AND_FOUR.ink) expect(plan.colors).toContain(colour);
-    expect(plan.colors).toEqual(FOUR_AND_FOUR_COLOURS);
+    expect(plan.colors).toEqual(FOUR_AND_FOUR_INK);
     expect(hasDuplicates(plan.colors)).toBe(false);
   });
 
-  it("never drops a colour that is in both rows - the ink group keeps it", () => {
+  it("never reaches into the plain panel - a ticked design prints the ink panel only", () => {
+    // The two panels are independent. The plain colours belong to the
+    // no-ink-variants designs; handing them to the ink design is what put
+    // every shirt on the black-ink design.
+    const plan = planDesignColours(
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+      FOUR_AND_FOUR,
+    );
+
+    for (const colour of FOUR_AND_FOUR.plain) expect(plan.colors).not.toContain(colour);
+    expect(plan.groups.find((group) => group.ink === "main")).toBeUndefined();
+  });
+
+  it("keeps a colour that is in BOTH panels in the ink design's own panel", () => {
+    // "Solid Black" is in both panels. The plain design prints its main
+    // artwork there; THIS design prints its black ink there. Both are right.
     const bothRows: ProductColourGroups = {
       plain: ["Solid White", "Solid Black"],
       ink: ["Solid Black", "Navy"],
@@ -222,23 +247,24 @@ describe("planDesignColours - four black-ink and four white-ink colours", () => 
     );
 
     expect(plan.groups).toEqual([
-      { ink: "main", colors: ["Solid White"] },
       { ink: "black", colors: ["Solid Black"] },
       { ink: "white", colors: ["Navy"] },
     ]);
-    expect(plan.colors).toEqual(["Solid White", "Solid Black", "Navy"]);
+    expect(plan.colors).toEqual(["Solid Black", "Navy"]);
   });
 });
 
 describe("summariseColourGroups", () => {
-  it("counts every group once, with the ink row winning the overlap", () => {
+  it("counts each panel separately and names the overlap neutrally", () => {
+    // "B" is in both panels: the plain design prints its main artwork there,
+    // the ink design its ink artwork. Both panels keep it.
     expect(
       summariseColourGroups({
         plain: ["A", "B"],
         ink: ["B", "C"],
         blackInk: ["B"],
       }),
-    ).toEqual({ plain: 1, black: 1, white: 1, total: 3, overlap: ["B"] });
+    ).toEqual({ plain: 2, black: 1, white: 1, total: 3, overlap: ["B"] });
   });
 
   it("reports the four-and-four case without an overlap", () => {
@@ -253,7 +279,7 @@ describe("summariseColourGroups", () => {
     });
   });
 
-  it("names every colour that is in both rows, in plain-row order", () => {
+  it("names every colour that is in both panels, in plain-panel order", () => {
     const summary = summariseColourGroups({
       plain: ["C", "A", "B"],
       ink: ["B", "C"],
@@ -265,11 +291,11 @@ describe("summariseColourGroups", () => {
   });
 });
 
-describe("planDesignColours - a design the user did NOT pair", () => {
-  it("prints the main artwork on EVERY colour of the product", () => {
-    // This is the fix for "the design would print on nothing": the design is
-    // not paired, so it cannot use an ink artwork on the ink colours. They
-    // print the MAIN artwork instead.
+describe("planDesignColours - a design the user did NOT tick", () => {
+  it("prints the main artwork on the plain panel's colours only", () => {
+    // THE PANEL DECIDES THE COLOURS. This design is in the "No ink variants"
+    // row, so it prints the "No ink variants" panel and nothing else. The ink
+    // panel's colours belong to the ink designs.
     const plan = planDesignColours(
       { hasInkPair: false, hasBlackInk: false, hasWhiteInk: false },
       PRODUCT,
@@ -277,13 +303,13 @@ describe("planDesignColours - a design the user did NOT pair", () => {
 
     expect(plan.groups).toHaveLength(1);
     expect(plan.groups[0].ink).toBe("main");
-    expect(plan.groups[0].colors).toEqual(PRODUCT_COLOURS);
-    expect(plan.colors).toEqual(PRODUCT_COLOURS);
+    expect(plan.groups[0].colors).toEqual(PLAIN_COLOURS);
+    expect(plan.colors).toEqual(PLAIN_COLOURS);
   });
 
   it("never uses ink artwork, and never reports a missing ink", () => {
-    // Unticked is a CHOICE: the design prints one artwork everywhere, so
-    // there is nothing wrong to report.
+    // Unticked is a CHOICE: the design prints one artwork on its own panel,
+    // so there is nothing wrong to report.
     const plan = planDesignColours(
       { hasInkPair: false, hasBlackInk: false, hasWhiteInk: false },
       PRODUCT,
@@ -301,21 +327,32 @@ describe("planDesignColours - a design the user did NOT pair", () => {
       PRODUCT,
     );
 
-    expect(plan.groups).toEqual([{ ink: "main", colors: PRODUCT_COLOURS }]);
+    expect(plan.groups).toEqual([{ ink: "main", colors: PLAIN_COLOURS }]);
     expect(plan.usesInkArtwork).toBe(false);
     expect(plan.missing).toEqual([]);
   });
+
+  it("plans nothing when the plain panel is empty", () => {
+    // Nothing to print. The Studio blocks the batch with a message naming
+    // this design and the panel, rather than creating a product on nothing.
+    const plan = planDesignColours(
+      { hasInkPair: false, hasBlackInk: true, hasWhiteInk: true },
+      { plain: [], ink: ["Black"], blackInk: ["Black"] },
+    );
+
+    expect(plan.groups).toEqual([]);
+    expect(plan.colors).toEqual([]);
+  });
 });
 
-describe("planDesignColours - a design the user PAIRED", () => {
-  it("gets one group per ink", () => {
+describe("planDesignColours - a design the user DID tick", () => {
+  it("gets one group per ink, from the ink panel", () => {
     const plan = planDesignColours(
       { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
       PRODUCT,
     );
 
     expect(plan.groups).toEqual([
-      { ink: "main", colors: ["White", "Natural"] },
       { ink: "black", colors: ["Black", "Navy"] },
       { ink: "white", colors: ["Red"] },
     ]);
@@ -323,7 +360,7 @@ describe("planDesignColours - a design the user PAIRED", () => {
     expect(plan.missing).toEqual([]);
   });
 
-  it("covers every colour of the product exactly once", () => {
+  it("covers its own panel exactly once and never the plain panel", () => {
     // Printify silently completes an incomplete partition and then prints
     // the WRONG artwork, so an overlap or a gap here is a real bug.
     const plan = planDesignColours(
@@ -332,9 +369,9 @@ describe("planDesignColours - a design the user PAIRED", () => {
     );
     const all = plan.groups.flatMap((group) => group.colors);
 
-    expect([...all].sort()).toEqual([...PRODUCT_COLOURS].sort());
+    expect([...all].sort()).toEqual([...INK_COLOURS].sort());
     expect(hasDuplicates(all)).toBe(false);
-    expect(plan.colors).toEqual(PRODUCT_COLOURS);
+    expect(plan.colors).toEqual(INK_COLOURS);
   });
 
   it("prints the main artwork on the ink colours it has no artwork for, and says so", () => {
@@ -344,13 +381,13 @@ describe("planDesignColours - a design the user PAIRED", () => {
     );
 
     expect(plan.groups).toEqual([
-      { ink: "main", colors: ["White", "Natural", "Red"] },
+      { ink: "main", colors: ["Red"] },
       { ink: "black", colors: ["Black", "Navy"] },
     ]);
     expect(plan.missing).toEqual([{ ink: "white", colors: ["Red"] }]);
   });
 
-  it("uses no ink artwork when the product's ink group is empty", () => {
+  it("plans nothing when the ink panel is empty", () => {
     const emptyInk: ProductColourGroups = { plain: ["White"], ink: [], blackInk: [] };
     const plan = planDesignColours(
       { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
@@ -358,19 +395,20 @@ describe("planDesignColours - a design the user PAIRED", () => {
     );
 
     expect(plan.usesInkArtwork).toBe(false);
-    expect(plan.groups).toEqual([{ ink: "main", colors: ["White"] }]);
+    expect(plan.groups).toEqual([]);
+    expect(plan.colors).toEqual([]);
     expect(plan.missing).toEqual([]);
   });
 
   it("does not report a missing ink the product never needs", () => {
-    // The design only has a black-ink file and the product only prints with
+    // The design only has a black-ink file and the ink panel only prints with
     // the white ink: nothing is missing that the product could use.
     const plan = planDesignColours(
       { hasInkPair: true, hasBlackInk: true, hasWhiteInk: false },
       WHITE_INK_ONLY,
     );
 
-    expect(plan.groups).toEqual([{ ink: "main", colors: ["White", "Red"] }]);
+    expect(plan.groups).toEqual([{ ink: "main", colors: ["Red"] }]);
     expect(plan.missing).toEqual([{ ink: "white", colors: ["Red"] }]);
   });
 });
@@ -401,31 +439,52 @@ describe("planDesignColours - the ink label travels with the group", () => {
       { plain: ["Natural"], ink: ["Black", "Red"], blackInk: ["Black"] },
     );
 
-    expect(plan.groups.map((group) => group.ink)).toEqual(["main", "black", "white"]);
+    // The plain panel is not this design's panel, so it contributes no group.
+    expect(plan.groups.map((group) => group.ink)).toEqual(["black", "white"]);
     expect(plan.groups.find((group) => group.ink === "black")?.colors).toEqual(["Black"]);
     expect(plan.groups.find((group) => group.ink === "white")?.colors).toEqual(["Red"]);
   });
 });
 
-describe("planDesignColours - every design covers the product", () => {
-  it("covers every colour of the product exactly once, whatever the design has", () => {
+describe("planDesignColours - every design covers exactly its own panel", () => {
+  it("covers its own panel exactly once, whatever the design has", () => {
     const designs = [NO_INK, BOTH_INKS, BLACK_ONLY, WHITE_ONLY];
-    const paired = new Set(["d-both", "d-white"]);
+    const ticked = new Set(["d-both", "d-white"]);
 
     for (const design of designs) {
+      const isTicked = ticked.has(design.id);
       const plan = planDesignColours(
         {
-          hasInkPair: paired.has(design.id),
+          hasInkPair: isTicked,
           hasBlackInk: Boolean(design.blackInkAssetId),
           hasWhiteInk: Boolean(design.whiteInkAssetId),
         },
         PRODUCT,
       );
       const all = plan.groups.flatMap((group) => group.colors);
+      const own = isTicked ? INK_COLOURS : PLAIN_COLOURS;
 
-      expect([...all].sort()).toEqual([...PRODUCT_COLOURS].sort());
+      expect([...all].sort()).toEqual([...own].sort());
       expect(hasDuplicates(all)).toBe(false);
     }
+  });
+
+  it("never mixes the two panels across a batch", () => {
+    // The whole point: a plain design and an ink design are different
+    // products, so their colour sets must be disjoint here (PRODUCT has no
+    // colour in both panels). If a plain design ever picked up an ink colour
+    // the black-ink design would lose it.
+    const plainPlan = planDesignColours(
+      { hasInkPair: false, hasBlackInk: false, hasWhiteInk: false },
+      PRODUCT,
+    );
+    const inkPlan = planDesignColours(
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+      PRODUCT,
+    );
+
+    const overlap = plainPlan.colors.filter((c) => inkPlan.colors.includes(c));
+    expect(overlap).toEqual([]);
   });
 });
 
@@ -562,15 +621,16 @@ describe("degenerate input", () => {
 // Pairing two UPLOADED designs
 //
 // Two designs can print as ONE listing: one carries the black-ink artwork, the
-// other the white-ink artwork. The black-ink design covers the plain AND the
-// black-ink colours (black ink reads on a light garment), its partner the
-// remaining ink colours. Together they cover every colour exactly once.
+// other the white-ink artwork. Both halves live in the "Has ink variants"
+// panel, so the pair takes THAT panel and only that panel: the black half
+// covers the colours marked Black ink, the white half the rest. The plain
+// panel belongs to the no-ink-variants designs and is handed to neither half.
 // ---------------------------------------------------------------------------
 
 describe("pairedColourGroups", () => {
-  it("gives the plain and black-ink colours to the black half", () => {
+  it("gives only the ink panel's colours to the halves, split by the switch", () => {
     expect(pairedColourGroups(PRODUCT)).toEqual({
-      black: ["White", "Natural", "Black", "Navy"],
+      black: ["Black", "Navy"],
       white: ["Red"],
     });
   });
@@ -578,25 +638,31 @@ describe("pairedColourGroups", () => {
   it("never puts a colour in both halves", () => {
     const split = pairedColourGroups(PRODUCT);
     expect(hasDuplicates([...split.black, ...split.white])).toBe(false);
-    expect([...split.black, ...split.white].sort()).toEqual([...PRODUCT_COLOURS].sort());
+    expect([...split.black, ...split.white].sort()).toEqual([...INK_COLOURS].sort());
+  });
+
+  it("keeps the plain panel out of the pair entirely", () => {
+    const split = pairedColourGroups(PRODUCT);
+    for (const colour of PLAIN_COLOURS) {
+      expect(split.black).not.toContain(colour);
+      expect(split.white).not.toContain(colour);
+    }
   });
 
   it("has no white half when every ink colour uses black ink", () => {
     expect(pairedColourGroups({ plain: ["White"], ink: ["Black"], blackInk: ["Black"] })).toEqual({
-      black: ["White", "Black"],
+      black: ["Black"],
       white: [],
     });
   });
 });
 
 describe("planPairedDesignColours", () => {
-  it("prints the black half on plain + black-ink colours only", () => {
+  it("prints the black half on the black-ink colours only", () => {
     const plan = planPairedDesignColours("black", PRODUCT);
 
-    expect(plan.colors).toEqual(["White", "Natural", "Black", "Navy"]);
-    expect(plan.groups).toEqual([
-      { ink: "main", colors: ["White", "Natural", "Black", "Navy"] },
-    ]);
+    expect(plan.colors).toEqual(["Black", "Navy"]);
+    expect(plan.groups).toEqual([{ ink: "main", colors: ["Black", "Navy"] }]);
     // The partner IS the white artwork, so nothing is missing.
     expect(plan.missing).toEqual([]);
     expect(plan.usesInkArtwork).toBe(true);
@@ -621,14 +687,23 @@ describe("planPairedDesignColours", () => {
     expect(plan.colors).toEqual([]);
   });
 
-  it("covers every product colour exactly once across the two halves", () => {
+  it("covers the ink panel exactly once across the two halves", () => {
     const all = [
       ...planPairedDesignColours("black", PRODUCT).groups,
       ...planPairedDesignColours("white", PRODUCT).groups,
     ].flatMap((group) => group.colors);
 
     expect(hasDuplicates(all)).toBe(false);
-    expect([...all].sort()).toEqual([...PRODUCT_COLOURS].sort());
+    expect([...all].sort()).toEqual([...INK_COLOURS].sort());
+  });
+
+  it("leaves the plain panel to the no-ink-variants designs", () => {
+    const all = [
+      ...planPairedDesignColours("black", PRODUCT).colors,
+      ...planPairedDesignColours("white", PRODUCT).colors,
+    ];
+
+    for (const colour of PLAIN_COLOURS) expect(all).not.toContain(colour);
   });
 });
 

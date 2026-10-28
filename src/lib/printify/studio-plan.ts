@@ -10,8 +10,12 @@
 //
 //   * only ticked designs are in scope;
 //   * a complete pair is ONE product, owned by its black-ink half;
-//   * an unpaired design covers every colour (main artwork everywhere, or its
-//     own ink artwork where the user ticked it);
+//   * THE PANEL DECIDES THE COLOURS: a design with no ink variants prints the
+//     plain panel's colours, an ink design prints the ink panel's colours, and
+//     neither row reaches into the other panel;
+//   * a design whose OWN panel is empty prints on nothing, so the batch is
+//     BLOCKED with a message that names the design and the panel - nothing is
+//     ever created half-right;
 //   * the partition must cover every variant and stay under Printify's cap.
 // ---------------------------------------------------------------------------
 
@@ -54,6 +58,15 @@ export interface StudioDesignPlan {
   partnerDesignId?: string;
   partnerName?: string;
   row: "plain" | "ink";
+  /**
+   * True when the USER ticked "Ink variants" on this design (or it is half of
+   * a pair), so it prints the "Has ink variants" panel.
+   *
+   * `row` alone cannot answer that: a ticked design whose ink panel is empty
+   * has no ink artwork to use, so it falls back to the plain row's display -
+   * but the panel it needs fixed is still the ink one.
+   */
+  inkTicked: boolean;
   groups: StudioDesignGroup[];
 }
 
@@ -132,6 +145,7 @@ export function buildStudioPlan(
       partnerDesignId: white.id,
       partnerName: white.name,
       row: "ink",
+      inkTicked: true,
       groups: pairedGroups,
     });
   }
@@ -139,9 +153,10 @@ export function buildStudioPlan(
   for (const design of designs) {
     if (!scoped.has(design.id)) continue;
     if (handled.has(design.id)) continue;
+    const inkTicked = (session.inkPairIds ?? []).includes(design.id);
     const colourPlan = planDesignColours(
       {
-        hasInkPair: (session.inkPairIds ?? []).includes(design.id),
+        hasInkPair: inkTicked,
         hasBlackInk: Boolean(design.blackInkAssetId),
         hasWhiteInk: Boolean(design.whiteInkAssetId),
       },
@@ -152,7 +167,11 @@ export function buildStudioPlan(
       designName: design.name,
       listingId: design.id,
       memberIds: [design.id],
+      // `row` is the DISPLAY row, and it falls back to "plain" when the ticked
+      // design has no ink artwork to use. `inkTicked` is what says which PANEL
+      // the user wants this design to read from.
       row: colourPlan.usesInkArtwork ? "ink" : "plain",
+      inkTicked,
       groups: colourPlan.groups.map((group) => {
         if (group.ink === "main") {
           return {
@@ -273,6 +292,11 @@ export function studioPartitionProblems(plan: StudioPlan, session: StudioSession
  *
  * The ink artwork problems come first: they name the cause ("no white-ink
  * artwork on Black and Navy") instead of only the partition symptom.
+ *
+ * Then come the EMPTY PANEL problems. Each panel feeds its own row, so a row
+ * whose panel has no colours would print on nothing - and Printify would
+ * quietly drop the product. Blocking here, with the design's name and the
+ * exact panel to fix, is the only honest answer.
  */
 export function studioPlanProblems(
   plan: StudioPlan,
@@ -293,8 +317,31 @@ export function studioPlanProblems(
     ...artworkProblems.map(
       (problem) => `${problem.designName}: ${describeMissingInk(problem)}`,
     ),
+    ...emptyPanelProblems(plan),
     ...studioPartitionProblems(plan, session),
   ];
+}
+
+/**
+ * The designs whose OWN colour panel is empty.
+ *
+ * The two panels are independent, so a design prints only the colours of the
+ * panel its row reads from. When that panel holds nothing the design would
+ * create a product with no colours at all - which Printify refuses, and which
+ * the user would only discover after a confusing upload failure. Name the
+ * design and the panel instead.
+ */
+export function emptyPanelProblems(plan: StudioPlan): string[] {
+  return plan.items
+    .filter((item) => item.groups.length === 0)
+    .map((item) =>
+      // Branch on the TICK, not on `row`: a ticked design whose ink panel is
+      // empty has no ink artwork to use, so it displays in the plain row -
+      // but the panel that needs fixing is still the ink one.
+      item.inkTicked
+        ? `"${item.designName}" is in the Has ink variants row, but no colours are selected in the "Has ink variants" panel of Colors. Select colours there (and mark each one Black ink or White ink), or untick "Ink variants" to move it back.`
+        : `"${item.designName}" is in the No ink variants row, but no colours are selected in the "No ink variants" panel of Colors. Select colours there, or tick "Ink variants" on this design to move it to the other panel.`,
+    );
 }
 
 /** What is actually wrong with one design and one ink. */

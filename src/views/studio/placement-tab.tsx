@@ -41,6 +41,7 @@ import {
 import {
   buildStudioPlan,
   describeMissingInk,
+  emptyPanelProblems,
   planVariantCounts,
   studioPartitionProblems,
 } from "@/lib/printify/studio-plan";
@@ -211,8 +212,9 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   /**
    * What each design prints on, for its card.
    *
-   * A design the user did not pair prints on every colour with its main
-   * artwork; a paired one prints the ink artwork on the ink colours.
+   * The panel decides it: an unticked design prints the plain panel's colours
+   * with its main artwork; a ticked one prints the ink panel's colours, split
+   * by the black/white ink switch.
    */
   const designColours = React.useCallback(
     (design: DesignCardData): DesignColours => {
@@ -317,11 +319,11 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   /**
    * The colour counts behind the plan, for the informational summary.
    *
-   * The selection belongs to the PRODUCT, so the counts are the same for every
-   * product row (a pair covers both halves, an ordinary design covers every
-   * colour). The overlap is named separately: the ink row wins that colour,
-   * and hiding the fact would be exactly the quiet loss this summary exists
-   * to rule out. These numbers never block creation.
+   * Each panel feeds its own row, so the summary reports them separately: the
+   * no-ink row's colours, then the ink row's split into black and white ink.
+   * A colour in BOTH panels is named separately and described as intentional,
+   * because each row prints it with its own artwork. These numbers never block
+   * creation.
    */
   const colourSummary = React.useMemo(
     () => summariseColourGroups(productColourGroups(session)),
@@ -379,14 +381,16 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   /**
    * Everything that stops the batch from being created.
    *
-   * The ink artwork problems come first: they name the cause.
+   * The ink artwork problems come first: they name the cause. Then the EMPTY
+   * PANEL problems, which name the design and the panel with no colours.
    */
   const problems = React.useMemo(
     () => [
       ...artworkProblems.map((p) => `${p.designName}: ${describeMissingInk(p)}`),
+      ...(plan ? emptyPanelProblems(plan) : []),
       ...partitionProblems,
     ],
-    [artworkProblems, partitionProblems],
+    [artworkProblems, partitionProblems, plan],
   );
 
   /** Colours whose ink would be invisible on the garment. */
@@ -623,13 +627,19 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                       )}
                       <Badge variant="muted">{item.row === "ink" ? "ink" : "plain"}</Badge>
                     </div>
-                    {/* Informational only: the counts say what the plan
-                        covers, and the variant count is the enabled set for
-                        THIS row with the chosen sizes applied. */}
+                    {/* Informational only: the counts say what THIS listing
+                        prints - its own panel's colours, split by ink - and
+                        the variant count is the enabled set with the chosen
+                        sizes applied. */}
                     <p className="mt-0.5 text-[11px] text-ink-subtle" data-colour-summary="">
-                      {colourSummary.plain} plain · {colourSummary.black} black ink ·{" "}
-                      {colourSummary.white} white ink · {itemVariantCounts.get(item.designId) ?? 0}{" "}
-                      variants
+                      {item.groups.filter((g) => g.colors.length > 0).length === 0
+                        ? "no colours selected"
+                        : item.groups
+                            .filter((g) => g.colors.length > 0)
+                            .map((g) => `${g.colors.length} ${g.label.toLowerCase()}`)
+                            .join(" · ")}
+                      {" · "}
+                      {itemVariantCounts.get(item.designId) ?? 0} variants
                     </p>
                   </div>
                 );
@@ -642,8 +652,8 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
               {colourSummary.overlap.length} colour
               {colourSummary.overlap.length === 1 ? "" : "s"}{" "}
               {colourSummary.overlap.length === 1
-                ? "is in both rows; it will print with the ink artwork."
-                : "are in both rows; they will print with the ink artwork."}
+                ? "is in both panels; that is fine, each row prints it with its own artwork."
+                : "are in both panels; that is fine, each row prints them with its own artwork."}
             </p>
           )}
 

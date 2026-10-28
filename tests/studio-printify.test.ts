@@ -287,11 +287,15 @@ describe("the variant partition", () => {
     ]);
     expect(partition.complete).toBe(true);
     expect(partition.covered).toHaveLength(18);
-    // The colours nobody named are absorbed by the last group, and reported
-    // so the caller can see which ones were picked up implicitly.
+    // The colours nobody named are absorbed by the SAFEST group, not the last
+    // one. Order of safety: "main" (the design's own artwork), then "black"
+    // ink (visible on a light garment), and only then whatever is left. The
+    // white-ink group never absorbs - white ink on a light garment is
+    // invisible - so here the black group picks up the leftovers.
     expect(partition.unclaimed).toHaveLength(6);
-    expect(partition.groups[1].variantIds).toContain(17643);
-    expect(partition.groups[0].variantIds).toHaveLength(6);
+    expect(partition.groups[1].variantIds).toHaveLength(6);
+    expect(partition.groups[0].variantIds).toContain(17643);
+    expect(partition.groups[0].variantIds).toHaveLength(12);
   });
 
   it("gives every variant to exactly one group", () => {
@@ -363,32 +367,26 @@ describe("the variant partition - safe absorber", () => {
     })),
   );
   const index = buildCatalogueIndex(CATALOGUE);
-  const GROUPS: ProductColourGroups = {
-    plain: PLAIN,
-    ink: WHITE_INK,
-    blackInk: [],
-  };
-  const PLAN = planDesignColours(
-    { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
-    GROUPS,
-  );
 
-  it("absorbs catalogue extras into the plain group, never the white-ink group", () => {
-    const partition = buildPartition(
-      index,
-      PLAN.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
-    );
+  it("absorbs catalogue extras into the main group, never the white-ink group", () => {
+    // A design that has no white-ink file prints those colours with its MAIN
+    // artwork, so its plan carries a main group alongside the white group -
+    // and the main group is the safe absorber.
+    const partition = buildPartition(index, [
+      { ink: "main" as const, colors: PLAIN },
+      { ink: "white" as const, colors: WHITE_INK },
+    ]);
 
     const whiteGroup = partition.groups.find((g) => g.ink === "white");
-    const plainGroup = partition.groups.find((g) => g.ink === "main");
+    const mainGroup = partition.groups.find((g) => g.ink === "main");
 
     // The white-ink group holds exactly the 5 dark colours' variants.
     const inkVariantIds = WHITE_INK.flatMap((c) => index.variantIds.get(c) ?? []);
     expect(whiteGroup!.variantIds).toEqual([...inkVariantIds].sort((a, b) => a - b));
 
-    // The plain group is complete: its own colours plus the absorbed extra.
+    // The main group is complete: its own colours plus the absorbed extra.
     const plainVariantIds = PLAIN.flatMap((c) => index.variantIds.get(c) ?? []);
-    expect(plainGroup!.variantIds.length).toBeGreaterThan(plainVariantIds.length);
+    expect(mainGroup!.variantIds.length).toBeGreaterThan(plainVariantIds.length);
 
     // Complete partition: every variant covered exactly once.
     expect(partition.complete).toBe(true);
@@ -399,6 +397,39 @@ describe("the variant partition - safe absorber", () => {
     const extraIds = index.variantIds.get(EXTRA) ?? [];
     expect(whiteGroup!.variantIds).not.toEqual(expect.arrayContaining(extraIds));
     expect(partition.unclaimed).toEqual([...extraIds].sort((a, b) => a - b));
+  });
+
+  it("never lets a no-ink design's plan name the ink panel's variants", () => {
+    // THE PANEL DECIDES THE COLOURS. A plain design prints the plain panel,
+    // so its plan never NAMES an ink-panel colour and the enabled set never
+    // contains an ink-panel variant. (The partition still covers every
+    // variant for Printify's sake, so the ink variants may appear inside the
+    // absorbing group's ids - they are simply disabled.)
+    const GROUPS: ProductColourGroups = {
+      plain: PLAIN,
+      ink: WHITE_INK,
+      blackInk: [],
+    };
+    const plan = planDesignColours(
+      { hasInkPair: false, hasBlackInk: false, hasWhiteInk: false },
+      GROUPS,
+    );
+    expect(plan.colors).toEqual(PLAIN);
+    for (const group of plan.groups) {
+      for (const colour of WHITE_INK) expect(group.colors).not.toContain(colour);
+    }
+
+    const partition = buildPartition(
+      index,
+      plan.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+    );
+    expect(partition.groups[0].colors).toEqual(PLAIN);
+    expect(partition.complete).toBe(true);
+
+    const enabled = new Set(resolveVariantIds(index, plan.colors, []));
+    for (const colour of WHITE_INK) {
+      for (const id of index.variantIds.get(colour) ?? []) expect(enabled.has(id)).toBe(false);
+    }
   });
 });
 
@@ -495,9 +526,9 @@ describe("the print_areas payload", () => {
 
 // ---------------------------------------------------------------------------
 // The real case: four black-ink colours + four white-ink colours + a few
-// plain ones. Every selected colour must reach the product, in the group whose
-// artwork will print on it. This is the end-to-end half of the fix: the plan,
-// the catalogue index and the partition have to agree.
+// plain ones. Each colour must reach the product IN ITS OWN PANEL's group,
+// in the group whose artwork will print on it. This is the end-to-end half of
+// the rule: the plan, the catalogue index and the partition have to agree.
 // ---------------------------------------------------------------------------
 
 describe("a four-and-four colour selection", () => {
@@ -519,96 +550,173 @@ describe("a four-and-four colour selection", () => {
     })),
   );
   const index = buildCatalogueIndex(CATALOGUE);
-  const PLAN = planDesignColours(
+  const INK_PLAN = planDesignColours(
     { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+    GROUPS,
+  );
+  const PLAIN_PLAN = planDesignColours(
+    { hasInkPair: false, hasBlackInk: false, hasWhiteInk: false },
     GROUPS,
   );
 
   it("keeps the eight ink colours, in the group that carries their artwork", () => {
-    expect(PLAN.colors).toEqual(COLOURS);
-    expect(new Set(PLAN.colors).size).toBe(COLOURS.length);
+    // The ink design prints the ink panel and only the ink panel.
+    expect(INK_PLAN.colors).toEqual([...BLACK_INK, ...WHITE_INK]);
+    expect(new Set(INK_PLAN.colors).size).toBe(BLACK_INK.length + WHITE_INK.length);
 
     const partition = buildPartition(
       index,
-      PLAN.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+      INK_PLAN.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
     );
     const groupFor = (ink: "main" | "black" | "white") =>
-      partition.groups[PLAN.groups.findIndex((group) => group.ink === ink)];
+      partition.groups[INK_PLAN.groups.findIndex((group) => group.ink === ink)];
 
     // The four black-ink colours and the four white-ink colours are not
     // merged, dropped or swapped.
     expect(groupFor("black").colors).toEqual(BLACK_INK);
     expect(groupFor("white").colors).toEqual(WHITE_INK);
-    expect(groupFor("main").colors).toEqual(PLAIN);
-    expect(new Set(groupFor("black").variantIds)).toEqual(
-      new Set(BLACK_INK.flatMap((colour) => index.variantIds.get(colour) ?? [])),
-    );
+
+    // The white-ink group holds EXACTLY its own colours' variants: white ink
+    // is the one group that must never absorb anything (it is invisible on a
+    // light garment), so the black group takes the plain panel's leftovers
+    // that the partition still has to name.
     expect(new Set(groupFor("white").variantIds)).toEqual(
       new Set(WHITE_INK.flatMap((colour) => index.variantIds.get(colour) ?? [])),
     );
+    // The black group holds every black-ink variant (plus the absorbed
+    // unclaimed ones, which stay disabled).
+    const blackOwn = new Set(BLACK_INK.flatMap((colour) => index.variantIds.get(colour) ?? []));
+    for (const id of blackOwn) expect(groupFor("black").variantIds).toContain(id);
+    expect(partition.complete).toBe(true);
+
+    // What is ENABLED is the ink panel and nothing else - the plain panel's
+    // variants may sit in a group, but they are switched off.
+    const enabled = new Set(resolveVariantIds(index, INK_PLAN.colors, []));
+    for (const colour of PLAIN) {
+      for (const id of index.variantIds.get(colour) ?? []) expect(enabled.has(id)).toBe(false);
+    }
+    expect(enabled.size).toBe((BLACK_INK.length + WHITE_INK.length) * SIZES.length);
+  });
+
+  it("gives a no-ink design the plain panel and nothing else", () => {
+    // This is the fix for "all shirts went to the black-ink design": a
+    // no-ink design used to be handed every colour of the product.
+    expect(PLAIN_PLAN.colors).toEqual(PLAIN);
+    expect(PLAIN_PLAN.groups).toEqual([{ ink: "main", colors: PLAIN }]);
+
+    const partition = buildPartition(
+      index,
+      PLAIN_PLAN.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+    );
+    // The group NAMES only the plain panel's colours...
+    expect(partition.groups[0].colors).toEqual(PLAIN);
+    const plainOwn = new Set(PLAIN.flatMap((colour) => index.variantIds.get(colour) ?? []));
+    for (const id of plainOwn) expect(partition.groups[0].variantIds).toContain(id);
+    // The partition is still complete over the whole catalogue, so Printify
+    // cannot silently append a variant to the wrong artwork; the ink panel's
+    // variants may be absorbed into the group but are NOT enabled.
     expect(partition.complete).toBe(true);
     expect(partition.covered).toHaveLength(COLOURS.length * SIZES.length);
+    const enabled = new Set(resolveVariantIds(index, PLAIN_PLAN.colors, []));
+    for (const colour of [...BLACK_INK, ...WHITE_INK]) {
+      for (const id of index.variantIds.get(colour) ?? []) expect(enabled.has(id)).toBe(false);
+    }
+    expect(enabled.size).toBe(PLAIN.length * SIZES.length);
   });
 
   it("enables every selected colour's variants, with the sizes applied", () => {
-    const enabled = resolveVariantIds(index, PLAN.colors, ["S", "M"]);
+    const enabled = resolveVariantIds(index, INK_PLAN.colors, ["S", "M"]);
 
-    expect(enabled).toHaveLength(COLOURS.length * 2);
+    expect(enabled).toHaveLength((BLACK_INK.length + WHITE_INK.length) * 2);
     expect(enabled).toEqual(
       [...enabled].sort((a, b) => a - b),
     );
-    for (const colour of COLOURS) {
+    for (const colour of INK_PLAN.colors) {
       for (const id of index.variantIds.get(colour) ?? []) {
         const size = CATALOGUE.find((variant) => variant.id === id)?.options?.size;
         expect(enabled.includes(id)).toBe(size === "S" || size === "M");
       }
     }
     // With no sizes ticked, every variant of every colour is enabled.
-    expect(resolveVariantIds(index, PLAN.colors, [])).toHaveLength(
-      COLOURS.length * SIZES.length,
+    expect(resolveVariantIds(index, INK_PLAN.colors, [])).toHaveLength(
+      (BLACK_INK.length + WHITE_INK.length) * SIZES.length,
+    );
+    // The plain panel is a DIFFERENT selection, not a superset of this one.
+    expect(resolveVariantIds(index, PLAIN_PLAN.colors, [])).toHaveLength(
+      PLAIN.length * SIZES.length,
     );
   });
 
-  it("puts a colour selected in BOTH rows in the ink group, never in plain", () => {
+  it("keeps a colour selected in BOTH panels in each panel's own group", () => {
+    // "Solid Black" and "Navy" are ticked in the plain panel too. That is
+    // intentional: the plain design prints its main artwork there, the ink
+    // design its black ink there. Neither panel strips the other.
     const bothRows: ProductColourGroups = {
       ...GROUPS,
-      // "Solid Black" and "Navy" are ticked in the plain row too.
       plain: [...PLAIN, "Solid Black", "Navy"],
     };
-    const plan = planDesignColours(
+    const inkPlan = planDesignColours(
       { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
       bothRows,
     );
+    const plainPlan = planDesignColours(
+      { hasInkPair: false, hasBlackInk: false, hasWhiteInk: false },
+      bothRows,
+    );
 
-    const main = plan.groups.find((group) => group.ink === "main");
-    const black = plan.groups.find((group) => group.ink === "black");
-    expect(main?.colors).toEqual(PLAIN);
+    const black = inkPlan.groups.find((group) => group.ink === "black");
+    expect(inkPlan.groups.find((group) => group.ink === "main")).toBeUndefined();
     expect(black?.colors).toEqual(BLACK_INK);
-    expect(plan.colors).toEqual(COLOURS);
+    expect(inkPlan.colors).toEqual([...BLACK_INK, ...WHITE_INK]);
+    expect(plainPlan.colors).toEqual([...PLAIN, "Solid Black", "Navy"]);
 
     const partition = buildPartition(
       index,
-      plan.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+      inkPlan.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
     );
-    const blackGroup = partition.groups[plan.groups.findIndex((group) => group.ink === "black")];
+    const blackGroup = partition.groups[inkPlan.groups.findIndex((group) => group.ink === "black")];
     expect(blackGroup.colors).toEqual(BLACK_INK);
-    expect(new Set(blackGroup.variantIds)).toEqual(
-      new Set(BLACK_INK.flatMap((colour) => index.variantIds.get(colour) ?? [])),
-    );
+    // The black group holds every black-ink variant, plus the plain panel's
+    // variants the complete partition still has to name (the absorber is the
+    // safe group, never the white-ink one). What matters is that they are
+    // named, not enabled.
+    const blackOwn = new Set(BLACK_INK.flatMap((colour) => index.variantIds.get(colour) ?? []));
+    for (const id of blackOwn) expect(blackGroup.variantIds).toContain(id);
     expect(partition.complete).toBe(true);
+
+    // The plain design's enabled set is the plain panel, ink design's is the
+    // ink panel - a colour in both is enabled on BOTH products, by design.
+    const plainEnabled = new Set(resolveVariantIds(index, plainPlan.colors, []));
+    const inkEnabled = new Set(resolveVariantIds(index, inkPlan.colors, []));
+    const plainOwn = [...PLAIN, "Solid Black", "Navy"].flatMap(
+      (colour) => index.variantIds.get(colour) ?? [],
+    );
+    for (const id of plainOwn) expect(plainEnabled.has(id)).toBe(true);
+    for (const id of blackOwn) expect(inkEnabled.has(id)).toBe(true);
+    // The two colours that are in BOTH panels are enabled on both products,
+    // on purpose: the plain product prints the main artwork there, the ink
+    // product the black ink.
+    for (const colour of ["Solid Black", "Navy"]) {
+      for (const id of index.variantIds.get(colour) ?? []) {
+        expect(plainEnabled.has(id)).toBe(true);
+        expect(inkEnabled.has(id)).toBe(true);
+      }
+    }
+    // White-panel colours are NOT enabled on the plain product.
+    for (const colour of WHITE_INK) {
+      for (const id of index.variantIds.get(colour) ?? []) expect(plainEnabled.has(id)).toBe(false);
+    }
   });
 
   it("splits a four-and-four pair between the halves, as ONE product", () => {
     const split = pairedColourGroups(GROUPS);
 
-    // The black-ink design prints the plain colours and the black-ink ones;
-    // its partner prints only the remaining (white-ink) colours.
-    expect(split.black).toEqual([...PLAIN, ...BLACK_INK]);
+    // Both halves live in the ink panel: the black-ink design prints the
+    // colours marked Black ink, its partner the rest of that panel. The plain
+    // panel belongs to the no-ink-variants designs.
+    expect(split.black).toEqual(BLACK_INK);
     expect(split.white).toEqual(WHITE_INK);
-    expect(planPairedDesignColours("black", GROUPS).colors).toEqual([
-      ...PLAIN,
-      ...BLACK_INK,
-    ]);
+    expect(planPairedDesignColours("black", GROUPS).colors).toEqual(BLACK_INK);
     expect(planPairedDesignColours("white", GROUPS).colors).toEqual(WHITE_INK);
 
     // One pair = one product: the two halves' groups form one complete
@@ -618,13 +726,19 @@ describe("a four-and-four colour selection", () => {
       { ink: "white", colors: split.white },
     ]);
     expect(partition.complete).toBe(true);
-    expect(partition.groups[0].colors).toEqual([...PLAIN, ...BLACK_INK]);
+    expect(partition.groups[0].colors).toEqual(BLACK_INK);
     expect(partition.groups[1].colors).toEqual(WHITE_INK);
     expect(new Set(partition.covered)).toEqual(new Set(CATALOGUE.map((v) => v.id)));
 
-    // ...and the enabled set covers every colour exactly once.
+    // ...and the enabled set covers the ink panel exactly once.
     const enabled = resolveVariantIds(index, [...split.black, ...split.white], []);
-    expect(enabled).toEqual([...CATALOGUE.map((v) => v.id)].sort((a, b) => a - b));
-    expect(new Set([...split.black, ...split.white]).size).toBe(COLOURS.length);
+    expect(new Set(enabled)).toEqual(
+      new Set(
+        [...BLACK_INK, ...WHITE_INK].flatMap((colour) => index.variantIds.get(colour) ?? []),
+      ),
+    );
+    expect(new Set([...split.black, ...split.white]).size).toBe(
+      BLACK_INK.length + WHITE_INK.length,
+    );
   });
 });

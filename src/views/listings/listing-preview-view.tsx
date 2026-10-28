@@ -819,15 +819,21 @@ export function ListingPreviewView() {
   );
 
   // --- colour and variant facts ----------------------------------------------
+  // Each listing prints the colours of ITS OWN panel, and nothing else: a
+  // plain listing prints the "No ink variants" panel, an ink listing the
+  // "Has ink variants" panel. Unioning both panels here used to make the
+  // checklist promise Printify a variant the product would never print.
   const colourCounts = React.useMemo(() => {
     const groups = normaliseColourGroups(productColourGroups(session));
+    const row = activeListing?.row ?? "plain";
     return {
       plain: groups.plain.length,
       ink: groups.ink.length,
       black: groups.black.length,
-      all: [...new Set([...groups.plain, ...groups.ink])],
+      row,
+      all: row === "ink" ? groups.ink : groups.plain,
     };
-  }, [session]);
+  }, [session, activeListing]);
 
   const variantPlan = React.useMemo((): { ids: number[]; error?: string } => {
     if (!blueprintId || !printProviderId) {
@@ -2106,9 +2112,11 @@ export function ListingPreviewView() {
                     {listing.partnerName && (
                       <p className="rounded-md bg-sage-soft px-3 py-2 text-[11px] text-forest">
                         One listing, two designs: <strong>{listing.designName}</strong> prints the
-                        plain and black-ink colours, and <strong>{listing.partnerName}</strong>{" "}
-                        prints the white-ink colours. The images, title and price above belong to
-                        the pair, not to either design alone.
+                        colours marked <strong>Black ink</strong>, and{" "}
+                        <strong>{listing.partnerName}</strong> prints the colours marked{" "}
+                        <strong>White ink</strong> — both from the "Has ink variants" panel. The
+                        images, title and price above belong to the pair, not to either design
+                        alone.
                       </p>
                     )}
 
@@ -2117,8 +2125,9 @@ export function ListingPreviewView() {
                       <dd className="text-ink">{productName}</dd>
                       <dt className="text-ink-muted">Colours</dt>
                       <dd className="text-ink">
-                        {colourCounts.plain} plain · {colourCounts.ink} ink
-                        {colourCounts.black > 0 ? ` (${colourCounts.black} black ink)` : ""}
+                        {colourCounts.row === "ink"
+                          ? `${colourCounts.ink} from the "Has ink variants" panel (${colourCounts.black} black ink, ${colourCounts.ink - colourCounts.black} white ink)`
+                          : `${colourCounts.plain} from the "No ink variants" panel`}
                       </dd>
                       <dt className="text-ink-muted">Variants</dt>
                       <dd className="text-ink">

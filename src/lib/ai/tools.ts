@@ -515,10 +515,33 @@ const INTENT_RULES: Array<{ name: string; patterns: RegExp[] }> = [
     ],
   },
   {
+    // Saving is a DIFFERENT tool from drafting, and it is the one that writes.
+    // This rule must stay above draft_listing: "save the title", "set the
+    // price", "update the listing details" are all writes, and routing them to
+    // draft_listing meant the agent returned copy ideas and never saved
+    // anything - the exact bug this rule fixes.
+    name: "save_listing_details",
+    patterns: [
+      // "save/apply/update/set/change/commit the title|description|tags|price|listing"
+      /(^|[.!?]\s*)(save|apply|update|set|change|store|commit|persist|overwrite)\b[^.?!]*\b(listing|title|description|tags?|price|copy|details)\b/i,
+      // "price it at 24.99", "set the price to $19", "make the price 20"
+      /\b(pric(e|es)|cost)\b[^.?!]*\b(at|to|be)\b\s*\$?\d/i,
+      /\b(set|make|put|drop|lower|raise|change)\b[^.?!]*\bthe price\b/i,
+      // "use/apply this copy|title|description" (the user just wrote it out)
+      /\b(use|apply|save|go with)\b[^.?!]*\b(this|that|these|following)\b[^.?!]*\b(copy|title|description|tags)\b/i,
+      // "make the title say ...", "retitle it to ..."
+      /\b(make|rename|retitle)\b[^.?!]*\b(title|listing|it)\b[^.?!]*\b(say|to)\b/i,
+    ],
+  },
+  {
     name: "draft_listing",
     patterns: [
-      /\b(listing|titles?|descriptions?|tags?|seo|keyword)\b/i,
-      /\b(write|draft|brainstorm) (me )?(copy|listing)\b/i,
+      // Drafting is IDEATION: it returns ideas and saves NOTHING. The old rule
+      // here was a bare /\b(listing|title|tags|seo|keyword)\b/i, which caught
+      // every "save my listing" request and turned a write into a no-op.
+      /\b(draft|write|brainstorm|come up with|generate|suggest|give me|think of)\b[^.?!]*\b(listing|copy|title|description|tags?|seo|keywords?)\b/i,
+      /\b(listing|copy|title|description|tags?|seo|keywords?)\b[^.?!]*\b(ideas?|drafts?|suggestions?|examples?|samples?|options)\b/i,
+      /\b(ideas?|suggestions?|examples?)\b[^.?!]*\b(for|of)\b/i,
     ],
   },
   {
@@ -695,6 +718,19 @@ export function routeIntent(text: string): RoutedIntent | null {
         return { name: rule.name, args: { query: etsyQueryFromText(clean) } };
       case "draft_listing":
         return { name: rule.name, args: { concept: clean.slice(0, 200) } };
+      case "save_listing_details": {
+        // The keyword fallback must produce something the real tool accepts,
+        // or the auto-run path would just bounce with "nothing to write". A
+        // price ("set the price to 24.99") is the one field we can lift
+        // verbatim. A title is only trusted when it is clearly quoted, so a
+        // stray word never becomes the listing's whole title.
+        const args: Record<string, unknown> = {};
+        const priceCents = detectPriceCents(clean);
+        if (priceCents) args.priceCents = priceCents;
+        const quotedTitle = clean.match(/["“']([^"”']{3,140})["”']/);
+        if (quotedTitle) args.title = quotedTitle[1].trim();
+        return { name: rule.name, args };
+      }
       case "create_printify_product": {
         const args: Record<string, unknown> = {};
         const productType = detectProductType(clean);

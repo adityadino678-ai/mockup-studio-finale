@@ -171,15 +171,21 @@ export function buildPartition(
   // The absorber takes the catalogue extras that no group named. It must be a
   // SAFE group - one whose artwork is harmless if ever enabled on a garment
   // the user never chose. A "main" group prints the design's own artwork, so
-  // it is always safe. An ink group is not: white ink on a light garment (or
-  // black ink on a dark one) is invisible. Never absorb into the white-ink
-  // group. When there is no main group, fall back to the last group that
-  // holds variants.
+  // it is always safe. A "black" ink group is next: black ink is at least
+  // VISIBLE on a light garment. A "white" ink group is the worst possible
+  // absorber (white ink on a light garment is invisible), so it is only ever
+  // the last resort - the fallback when a plan carries white ink and nothing
+  // else. Note an ink-ticked design's plan has no main group at all (the two
+  // panels are independent now), which is exactly why the black preference
+  // matters.
   const mainWithVariants = built.find(
     (g) => g.ink === "main" && g.variantIds.length > 0,
   );
+  const blackWithVariants = built.find(
+    (g) => g.ink === "black" && g.variantIds.length > 0,
+  );
   const lastWithVariants = built.filter((g) => g.variantIds.length > 0).pop();
-  const absorber = mainWithVariants ?? lastWithVariants;
+  const absorber = mainWithVariants ?? blackWithVariants ?? lastWithVariants;
   if (absorber && unclaimed.length > 0) {
     absorber.variantIds = [...absorber.variantIds, ...unclaimed].sort(
       (a, b) => a - b,

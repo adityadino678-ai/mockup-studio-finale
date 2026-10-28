@@ -18,13 +18,10 @@ import {
 } from "@/lib/client/chat";
 import {
   CONFIRM_TOOL_RUNNERS,
-  confirmInkVariant,
   confirmMockupRender,
   confirmPrintifyProduct,
-  confirmRemoveBackground,
   confirmSaveChatImage,
   confirmSaveListingDetails,
-  confirmSavePlacement,
   executeTool,
 } from "@/lib/client/tools";
 import {
@@ -529,7 +526,7 @@ describe("tool executors", () => {
     expect(result.confirmation).toBeUndefined();
   });
 
-  it("proposes a batch without writing anything", async () => {
+  it("auto-runs a batch instead of proposing one", async () => {
     await db.designs.put({
       id: "d1",
       name: "Sunset",
@@ -553,9 +550,10 @@ describe("tool executors", () => {
     });
     const result = await executeTool("create_batch_job", { variant: "white" });
     expect(result.error).toBeUndefined();
-    expect(result.confirmation?.payload.total).toBe(1);
-    expect(result.confirmation?.payload.variant).toBe("white");
-    expect(await db.batchJobs.count()).toBe(0);
+    // The local write ran itself: no confirmation is left for the user to
+    // click, and the job is already persisted.
+    expect(result.confirmation).toBeUndefined();
+    expect(await db.batchJobs.count()).toBe(1);
   });
 
   it("refuses to propose a Printify product without a design", async () => {
@@ -767,12 +765,13 @@ describe("mockup + library tools", () => {
     expect((result.result as { blueprints: unknown[] }).blueprints).toHaveLength(1);
   });
 
-  it("proposes a single mockup render without writing anything", async () => {
+  it("auto-runs a single mockup render (no confirmation, reports missing artwork)", async () => {
     await seedLibrary();
     const result = await executeTool("create_mockup_render", { design: "sunset" });
-    expect(result.error).toBeUndefined();
-    expect(result.confirmation?.payload.designId).toBe("d1");
-    expect(result.confirmation?.payload.mockupId).toBe("m1");
+    // The render ran itself. With no source image in storage it fails honestly
+    // rather than leaving a pending confirmation.
+    expect(result.confirmation).toBeUndefined();
+    expect(result.error).toBeDefined();
     expect(await db.assets.where("kind").equals("mockup-render").count()).toBe(0);
   });
 
@@ -782,63 +781,61 @@ describe("mockup + library tools", () => {
     expect(result.error).toBeDefined();
   });
 
-  it("saves a placement and a template on confirm", async () => {
+  it("auto-runs a placement save and a template in one call", async () => {
     await seedLibrary();
-    const proposal = await executeTool("save_placement", {
+    const result = await executeTool("save_placement", {
       design: "sunset",
       mockup: "tee",
       transform: { x: 2, y: 0.5, scale: 0.4 },
       asTemplate: true,
       templateName: "Chest print",
     });
-    expect(proposal.confirmation).toBeDefined();
-    const executed = await confirmSavePlacement(proposal.confirmation!.payload);
-    expect(executed.error).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect(result.confirmation).toBeUndefined();
     const placement = await db.placements.where("designId").equals("d1").first();
     expect(placement?.transform.x).toBe(1);
     expect(await db.templates.count()).toBe(1);
   });
 
-  it("proposes an ink variant and reports missing artwork on confirm", async () => {
+  it("auto-runs an ink variant and reports missing artwork", async () => {
     await seedLibrary();
-    const proposal = await executeTool("create_ink_variant", { design: "sunset", ink: "black" });
-    expect(proposal.confirmation?.payload.ink).toBe("black");
-    const executed = await confirmInkVariant({ designId: "d1", ink: "black" });
-    expect(executed.error).toBeDefined();
+    const result = await executeTool("create_ink_variant", { design: "sunset", ink: "black" });
+    // It ran itself and failed honestly: there is no artwork blob in storage.
+    expect(result.confirmation).toBeUndefined();
+    expect(result.error).toBeDefined();
   });
 
-  it("proposes background removal and reports missing artwork on confirm", async () => {
+  it("auto-runs background removal and reports missing artwork", async () => {
     await seedLibrary();
-    const proposal = await executeTool("remove_background", { design: "sunset" });
-    expect(proposal.confirmation?.payload.designId).toBe("d1");
-    expect(proposal.confirmation?.payload.engine).toBeUndefined();
-    const executed = await confirmRemoveBackground({ designId: "d1" });
-    expect(executed.error).toBeDefined();
+    const result = await executeTool("remove_background", { design: "sunset" });
+    expect(result.confirmation).toBeUndefined();
+    expect(result.error).toBeDefined();
   });
 
   it("has no engine to choose: the local chain is fixed", async () => {
     // The remover runs flood-key then border-model, on this device, with no
-    // key and no limit. There is no engine for the model to pick, so a
-    // stray `engine` argument must not reach the confirm card.
+    // key and no limit. There is no engine for the model to pick, so the tool
+    // must not advertise an engine choice in its summary.
     await seedLibrary();
-    const proposal = await executeTool("remove_background", {
+    const result = await executeTool("remove_background", {
       design: "sunset",
       engine: "flood-key",
     });
-    expect(proposal.confirmation?.payload.engine).toBeUndefined();
-    expect(proposal.confirmation?.detail).toMatch(/on this device/i);
-    expect(proposal.confirmation?.detail).not.toMatch(/download|25 MB|AI segmentation/i);
+    expect(result.summary).not.toMatch(/download|25 MB|AI segmentation/i);
   });
 
   it("needs an attached image before saving one from chat", async () => {
     const none = await executeTool("save_chat_image", { kind: "design" });
     expect(none.error).toBeDefined();
+    // A malformed data URL makes the auto-run's own decode step throw, which
+    // proves executeTool ran the save rather than leaving a confirmation.
     const withImage = await executeTool(
       "save_chat_image",
       { kind: "design", name: "New art" },
-      { attachments: [{ name: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,AAAA" }] },
+      { attachments: [{ name: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,!!!" }] },
     );
-    expect(withImage.confirmation?.payload.name).toBe("New art");
+    expect(withImage.error).toBeDefined();
+    expect(withImage.confirmation).toBeUndefined();
     const missing = await confirmSaveChatImage({ kind: "design" }, { attachments: [] });
     expect(missing.error).toBeDefined();
   });
@@ -897,7 +894,7 @@ describe("save_listing_details", () => {
     });
   }
 
-  it("proposes a write without touching the drafts", async () => {
+  it("auto-runs the write and persists the draft", async () => {
     await seed();
     const result = await executeTool("save_listing_details", {
       design: "sunset",
@@ -907,14 +904,13 @@ describe("save_listing_details", () => {
       price: 24.99,
     });
     expect(result.error).toBeUndefined();
-    expect(result.confirmation?.payload).toMatchObject({
-      listingIds: ["d1"],
-      title: "Golden Hour Tee",
-      description: "A warm sunset tee.",
-      tags: ["sunset", "gift"],
-      priceCents: 2499,
-    });
-    expect(await db.listingDrafts.count()).toBe(0);
+    // No confirmation: the local write ran itself.
+    expect(result.confirmation).toBeUndefined();
+    const draft = (await db.listingDrafts.where("designId").equals("d1").toArray())[0];
+    expect(draft.title).toBe("Golden Hour Tee");
+    expect(draft.description).toBe("A warm sunset tee.");
+    expect(draft.tags).toEqual(["sunset", "gift"]);
+    expect(draft.priceCents).toBe(2499);
   });
 
   it("writes one listing, pins the other price and leaves its draft alone", async () => {
@@ -1000,7 +996,7 @@ describe("save_listing_details", () => {
     expect(await db.listingDrafts.count()).toBe(0);
   });
 
-  it("proposes unique copy per listing via items", async () => {
+  it("auto-runs unique copy per listing via items", async () => {
     await seed();
     const result = await executeTool("save_listing_details", {
       items: [
@@ -1009,25 +1005,16 @@ describe("save_listing_details", () => {
       ],
     });
     expect(result.error).toBeUndefined();
-    expect(result.confirmation?.payload).toMatchObject({
-      items: [
-        {
-          listingId: "d1",
-          designName: "Sunset",
-          title: "Golden Hour Tee",
-          tags: ["sunset", "gift"],
-          priceCents: 2499,
-        },
-        {
-          listingId: "d2",
-          designName: "Moon",
-          title: "Night Sky Tee",
-          tags: ["moon", "night"],
-          priceCents: 1999,
-        },
-      ],
-    });
-    expect(await db.listingDrafts.count()).toBe(0);
+    // No confirmation: the batch write ran itself and persisted both drafts.
+    expect(result.confirmation).toBeUndefined();
+    const sunset = (await db.listingDrafts.where("designId").equals("d1").toArray())[0];
+    expect(sunset.title).toBe("Golden Hour Tee");
+    expect(sunset.tags).toEqual(["sunset", "gift"]);
+    expect(sunset.priceCents).toBe(2499);
+    const moon = (await db.listingDrafts.where("designId").equals("d2").toArray())[0];
+    expect(moon.title).toBe("Night Sky Tee");
+    expect(moon.tags).toEqual(["moon", "night"]);
+    expect(moon.priceCents).toBe(1999);
   });
 
   it("writes unique copy per listing via items and pins untouched prices", async () => {

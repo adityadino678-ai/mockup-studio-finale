@@ -40,6 +40,15 @@ interface ColorsTabProps {
 /** Printify's own limit on enabled variants per product. */
 const MAX_VARIANTS = 100;
 
+/** "White, Cream and Navy" / "White and 12 more" - never the whole list. */
+function joinShort(names: string[], max = 3): string {
+  if (names.length <= max) {
+    if (names.length === 1) return names[0];
+    return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  }
+  return `${names.slice(0, max).join(", ")} and ${names.length - max} more`;
+}
+
 export function ColorsTab({
   session,
   update,
@@ -213,6 +222,15 @@ export function ColorsTab({
 
   const problems = React.useMemo(() => inkProblems(session, hexFor), [session, hexFor]);
   const invisible = problems.filter((p) => p.severity === "none");
+
+  // --- the ink split readout -------------------------------------------------
+  // The whole point of the two panels: which colours the black-ink designs
+  // get, which the white-ink designs get, and which the no-ink designs get.
+  const inkColors = session.rows.ink?.colors ?? [];
+  const blackInkColors = session.rows.ink?.blackInkColors ?? [];
+  const blackInkList = inkColors.filter((c) => blackInkColors.includes(c));
+  const whiteInkList = inkColors.filter((c) => !blackInkColors.includes(c));
+  const plainColors = session.rows.plain?.colors ?? [];
 
   // --- the product picker ----------------------------------------------------
   const pickBlueprint = (id: number) => {
@@ -420,6 +438,16 @@ export function ColorsTab({
           </Card>
 
           {/* --- colours, one panel per row --------------------------------- */}
+          <div className="space-y-1">
+            <h2 className="text-[14px] font-semibold text-ink">Which colours each row prints</h2>
+            <p className="text-[12px] text-ink-muted">
+              The two panels are independent. A design in the <strong>No ink variants</strong> row
+              prints only the colours picked below it; a design in the <strong>Has ink
+              variants</strong> row prints only the colours picked in its own panel, split between
+              black and white ink. A colour may be in both panels — each row prints it with its own
+              artwork.
+            </p>
+          </div>
           {ROWS.map((row) => {
             const state = session.rows[row];
             const swatchCount = rowVariantCount(row);
@@ -501,8 +529,16 @@ export function ColorsTab({
                       <Separator />
                       <div className="space-y-2">
                         <p className="text-[12px] text-ink-muted">
-                          The colours marked <strong>black</strong> print with the black ink; the
-                          rest use the white ink.
+                          Switch each colour between <strong>Black ink</strong> and{" "}
+                          <strong>White ink</strong>. The colour marked black prints with the black
+                          ink; every other colour here prints with the white ink.
+                        </p>
+                        <p className="text-[12px] font-medium text-ink">
+                          Black ink: {blackInkList.length} colour
+                          {blackInkList.length === 1 ? "" : "s"}
+                          {blackInkList.length > 0 ? ` (${joinShort(blackInkList)})` : ""} · White
+                          ink: {whiteInkList.length} colour{whiteInkList.length === 1 ? "" : "s"}
+                          {whiteInkList.length > 0 ? ` (${joinShort(whiteInkList)})` : ""}
                         </p>
                         <div className="flex flex-wrap gap-1.5">
                           {(state?.colors ?? []).map((name) => {
@@ -529,10 +565,22 @@ export function ColorsTab({
                                 <Button
                                   size="sm"
                                   variant={isBlack ? "default" : "outline"}
-                                  onClick={() => setInk(name, isBlack ? "white" : "black")}
-                                  className="h-6 rounded-full px-2 text-[10px]"
+                                  aria-pressed={isBlack}
+                                  aria-label={`${name}: print with black ink`}
+                                  onClick={() => setInk(name, "black")}
+                                  className="h-6 rounded-l-full px-2 text-[10px]"
                                 >
-                                  {isBlack ? "Black ink" : "White ink"}
+                                  Black ink
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant={isBlack ? "outline" : "default"}
+                                  aria-pressed={!isBlack}
+                                  aria-label={`${name}: print with white ink`}
+                                  onClick={() => setInk(name, "white")}
+                                  className="-ml-px h-6 rounded-r-full px-2 text-[10px]"
+                                >
+                                  White ink
                                 </Button>
                               </div>
                             );
@@ -590,6 +638,55 @@ export function ColorsTab({
               </Card>
             );
           })}
+
+          {/* --- the live split readout ------------------------------------- */}
+          <Card>
+            <CardContent className="space-y-1.5 p-4">
+              <h2 className="text-[14px] font-semibold text-ink">The split, at a glance</h2>
+              <p className="text-[12px] text-ink-muted">
+                No ink variants row →{" "}
+                <strong>
+                  {plainColors.length} colour{plainColors.length === 1 ? "" : "s"}
+                </strong>
+                {plainColors.length > 0 ? ` (${joinShort(plainColors)})` : " — pick colours in its panel"}
+                . Has ink variants row →{" "}
+                <strong>
+                  {inkColors.length} colour{inkColors.length === 1 ? "" : "s"}
+                </strong>
+                {inkColors.length > 0 ? ` (${joinShort(inkColors)})` : " — pick colours in its panel"}
+                , of which {blackInkList.length} use black ink and {whiteInkList.length} use white
+                ink.
+              </p>
+              {inkColors.length > 0 && whiteInkList.length === 0 && (
+                <p className="flex items-start gap-1.5 text-[12px] text-warning">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Every ink colour is on black ink, so the white-ink design would print on
+                    nothing. Switch at least one colour to White ink.
+                  </span>
+                </p>
+              )}
+              {inkColors.length > 0 && blackInkList.length === 0 && (
+                <p className="flex items-start gap-1.5 text-[12px] text-warning">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Every ink colour is on white ink, so the black-ink design would print on
+                    nothing. Switch at least one colour to Black ink.
+                  </span>
+                </p>
+              )}
+              {plainColors.length > 0 && inkColors.length > 0 && (
+                <p className="text-[11px] text-ink-subtle">
+                  Colours in both panels: {plainColors.filter((c) => inkColors.includes(c)).length}
+                  {(() => {
+                    const both = plainColors.filter((c) => inkColors.includes(c));
+                    return both.length > 0 ? ` (${joinShort(both)})` : "";
+                  })()}
+                  . That is fine — each row prints it with its own artwork.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
             <p className="text-[12px] text-ink-muted">

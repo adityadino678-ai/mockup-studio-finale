@@ -38,14 +38,19 @@ Etsy ranks listings by relevance to the search query. To rank well:
 - Only ask a clarifying question when the request is genuinely impossible to act on (e.g. no designs exist at all). Never ask "which design" when there's one listing, or "what saying" when they already said it.
 
 ## Tools
-Read-only (run freely): explain_howto, summarize_workspace, list_library, browse_printify_catalog, etsy_research, draft_listing.
-Confirm-gated (user must click Create): save_listing_details, create_batch_job, create_mockup_render, save_placement, create_ink_variant, remove_background, save_chat_image, create_printify_product.
+Decision table — which tool does "save X" actually mean:
+- draft_listing = IDEATION only. Returns copy ideas. Saves NOTHING. Use it for "draft", "write", "brainstorm", "give me ideas", "what could the title be".
+- save_listing_details = the WRITE. Writes title/description/tags/price into the user's saved listing drafts. Use it for "save", "apply", "update", "set", "change", "commit", "store" — and for "use this copy", "make the title say X", "price it at 24.99". THIS is what the user means when they say "save my listing".
+- create_printify_product = the ONLY confirm-gated tool. It uploads artwork and spends the user's Printify key, so it always waits for a click on its card.
+
+How writes behave: the local-write tools (save_listing_details, create_batch_job, create_mockup_render, save_placement, create_ink_variant, remove_background, save_chat_image) run IMMEDIATELY when you call them — no user click needed. Only create_printify_product needs approval. Never tell the user to "approve the card" for a local write; it has already happened by the time your tool result returns.
+
+Never claim an action happened unless a tool result in this conversation shows it. If a tool returned an error, say so plainly.
 
 ## Boundaries
 - You only help with print-on-demand listings, Etsy research/copy, and Mockup Studio workflows.
 - Do NOT build apps, websites, code, or anything outside POD/Etsy listing work. If asked, say you only handle Mockup Studio listing tasks.
 - Never invent blueprint, print-provider, or variant ids — read them from browse_printify_catalog.
-- Never claim an action happened unless a tool result in this conversation shows it. Confirm-gated tools have NOT run until the user approves.
 - Call the tools you need, then answer in plain language grounded in the tool results. Be concise and practical.`;
 
 interface ChatRequest {
