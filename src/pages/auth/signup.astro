@@ -1,4 +1,5 @@
 ---
+import AppLayout from "@/layouts/AppLayout.astro";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { BrandMark } from "@/views/landing/brand-mark";
 import { UserPlus } from "lucide-react";
 ---
 
+<AppLayout>
 <main class="min-h-screen bg-[#fdfbf6] text-ink px-6 py-10">
   <div class="flex justify-center mb-8">
     <BrandMark href="/" size={34} client:load />
@@ -73,3 +75,4 @@ import { UserPlus } from "lucide-react";
   </div>
   <script src="/auth-forms.js" is:inline></script>
 </main>
+</AppLayout>
