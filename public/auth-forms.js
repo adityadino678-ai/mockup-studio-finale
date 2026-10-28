@@ -21,10 +21,15 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (!res.ok || (apiPath === "/api/auth/signin" ? !data.accessToken : !data.user)) {
-            message.textContent = data.message || "Failed";
+        .then(function (res) {
+          return res.json().then(function (data) {
+            return { ok: res.ok, status: res.status, data: data };
+          });
+        })
+        .then(function (result) {
+          var data = result.data;
+          if (!result.ok || (apiPath === "/api/auth/signin" ? !data.accessToken : !data.user)) {
+            message.textContent = data.message || "Failed (" + result.status + ")";
             message.style.color = "var(--color-danger)";
             btn.textContent = originalText;
             btn.disabled = false;
