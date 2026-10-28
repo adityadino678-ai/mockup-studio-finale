@@ -27,6 +27,13 @@ export async function requireAuth(
   }
 
   // Verify the token with Supabase
+  if (!supabase) {
+    return json(
+      { error: "not_configured", message: "Supabase not configured" },
+      503,
+    );
+  }
+
   const { data, error } = await supabase.auth.getUser(token);
 
   if (error || !data.user) {
