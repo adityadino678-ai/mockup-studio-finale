@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge, Card, CardContent, Separator } from "@/components/ui/card";
@@ -19,13 +18,13 @@ import {
   categoriesOfIndex,
   filterBlueprintIndex,
 } from "@/lib/printify/catalog-client";
-import { describeInkContrast, inkContrast, knowsColourName, suggestInk } from "@/lib/printify/colors";
+import { describeInkContrast, inkContrast, suggestInk } from "@/lib/printify/colors";
 import { inkProblems } from "@/lib/printify/studio-session";
 import { ROW_HINTS, ROW_LABELS, ROWS } from "@/lib/printify/studio-session";
 import { cn } from "@/lib/utils";
 import type { StudioCatalogState } from "@/views/printify-studio-page";
 import type { StudioRowId, StudioSession } from "@/types/domain";
-import { AlertTriangle, Package, Palette, Search, Sparkles } from "lucide-react";
+import { AlertTriangle, Package, Palette, Search } from "lucide-react";
 
 interface ColorsTabProps {
   session: StudioSession;
@@ -185,49 +184,6 @@ export function ColorsTab({
       return { blackInkColors: [...black] };
     });
   };
-
-  /** Marks the dark colours for white ink and the light ones for black ink. */
-  const autoAssign = () => {
-    const black: string[] = [];
-    const mid: string[] = [];
-    const unknown: string[] = [];
-    for (const name of session.rows.ink?.colors ?? []) {
-      // A colour we know nothing about is left alone: guessing would be
-      // guessing twice, on a colour we cannot even see.
-      if (!isKnownColour(name)) {
-        unknown.push(name);
-        continue;
-      }
-      const choice = suggestInk(hexFor(name));
-      if (choice === "ambiguous") mid.push(name);
-      else if (choice === "black") black.push(name);
-    }
-    updateRow("ink", { blackInkColors: black });
-    const notes: string[] = [];
-    if (mid.length) notes.push(`${mid.length} mid-tone colour(s) need a look`);
-    if (unknown.length) notes.push(`${unknown.length} colour(s) are not in the colour table`);
-    toast.success(
-      notes.length
-        ? `Assigned ${black.length} colour(s) to black ink. ${notes.join(" and ")}.`
-        : `Assigned ${black.length} colour(s) to black ink.`,
-    );
-  };
-
-  /** True when the colour's real hex is known - from a product or the table. */
-  const isKnownColour = React.useCallback(
-    (name: string) => realHexes.has(name) || knowsColourName(name),
-    [realHexes],
-  );
-
-  const unknownColors = React.useMemo(
-    () => (session.rows.ink?.colors ?? []).filter((name) => !isKnownColour(name)),
-    [session.rows.ink, isKnownColour],
-  );
-
-  const midTones = React.useMemo(
-    () => (session.rows.ink?.colors ?? []).filter((name) => suggestInk(hexFor(name)) === "ambiguous"),
-    [session.rows.ink, hexFor],
-  );
 
   const problems = React.useMemo(() => inkProblems(session, hexFor), [session, hexFor]);
   const invisible = problems.filter((p) => p.severity === "none");
@@ -474,11 +430,6 @@ export function ColorsTab({
                       <p className="text-[11px] text-ink-muted">{ROW_HINTS[row]}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {row === "ink" && (
-                        <Button size="sm" variant="outline" onClick={autoAssign}>
-                          <Sparkles className="h-3.5 w-3.5" /> Auto-assign
-                        </Button>
-                      )}
                       <Badge variant={overCap(row) ? "danger" : "muted"}>
                         {swatchCount} variant{swatchCount === 1 ? "" : "s"}
                       </Badge>
@@ -618,27 +569,6 @@ export function ColorsTab({
                               </p>
                             ))}
                           </div>
-                        )}
-                        {unknownColors.length > 0 && (
-                          <p className="flex items-start gap-1.5 text-[12px] text-warning">
-                            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                            <span>
-                              {unknownColors.length} colour{unknownColors.length === 1 ? "" : "s"} (
-                              {unknownColors.slice(0, 4).join(", ")}
-                              {unknownColors.length > 4 ? ", …" : ""}) {unknownColors.length === 1 ? "is" : "are"}{" "}
-                              not in the colour table, so the ink cannot be suggested — check them by
-                              hand.
-                            </span>
-                          </p>
-                        )}
-                        {midTones.length > 0 && (
-                          <p className="flex items-start gap-1.5 text-[12px] text-warning">
-                            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                            {midTones.length} mid-tone colour{midTones.length === 1 ? "" : "s"} (
-                            {midTones.slice(0, 4).join(", ")}
-                            {midTones.length > 4 ? ", …" : ""}) — black and white ink both risk
-                            disappearing on these. Check them before creating.
-                          </p>
                         )}
                       </div>
                     </>
