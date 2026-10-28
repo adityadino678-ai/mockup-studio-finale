@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
+import { BrandMark } from "./brand-mark";
 import { fonts } from "./landing-page";
 
 const STORAGE_KEY = "mockup-studio:onboarding";
@@ -55,6 +56,7 @@ export function OnboardingWizard() {
     });
   };
 
+  const reduceMotion = useReducedMotion();
   const current = STEPS[stepIndex];
   const last = stepIndex === STEPS.length - 1;
 
@@ -64,7 +66,13 @@ export function OnboardingWizard() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#fdfbf6] px-6 text-center">
         <div className="max-w-md">
-          <div className="w-16 h-16 rounded-full bg-forest flex items-center justify-center mx-auto mb-6">
+          <div className="flex items-center justify-between max-w-md mx-auto pt-8 pb-2">
+            <BrandMark href="/" />
+            <a href="/" className="text-xs text-ink-muted underline underline-offset-2 hover:text-ink">
+              Back to home
+            </a>
+          </div>
+        <div className="w-16 h-16 rounded-full bg-forest flex items-center justify-center mx-auto mb-6">
             <span className="text-white font-mono text-2xl">✓</span>
           </div>
           <h2 className="text-2xl font-heading text-ink mb-4" style={{ fontFamily: fonts.heading }}>
@@ -74,12 +82,12 @@ export function OnboardingWizard() {
             Your onboarding is complete. Jump into the studio and start creating.
           </p>
           <div className="flex gap-3 justify-center">
-            <button
-              onClick={() => (window.location.href = "/printify-studio")}
+            <a
+              href="/printify-studio"
               className="px-5 py-2 rounded-md bg-forest text-white text-sm font-medium hover:bg-forest-deep"
             >
               Open Studio
-            </button>
+            </a>
             <button
               onClick={() => {
                 setProgress({ done: [], skipped: false });
@@ -98,6 +106,12 @@ export function OnboardingWizard() {
 
   return (
     <div className="min-h-screen bg-[#fdfbf6] text-ink px-6">
+      <div className="flex items-center justify-between max-w-3xl mx-auto pt-8 pb-2">
+        <BrandMark href="/" />
+        <a href="/" className="text-xs text-ink-muted underline underline-offset-2 hover:text-ink">
+          Back to home
+        </a>
+      </div>
       <div className="max-w-3xl mx-auto py-12">
         {/* Progress */}
         <div className="mb-8">
@@ -114,9 +128,9 @@ export function OnboardingWizard() {
 
         {/* Card */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
+          initial={reduceMotion ? false : { opacity: 0, x: 20 }}
+          animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
+          exit={reduceMotion ? undefined : { opacity: 0, x: -20 }}
           className="rounded-2xl border border-border-strong bg-surface shadow-card p-10"
         >
           <div className="flex items-center justify-between mb-8">

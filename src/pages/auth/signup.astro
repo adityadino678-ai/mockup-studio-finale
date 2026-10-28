@@ -1,18 +1,20 @@
 ---
-import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/views/landing/brand-mark";
 import { UserPlus } from "lucide-react";
 ---
 
-<main class="mx-auto max-w-md p-8">
-  <PageHeader
-    title="Create account"
-    description="Join Mockup Studio. Sign up with email to sync your designs, mockups, and listings to Supabase."
-  />
+<main class="min-h-screen bg-[#fdfbf6] text-ink px-6 py-10">
+  <div class="flex justify-center mb-8">
+    <BrandMark href="/" size={34} client:load />
+  </div>
 
-  <Card className="mt-6">
+  <h1 class="text-4xl font-heading text-ink text-center mb-2" style="font-family:'Patrick Hand',cursive">Create your account</h1>
+  <p class="text-lg text-ink-muted text-center mb-8" style="font-family:'Caveat',cursive">Join Mockup Studio — your art stays on your device.</p>
+
+  <Card className="mt-6 max-w-md mx-auto shadow-card border-border-strong bg-white">
     <CardHeader>
       <CardTitle className="flex items-center gap-2">
         <UserPlus className="h-4 w-4 text-forest" /> Create account
@@ -62,9 +64,12 @@ import { UserPlus } from "lucide-react";
 
   <p class="mt-6 text-[13px] text-ink-muted text-center">
     Already have an account?{" "}
-    <a href="/auth/signin" class="text-forest underline font-medium">
+    <a href="/auth/signin" class="text-forest underline underline-offset-2 font-medium">
       Sign in &rarr;
     </a>
   </p>
+  <div class="mt-6 text-center">
+    <a href="/" class="inline-block text-[13px] text-ink-muted underline underline-offset-2 hover:text-ink">← Back to home</a>
+  </div>
   <script src="/auth-forms.js" is:inline></script>
 </main>

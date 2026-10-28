@@ -3,6 +3,7 @@
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { BrandMark } from "./brand-mark";
 
 export const fonts = {
   heading: '"Patrick Hand", cursive',
@@ -13,7 +14,7 @@ export const fonts = {
 /* ===================== HERO ===================== */
 export function HeroSection() {
   return (
-    <section id="hero" className="relative h-screen flex flex-col items-center justify-center px-6 overflow-hidden">
+    <section id="hero" className="relative min-h-screen flex flex-col items-center justify-center px-6 overflow-hidden pt-14">
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <motion.div
           className="absolute top-1/4 left-1/2 w-[600px] h-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-sage-soft/60 blur-[120px]"
@@ -43,10 +44,10 @@ export function HeroSection() {
           listing — and publish with one click.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-center">
-          <Button size="lg" className="w-full sm:w-auto">
+          <Button size="lg" href="/auth/signup">
             Start Free →
           </Button>
-          <Button variant="outline" size="lg" className="w-full sm:w-auto">
+          <Button variant="outline" size="lg" href="#how">
             See how it works
           </Button>
         </div>
@@ -339,7 +340,7 @@ function PricingCard({ plan }: { plan: { name: string; price: string; desc: stri
       <p className="mt-4 font-body text-sm text-ink-muted leading-relaxed" style={{ fontFamily: fonts.body }}>
         {plan.desc}
       </p>
-      <Button variant={plan.highlight ? "default" : "outline"} className="w-full mt-6">
+      <Button variant={plan.highlight ? "default" : "outline"} className="w-full mt-6" href="/auth/signup">
         {plan.name === "Free" ? "Start free" : "Choose"}
       </Button>
     </motion.div>
@@ -424,10 +425,10 @@ export function CTASection() {
             Start free. No credit card. Your art stays on your device.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Button size="lg" onClick={() => (window.location.href = "/auth/signup")}>
+            <Button size="lg" href="/auth/signup">
               Start Free →
             </Button>
-            <Button variant="outline" size="lg">
+            <Button variant="outline" size="lg" href="/printify-studio">
               Browse the studio
             </Button>
           </div>
@@ -438,9 +439,28 @@ export function CTASection() {
 }
 
 /* ===================== LANDING PAGE ===================== */
+function Header() {
+  return (
+    <header className="sticky top-0 z-50 w-full border-b border-border-subtle bg-[#fdfbf6]/85 backdrop-blur-sm">
+      <div className="mx-auto max-w-5xl px-6 h-14 flex items-center justify-between">
+        <BrandMark href="/" size={26} />
+        <div className="flex items-center gap-2">
+          <a href="/auth/signin" className="text-sm font-medium text-ink hover:text-forest transition-colors no-underline px-3 py-2">
+            Sign in
+          </a>
+          <a href="/auth/signup" className="rounded-full bg-forest text-white text-sm font-medium px-4 py-2 hover:bg-forest-deep transition-colors no-underline shadow-subtle">
+            Start free
+          </a>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 export function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#fdfbf6] text-ink overflow-x-hidden">
+    <div className="min-h-screen bg-[#fdfbf6] text-ink overflow-x-hidden" style={{ scrollBehavior: "smooth" }}>
+      <Header />
       <HeroSection />
       <ProblemSolutionSection />
       <HowItWorksSection />
@@ -459,19 +479,23 @@ export default LandingPage;
 type ButtonSize = "sm" | "default" | "lg";
 type ButtonVariant = "default" | "outline";
 
+type ButtonProps = {
+  className?: string;
+  size?: ButtonSize;
+  variant?: ButtonVariant;
+  href?: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+};
+
 function Button({
   className,
   size = "default",
   variant = "default",
+  href,
   onClick,
   children,
-}: {
-  className?: string;
-  size?: ButtonSize;
-  variant?: ButtonVariant;
-  onClick?: () => void;
-  children: React.ReactNode;
-}) {
+}: ButtonProps) {
   const base =
     "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 cursor-pointer select-none whitespace-nowrap";
   const variants: Record<ButtonVariant, string> = {
@@ -483,9 +507,21 @@ function Button({
     default: "h-9 px-4",
     lg: "h-10 px-5",
   };
+  const classes = cn(base, variants[variant], sizes[size], className);
+  if (href) {
+    return (
+      <a
+        href={href}
+        className={cn(classes, "cursor-pointer")}
+        onClick={onClick}
+      >
+        {children}
+      </a>
+    );
+  }
   return (
     <button
-      className={cn(base, variants[variant], sizes[size], className)}
+      className={classes}
       onClick={onClick}
     >
       {children}
