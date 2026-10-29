@@ -102,11 +102,27 @@ export async function createStudioProduct(
       plan.colourIndex,
       item.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
     );
+    console.debug("[studio-create] item.groups:", item.groups.map(g => ({
+      ink: g.ink,
+      colors: g.colors,
+      assetId: g.assetId,
+      label: g.label,
+    })));
+    console.debug("[studio-create] partition.groups:", partition.groups.map(g => ({
+      ink: g.ink,
+      colors: g.colors,
+      variantCount: g.variantIds.length,
+      variantIds: g.variantIds,
+    })));
     const enabled = resolveVariantIds(
       plan.colourIndex,
       item.groups.flatMap((group) => group.colors),
       session.sizes,
     );
+    console.debug("[studio-create] enabled variant count:", enabled.length, "all enabled:", enabled);
+    if (partition.groups.some((g) => g.variantIds.length === 0 && g.colors.length > 0)) {
+      console.warn("[studio-create] WARNING: groups with colors but no variants:", partition.groups.filter((g) => g.variantIds.length === 0 && g.colors.length > 0).map((g) => ({ ink: g.ink, colors: g.colors })));
+    }
     if (enabled.length === 0) {
       return {
         designId: item.designId,

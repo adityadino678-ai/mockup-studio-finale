@@ -234,12 +234,12 @@ export async function loadSession(): Promise<StudioSession> {
   for (const row of ROWS) {
     const rowState = stored.rows?.[row];
     if (!rowState || typeof rowState !== "object") continue;
-    rows[row] = {
-      colors: stringArray(rowState.colors),
-      blackInkColors: stringArray(rowState.blackInkColors).filter((c) =>
-        stringArray(rowState.colors).includes(c),
-      ),
-    };
+    const colors = stringArray(rowState.colors);
+    const blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
+    rows[row] = { colors, blackInkColors: blackInk };
+    if (colors.length > 0 && blackInk.length === colors.length && row === "ink") {
+      console.warn("[studio-session] loadSession: all ink colours are marked black ink — white ink will get nothing. Check stored blackInkColors in IndexedDB.");
+    }
   }
 
   const placements: Record<string, StudioPlacement> = {};
