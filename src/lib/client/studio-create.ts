@@ -144,10 +144,12 @@ export async function createStudioProduct(
       filename: string;
       placement: { x: number; y: number; scale: number; angle: number };
     }> = [];
+    const enabledSet = new Set(enabled);
     for (let index = 0; index < partition.groups.length; index++) {
       const group = partition.groups[index];
       const artwork = item.groups[index];
-      if (!artwork || group.variantIds.length === 0) continue;
+      const activeVariantIds = group.variantIds.filter((id) => enabledSet.has(id));
+      if (!artwork || activeVariantIds.length === 0) continue;
       const blob = await getAssetBlob(artwork.assetId);
       if (!blob) throw new Error(`Could not read "${item.designName}" from storage`);
       const longEdge = Math.max(context.areaWidth ?? 3000, context.areaHeight ?? 3000);
@@ -155,7 +157,7 @@ export async function createStudioProduct(
       const placement = placementFor(session, item.designId);
       artworks.push({
         printAreaId: placement.position,
-        variantIds: group.variantIds,
+        variantIds: activeVariantIds,
         base64,
         filename: `${item.designName}-${artwork.ink}.png`,
         placement: clampPlacement(placement),

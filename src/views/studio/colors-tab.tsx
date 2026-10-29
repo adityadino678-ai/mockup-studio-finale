@@ -18,7 +18,7 @@ import {
   categoriesOfIndex,
   filterBlueprintIndex,
 } from "@/lib/printify/catalog-client";
-import { describeInkContrast, inkContrast, suggestInk } from "@/lib/printify/colors";
+import { describeInkContrast, inkContrast, lightness, suggestInk } from "@/lib/printify/colors";
 import { inkProblems } from "@/lib/printify/studio-session";
 import { ROW_HINTS, ROW_LABELS, ROWS } from "@/lib/printify/studio-session";
 import { cn } from "@/lib/utils";
@@ -145,10 +145,23 @@ export function ColorsTab({
   const toggleColor = (row: StudioRowId, name: string) => {
     updateRow(row, (prev: StudioSession) => {
       const current = prev.rows[row]?.colors ?? [];
-      const next = current.includes(name) ? current.filter((c) => c !== name) : [...current, name];
+      const isSelecting = !current.includes(name);
+      const next = isSelecting ? [...current, name] : current.filter((c) => c !== name);
+
+      let nextBlack = (prev.rows[row]?.blackInkColors ?? []).filter((c: string) => next.includes(c));
+      if (row === "ink" && isSelecting) {
+        // Smart auto-assignment on click:
+        // Light garments (lightness > 0.5) automatically get Black ink.
+        // Dark garments (lightness <= 0.5) automatically get White ink.
+        const hex = hexFor(name);
+        if (lightness(hex) > 0.5) {
+          nextBlack = [...new Set([...nextBlack, name])];
+        }
+      }
+
       return {
         colors: next,
-        blackInkColors: (prev.rows[row]?.blackInkColors ?? []).filter((c: string) => next.includes(c)),
+        blackInkColors: nextBlack,
       };
     });
   };

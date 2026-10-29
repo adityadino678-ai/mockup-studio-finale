@@ -21,7 +21,7 @@ import type {
   StudioSession,
 } from "@/types/domain";
 import { DEFAULT_PLACEMENT } from "@/lib/printify/print-areas";
-import { describeInkContrast, inkContrast } from "@/lib/printify/colors";
+import { describeInkContrast, hexForColourName, inkContrast, lightness } from "@/lib/printify/colors";
 
 export const SESSION_KEY = "printifyStudio:session";
 export const RESULTS_KEY = "printifyStudio:results";
@@ -235,12 +235,25 @@ export async function loadSession(): Promise<StudioSession> {
     const rowState = stored.rows?.[row];
     if (!rowState || typeof rowState !== "object") continue;
     const colors = stringArray(rowState.colors);
-    const blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
-    rows[row] = { colors, blackInkColors: blackInk };
-    if (colors.length > 0 && blackInk.length === colors.length && row === "ink") {
-      console.warn("[studio-session] loadSession: all ink colours are marked black ink — white ink will get nothing. This is likely stale state from before the ink split fix. Clearing blackInkColors so all ink colours default to white ink.");
-      rows[row] = { colors, blackInkColors: [] };
+    let blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
+    if (colors.length > 0 && row === "ink") {
+      const allBlack = blackInk.length === colors.length;
+      const allWhite = blackInk.length === 0;
+      // If all colors are stuck on black OR all on white (often stale state or previous unassigned state),
+      // auto-rebalance based on garment lightness so light shirts get Black ink and dark shirts get White ink.
+      if (colors.length > 1 && (allBlack || allWhite)) {
+        const smartBlack = colors.filter((c) => lightness(hexForColourName(c)) > 0.5);
+        if (smartBlack.length !== blackInk.length) {
+          console.info("[studio-session] loadSession: auto-rebalanced ink colors by garment lightness:", {
+            total: colors.length,
+            blackInk: smartBlack,
+            whiteInk: colors.filter((c) => !smartBlack.includes(c)),
+          });
+          blackInk = smartBlack;
+        }
+      }
     }
+    rows[row] = { colors, blackInkColors: blackInk };
   }
 
   const placements: Record<string, StudioPlacement> = {};
