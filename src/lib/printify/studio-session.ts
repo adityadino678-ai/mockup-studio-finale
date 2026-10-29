@@ -238,7 +238,8 @@ export async function loadSession(): Promise<StudioSession> {
     const blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
     rows[row] = { colors, blackInkColors: blackInk };
     if (colors.length > 0 && blackInk.length === colors.length && row === "ink") {
-      console.warn("[studio-session] loadSession: all ink colours are marked black ink — white ink will get nothing. Check stored blackInkColors in IndexedDB.");
+      console.warn("[studio-session] loadSession: all ink colours are marked black ink — white ink will get nothing. This is likely stale state from before the ink split fix. Clearing blackInkColors so all ink colours default to white ink.");
+      rows[row] = { colors, blackInkColors: [] };
     }
   }
 

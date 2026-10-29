@@ -177,6 +177,7 @@ export function ColorsTab({
   };
 
   const setInk = (name: string, ink: "black" | "white") => {
+    console.debug("[colors-tab] setInk BEFORE:", { name, ink, blackInkColors: session.rows.ink?.blackInkColors, inkColors: session.rows.ink?.colors });
     updateRow("ink", (prev: StudioSession) => {
       const inkColors = [...(prev.rows.ink?.colors ?? [])];
       const black = new Set(prev.rows.ink?.blackInkColors ?? []);
@@ -184,10 +185,14 @@ export function ColorsTab({
         black.add(name);
         // Ensure the color is in the ink panel so loadSession doesn't drop it
         if (!inkColors.includes(name)) inkColors.push(name);
-        return { blackInkColors: [...black], colors: inkColors };
+        const result = { blackInkColors: [...black], colors: inkColors };
+        console.debug("[colors-tab] setInk AFTER (black):", result);
+        return result;
       } else {
         black.delete(name);
-        return { blackInkColors: [...black] };
+        const result = { blackInkColors: [...black] };
+        console.debug("[colors-tab] setInk AFTER (white):", result);
+        return result;
       }
     });
   };
