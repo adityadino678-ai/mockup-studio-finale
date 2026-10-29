@@ -135,10 +135,10 @@ export interface Partition {
 /**
  * Builds the groups that become `print_areas`.
  *
- * `groups` is ordered: earlier groups claim their variants first, and the
- * LAST group receives everything nobody else claimed. That mirrors what
- * Printify does on its own - but doing it here means the partition we send is
- * the partition we meant, and the artwork cannot land on the wrong colour.
+ * `groups` is ordered: earlier groups claim their variants first.
+ * Each group receives EXACTLY the variant IDs for its colours - no absorber.
+ * Unclaimed catalogue variants are left out (they are not in the user's selection
+ * and will be disabled via `is_enabled: false` in the product payload).
  *
  * Groups stay in the output even when they claim no variants, so the caller
  * can zip them with their artwork by index. An empty group is left out of the
@@ -167,31 +167,9 @@ export function buildPartition(
     });
   }
 
+  // NO absorber: unclaimed variants are catalogue extras not in user's selection.
+  // They will be disabled via `is_enabled: false` in the payload.
   const unclaimed = index.allVariantIds.filter((id) => !claimed.has(id));
-  // The absorber takes the catalogue extras that no group named. It must be a
-  // SAFE group - one whose artwork is harmless if ever enabled on a garment
-  // the user never chose. A "main" group prints the design's own artwork, so
-  // it is always safe. A "black" ink group is next: black ink is at least
-  // VISIBLE on a light garment. A "white" ink group is the worst possible
-  // absorber (white ink on a light garment is invisible), so it is only ever
-  // the last resort - the fallback when a plan carries white ink and nothing
-  // else. Note an ink-ticked design's plan has no main group at all (the two
-  // panels are independent now), which is exactly why the black preference
-  // matters.
-  const mainWithVariants = built.find(
-    (g) => g.ink === "main" && g.variantIds.length > 0,
-  );
-  const blackWithVariants = built.find(
-    (g) => g.ink === "black" && g.variantIds.length > 0,
-  );
-  const lastWithVariants = built.filter((g) => g.variantIds.length > 0).pop();
-  const absorber = mainWithVariants ?? blackWithVariants ?? lastWithVariants;
-  if (absorber && unclaimed.length > 0) {
-    absorber.variantIds = [...absorber.variantIds, ...unclaimed].sort(
-      (a, b) => a - b,
-    );
-  }
-
   const covered = built.flatMap((g) => g.variantIds);
   const unique = new Set(covered);
   return {

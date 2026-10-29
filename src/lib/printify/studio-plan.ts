@@ -27,7 +27,6 @@ import {
   type InkArtworkProblem,
   type ProductColourGroups,
 } from "./design-colours";
-import { assertCompletePartition } from "./print-areas";
 import { buildCatalogueIndex, buildPartition, resolveVariantIds } from "./variants";
 import type { CatalogVariant, ColourIndex } from "./types";
 import type { Design, StudioSession } from "@/types/domain";
@@ -116,9 +115,8 @@ export function buildStudioPlan(
     handled.add(white.id);
 
     const pairedGroups: StudioDesignGroup[] = [];
-    // The absorber is the last group that holds variants, so the group that
-    // can safely swallow the catalogue's hidden extras is the last non-empty
-    // one. Both groups are complete by construction here.
+    // Each paired design uses its main artwork as the ink artwork.
+    // Black half covers black-ink colours, white half covers white-ink colours.
     if (split.black.length > 0) {
       pairedGroups.push({
         ink: "main",
@@ -130,7 +128,7 @@ export function buildStudioPlan(
     }
     if (split.white.length > 0) {
       pairedGroups.push({
-        ink: "white",
+        ink: "main",
         assetId: mainAssetId(white),
         colors: split.white,
         label: `White ink · ${white.name}`,
@@ -243,26 +241,18 @@ export function planVariantCounts(plan: StudioPlan, sizes: string[]): Map<string
 }
 
 /**
- * The API-level problems: an incomplete partition, the variant cap, or no
- * matching variants. These are the safety net; the ink artwork problems above
- * are the ones that say WHY a design cannot serve a colour.
+ * The API-level problems: the variant cap, or no matching variants.
+ * The ink artwork problems above are the ones that say WHY a design cannot serve a colour.
+ * Partition completeness is NOT required - we only cover user-selected colours.
+ * Catalogue extras are left unclaimed and disabled via is_enabled: false.
  */
 export function studioPartitionProblems(plan: StudioPlan, session: StudioSession): string[] {
   const found: string[] = [];
   for (const item of plan.items) {
-    const partition = buildPartition(
+    buildPartition(
       plan.colourIndex,
       item.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
     );
-    const issues = assertCompletePartition(
-      partition.groups.map((group, index) => ({
-        imageId: item.groups[index]?.assetId ?? "",
-        variantIds: group.variantIds,
-        colors: group.colors,
-      })),
-      plan.colourIndex.allVariantIds,
-    );
-    for (const issue of issues) found.push(`${item.designName}: ${issue.detail}`);
 
     const enabled = planItemVariantIds(plan, item, session.sizes);
     if (enabled.length > MAX_STUDIO_VARIANTS) {
@@ -274,7 +264,7 @@ export function studioPartitionProblems(plan: StudioPlan, session: StudioSession
       found.push(`${item.designName}: no variants match the selected colours and sizes.`);
     }
 
-    // Warn about groups that have colors but no matching variants
+    // Warn about groups that have colors but no matching variants in selected sizes
     const coverageWarnings = checkGroupVariantCoverage(plan, item, session.sizes);
     for (const warning of coverageWarnings) {
       const colourList = warning.colors.slice(0, 5).join(", ") + (warning.colors.length > 5 ? ", …" : "");

@@ -195,6 +195,10 @@ export function summariseColourGroups(groups: ProductColourGroups): ColourGroupS
  * An empty colour set is the caller's problem to report, not to paper over:
  * `studioPlanProblems` blocks the batch when a design's own panel is empty,
  * so nothing is ever created half-right.
+ *
+ * NO FALLBACK: if an ink-ticked design lacks black/white artwork, those
+ * colours simply do NOT print - they are reported in `missing` and the
+ * user is warned. The main artwork is NEVER used for ink panel colours.
  */
 export function planDesignColours(
   artwork: DesignInkArtwork,
@@ -212,31 +216,35 @@ export function planDesignColours(
     };
   }
 
-  // Ticked: the ink panel's colours, and never the plain panel's.
-  const useBlack = artwork.hasBlackInk && black.length > 0;
-  const useWhite = artwork.hasWhiteInk && white.length > 0;
-
-  // Any ink colour this design has no artwork for prints with the MAIN
-  // artwork - which is what the user is warned about, not silently given.
-  const mainColors = unique([
-    ...(useBlack ? [] : black),
-    ...(useWhite ? [] : white),
-  ]);
-  const colors = unique([...black, ...white]);
-
+  // TICKED: the ink panel's colours ONLY, and never the plain panel's.
+  // Each ink group is created ONLY when BOTH the artwork exists AND
+  // the user selected colours for that ink. No fallback to main artwork.
   const planGroups: Array<{ ink: DesignInk; colors: string[] }> = [];
-  if (mainColors.length > 0) planGroups.push({ ink: "main", colors: mainColors });
-  if (useBlack) planGroups.push({ ink: "black", colors: black });
-  if (useWhite) planGroups.push({ ink: "white", colors: white });
-
   const missing: Array<{ ink: "black" | "white"; colors: string[] }> = [];
-  if (!artwork.hasBlackInk && black.length > 0) missing.push({ ink: "black", colors: black });
-  if (!artwork.hasWhiteInk && white.length > 0) missing.push({ ink: "white", colors: white });
+
+  // Black ink group - ONLY if design has black ink artwork AND user selected black ink colours
+  if (artwork.hasBlackInk && black.length > 0) {
+    planGroups.push({ ink: "black", colors: black });
+  } else if (black.length > 0) {
+    // User selected black ink colours but design has no black ink artwork
+    missing.push({ ink: "black", colors: black });
+  }
+
+  // White ink group - ONLY if design has white ink artwork AND user selected white ink colours
+  if (artwork.hasWhiteInk && white.length > 0) {
+    planGroups.push({ ink: "white", colors: white });
+  } else if (white.length > 0) {
+    // User selected white ink colours but design has no white ink artwork
+    missing.push({ ink: "white", colors: white });
+  }
+
+  // Only colours that will actually be printed (in groups)
+  const colors = unique(planGroups.flatMap((g) => g.colors));
 
   return {
     groups: planGroups,
     missing,
-    usesInkArtwork: useBlack || useWhite,
+    usesInkArtwork: planGroups.length > 0,
     colors,
   };
 }

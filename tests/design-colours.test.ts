@@ -374,17 +374,24 @@ describe("planDesignColours - a design the user DID tick", () => {
     expect(plan.colors).toEqual(INK_COLOURS);
   });
 
-  it("prints the main artwork on the ink colours it has no artwork for, and says so", () => {
+  it("does NOT fall back to main artwork when ink artwork is missing - those colours don't print", () => {
+    // NEW BEHAVIOR: no fallback. Missing ink colours are reported in `missing`
+    // but do NOT get a group. The user is warned, and those colours simply
+    // won't be printed on the product.
     const plan = planDesignColours(
       { hasInkPair: true, hasBlackInk: true, hasWhiteInk: false },
       PRODUCT,
     );
 
+    // Only black ink group - white ink colours have no artwork, so no group
     expect(plan.groups).toEqual([
-      { ink: "main", colors: ["Red"] },
       { ink: "black", colors: ["Black", "Navy"] },
     ]);
+    // White ink colours are reported as missing
     expect(plan.missing).toEqual([{ ink: "white", colors: ["Red"] }]);
+    // Only black ink colours are in the plan's colors
+    expect(plan.colors).toEqual(["Black", "Navy"]);
+    expect(plan.usesInkArtwork).toBe(true);
   });
 
   it("plans nothing when the ink panel is empty", () => {
@@ -408,8 +415,10 @@ describe("planDesignColours - a design the user DID tick", () => {
       WHITE_INK_ONLY,
     );
 
-    expect(plan.groups).toEqual([{ ink: "main", colors: ["Red"] }]);
+    // No black ink colours in the panel, no white ink artwork
+    expect(plan.groups).toEqual([]);
     expect(plan.missing).toEqual([{ ink: "white", colors: ["Red"] }]);
+    expect(plan.colors).toEqual([]);
   });
 });
 
@@ -447,7 +456,7 @@ describe("planDesignColours - the ink label travels with the group", () => {
 });
 
 describe("planDesignColours - every design covers exactly its own panel", () => {
-  it("covers its own panel exactly once, whatever the design has", () => {
+  it("covers exactly the colours it has artwork for, from its own panel", () => {
     const designs = [NO_INK, BOTH_INKS, BLACK_ONLY, WHITE_ONLY];
     const ticked = new Set(["d-both", "d-white"]);
 
@@ -462,9 +471,15 @@ describe("planDesignColours - every design covers exactly its own panel", () => 
         PRODUCT,
       );
       const all = plan.groups.flatMap((group) => group.colors);
-      const own = isTicked ? INK_COLOURS : PLAIN_COLOURS;
+      // A design only covers colours it has artwork for (or plain panel if not ticked)
+      const expectedOwn = isTicked
+        ? (design.blackInkAssetId && design.whiteInkAssetId ? INK_COLOURS
+            : design.blackInkAssetId ? INK_COLOURS.filter(c => PRODUCT.blackInk.includes(c))
+            : design.whiteInkAssetId ? INK_COLOURS.filter(c => !PRODUCT.blackInk.includes(c))
+            : [])
+        : PLAIN_COLOURS;
 
-      expect([...all].sort()).toEqual([...own].sort());
+      expect([...all].sort()).toEqual([...expectedOwn].sort());
       expect(hasDuplicates(all)).toBe(false);
     }
   });
