@@ -178,10 +178,17 @@ export function ColorsTab({
 
   const setInk = (name: string, ink: "black" | "white") => {
     updateRow("ink", (prev: StudioSession) => {
+      const inkColors = [...(prev.rows.ink?.colors ?? [])];
       const black = new Set(prev.rows.ink?.blackInkColors ?? []);
-      if (ink === "black") black.add(name);
-      else black.delete(name);
-      return { blackInkColors: [...black] };
+      if (ink === "black") {
+        black.add(name);
+        // Ensure the color is in the ink panel so loadSession doesn't drop it
+        if (!inkColors.includes(name)) inkColors.push(name);
+        return { blackInkColors: [...black], colors: inkColors };
+      } else {
+        black.delete(name);
+        return { blackInkColors: [...black] };
+      }
     });
   };
 

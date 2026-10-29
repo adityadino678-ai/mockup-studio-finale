@@ -102,11 +102,19 @@ export async function createStudioProduct(
       plan.colourIndex,
       item.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
     );
+    // DEBUG: log partition groups to verify ink split
+    console.debug("[studio-create] partition groups:", partition.groups.map(g => ({
+      ink: g.ink,
+      colors: g.colors,
+      variantCount: g.variantIds.length,
+      variantIds: g.variantIds.slice(0, 5) // first 5 only
+    })));
     const enabled = resolveVariantIds(
       plan.colourIndex,
       item.groups.flatMap((group) => group.colors),
       session.sizes,
     );
+    console.debug("[studio-create] enabled variant count:", enabled.length, "enabled:", enabled.slice(0, 10));
     if (enabled.length === 0) {
       return {
         designId: item.designId,
@@ -144,6 +152,11 @@ export async function createStudioProduct(
         placement: clampPlacement(placement),
       });
     }
+    console.debug("[studio-create] artworks to Printify:", artworks.map(a => ({
+      ink: a.filename,
+      variantCount: a.variantIds.length,
+      variantIds: a.variantIds.slice(0, 5)
+    })));
 
     const title =
       context.overrides?.title?.trim() ||
