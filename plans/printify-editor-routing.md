@@ -230,6 +230,96 @@ approved work was the verification hardening, not a payload change:
 
 No change to what is sent to Printify.
 
+## Live verification against the real account (done)
+
+Method: your running Brave cannot expose CDP on its default profile (Chromium 136+
+blocks it), so a *copy* of the profile (`Local State`, Local Storage, IndexedDB)
+was launched with `--remote-debugging-port=9222` and driven with `agent-browser`.
+No password was needed and no cookie DB was copied; Printify authenticates the SPA
+from `localStorage.session.access_token`. Only `GET` calls were made. The temp
+profile and the token file were deleted afterwards.
+
+Product inspected: `6ae4306bc237f65f2e065877` — Comfort Colors 1717, 4 colours ×
+7 sizes = 28 variants (White, Black, Butter, True Navy).
+
+### The editor's own model (`decorators[0].prints[]`)
+
+| print | variants | colours | image | artwork |
+|---|---|---|---|---|
+| A | 14 | **White, Butter** | `2932cfb2-…` | dark "merry & bright" script |
+| B | 495 | **Black, True Navy**, + every other blueprint colour | `c88c4cb9-…` | white "merry & bright" script |
+
+Both images were downloaded and compared: different files, different art. The
+mapping is exactly the ink rule — light colours get the dark-ink design, dark
+colours get the white-ink design.
+
+### What the editor shows
+
+- Select **White** → "Currently editing the **default** design", canvas shows the
+  **dark script**. `editor-white.png`.
+- Select **Black** → "Currently editing **variant specific design**" + "Revert
+  Black to default design", canvas shows the **white script**. `editor-black.png`.
+
+So the editor *is* variant-aware and Black genuinely carries the white-ink
+artwork — the same artwork its mockup shows. **Nothing is misrouted and nothing
+is missing.**
+
+### The one real defect: both uploads share a filename
+
+`studio-plan.ts:119-137` labels **both halves of a pair `ink: "main"`** and names
+the item after the black half, so `createStudioProduct` uploads
+`<black design name>-main.png` **twice** (different bytes, same name). In
+Printify's "Layers" panel you therefore see one indistinguishable
+`…-removebg-preview-main.png` no matter which colour is selected — which reads as
+"only one design, applied everywhere".
+
+Proposed fix (not applied): name each upload by its ink role, e.g.
+`<design>-black-ink.png` / `<design>-white-ink.png` (pairs), so the editor and the
+Printify uploads page distinguish them. Cosmetic only — no payload change.
+
+## Update: why True Navy shows the black-ink design (root cause)
+
+Checked live on product `6ae43bafa9c8fca6d30ac7ff` (the one created after the
+rename; both files upload as `black design-main.png` because it predates
+`f4bfbe7`):
+
+| print group | variants | first variant | artwork |
+|---|---|---|---|
+| 0 | 14 | `73199 S / White` | dark script (black ink) |
+| 1 | 495 | `73196 S / Black` | white script (white ink) |
+
+Black and True Navy are BOTH in group 1, and every enabled variant of both
+maps to `c88c4cb9` (white script). The print data is right.
+
+In the editor, selecting **Black** says "Currently editing variant specific
+design" and paints the white script; selecting **True Navy** says "Currently
+editing the default design" and paints the **dark** script, offering "Make a
+specific design for True Navy".
+
+The rule is in Printify's own bundle (`app/chunk-B3kK5WRn.js`):
+
+```
+isEditingAllVariants$ = prints.overrides[optionItemId] === undefined
+featuredDesignApplied$ = !isEditingAllVariants$
+```
+
+So the editor is a per-COLOUR view with an `overrides` map, and an API-created
+`print_areas` group only produces **one** override - the colour of its FIRST
+`variant_ids` entry. Group 1's first id is `S / Black`, so Black is the only
+colour it will show as specific. White is the default group's first id, and the
+default group's artwork IS the default design, so it looks correct.
+
+Consequence: with one group holding 71 dark colours, the editor can never show
+the white-ink artwork for more than one of them, no matter what we name the
+file. Naming fixes only distinguish the layers in Printify's uploads list.
+
+Possible fix (not applied, needs live verification): emit **one print_areas
+group per colour**, then each colour is its own override and the editor shows
+its real artwork. Cost: the payload grows from 2 to ~71 groups (the same two
+uploads reused), and it is unproven whether Printify keeps 71 overrides.
+Alternative: accept the display limitation, since the print file and the
+generated mockups are already correct.
+
 ## Modelling question to settle alongside the bug
 
 If Printify truly cannot hold two artworks in one position, the honest model is **two products**

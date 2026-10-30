@@ -134,12 +134,21 @@ Re-run the spike after any Printify change.
   fallback would print ONE design on every colour), and `createProduct()`
   throws instead of `continue`-ing past a group with no image or no variants,
   which would have let Printify append those variants to the last group.
-- **Printify's "Edit design" canvas is NOT a per-variant view.** It shows one
-  design layer per print position; switching the colour does not reveal the
-  other group. The per-colour artwork lives in `print_areas` and is visible in
-  the **generated mockups** (Printify composites them from `print_areas`) and
-  in the print file. Do not diagnose a misroute from the editor, and do not
-  "fix" a correct payload because the canvas shows one design.
+- **The "Edit design" canvas shows ONE variant-specific design per print group.**
+  Verified live (Oct 2026) by clicking each colour chip on two real products:
+  the first group's artwork is the **default design** (every colour whose own
+  group is that one says "Currently editing the default design"), and each
+  ADDITIONAL `print_areas` group marks exactly **one** colour as "Currently
+  editing variant specific design" — the colour of that group's **first**
+  `variant_ids` entry. Every other colour in the same group silently falls back
+  to the default design on the canvas, even though the print data is correct.
+  The editor's own Angular state confirms the rule:
+  `isEditingAllVariants$ = prints.overrides[optionItemId] === undefined`.
+  → The editor is a per-COLOUR view, but it can only express one override per
+  print group. A group holding many colours therefore looks misrouted. Do not
+  diagnose a misroute from the canvas alone: read `decorators[0].prints[]`,
+  where `variant_ids` → `placeholders[].images[]` is the real mapping, and
+  compare the generated mockups.
 - `placeholders[].position` comes back expanded to every printable position for
   the variant (`front` **and** `back`), but only the position you named receives
   the image. The other stays empty — that is expected, not a bug.
