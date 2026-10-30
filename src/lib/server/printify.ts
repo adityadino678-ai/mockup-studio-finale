@@ -591,7 +591,16 @@ export function createPrintifyClient(explicitKey?: string) {
         // One group per artwork. `variant_ids` decides which colour the
         // artwork is printed on, so the groups must partition the variants.
         for (const group of input.printAreaGroups) {
-          if (!group.imageId || group.variantIds.length === 0) continue;
+          if (!group.imageId || group.variantIds.length === 0) {
+            // Dropping the group would leave its variants unclaimed, and
+            // Printify appends unclaimed variants to the LAST group - so the
+            // product would be created with the wrong artwork and no error.
+            // Refuse instead of building a product that prints the wrong file.
+            throw new PrintifyError(
+              "A print area group has no artwork or no variants. Every selected variant must carry its own artwork before a product can be created.",
+              400,
+            );
+          }
           printAreas.push({
             variant_ids: group.variantIds,
             placeholders: [

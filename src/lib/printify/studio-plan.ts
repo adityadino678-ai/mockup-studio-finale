@@ -198,19 +198,6 @@ export function buildStudioPlan(
     });
   }
 
-  console.debug("[studio-plan] buildStudioPlan result:", {
-    inkColors: session.rows.ink?.colors,
-    blackInkColors: session.rows.ink?.blackInkColors,
-    whiteInkColors: session.rows.ink?.whiteInkColors,
-    inkPairIds: session.inkPairIds,
-    items: items.map((i) => ({
-      designId: i.designId,
-      inkTicked: i.inkTicked,
-      row: i.row,
-      groups: i.groups.map((g) => ({ ink: g.ink, colors: g.colors })),
-    })),
-  });
-
   return { items, colourIndex, groups };
 }
 

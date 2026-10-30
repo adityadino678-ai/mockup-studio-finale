@@ -241,6 +241,22 @@ export const POST: APIRoute = async ({ request }) => {
     if (artworks.length === 0) {
       return json({ error: "Attach a design to a print area before creating the product" }, 400);
     }
+    // A single artwork with no `variantIds` is the legacy one-design form and
+    // covers every variant on purpose. With SEVERAL groups that is ambiguous:
+    // the fallback would give every colour the same image, which is exactly the
+    // silent collapse that prints one design everywhere. Refuse it here, before
+    // uploading anything.
+    if (artworks.length > 1) {
+      const unnamed = artworks.filter((artwork) => !artwork.variantIds?.length);
+      if (unnamed.length > 0) {
+        return json(
+          {
+            error: `${unnamed.length} artwork group(s) don't say which colours they print. Every group needs the variants it belongs to, or one design would land on every colour.`,
+          },
+          400,
+        );
+      }
+    }
 
     const totalBytes = artworks.reduce((sum, a) => sum + base64Bytes(a.base64), 0);
     if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {

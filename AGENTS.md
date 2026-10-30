@@ -120,6 +120,26 @@ Re-run the spike after any Printify change.
   → **Always build a complete partition over every variant of the
   (blueprint, print_provider) and disable the unwanted ones with
   `is_enabled: false`.** Never rely on Printify filling the gaps.
+- **The create response is verified strictly — "no image" is a failure.**
+  `src/lib/printify/verify-artwork.ts` (`verifyProductArtwork`) compares the
+  product Printify returned with the image ids the endpoint echoed back, and
+  requires, for every ENABLED variant: an expected image, an image in the
+  product, and the same id. The old predicate
+  `got && want && got !== want` short-circuited when the product had **no**
+  image, so a variant that lost its artwork passed silently. It also reports a
+  body it cannot read (a 2xx with no JSON used to skip the check entirely) and
+  enabled variants it added that we never prepared artwork for. Two related
+  silent paths are closed: `/api/printify/products` refuses a multi-group
+  request where an artwork names no variants (the "defaults to every variant"
+  fallback would print ONE design on every colour), and `createProduct()`
+  throws instead of `continue`-ing past a group with no image or no variants,
+  which would have let Printify append those variants to the last group.
+- **Printify's "Edit design" canvas is NOT a per-variant view.** It shows one
+  design layer per print position; switching the colour does not reveal the
+  other group. The per-colour artwork lives in `print_areas` and is visible in
+  the **generated mockups** (Printify composites them from `print_areas`) and
+  in the print file. Do not diagnose a misroute from the editor, and do not
+  "fix" a correct payload because the canvas shows one design.
 - `placeholders[].position` comes back expanded to every printable position for
   the variant (`front` **and** `back`), but only the position you named receives
   the image. The other stays empty — that is expected, not a bug.

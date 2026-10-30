@@ -27,6 +27,7 @@ import {
 } from "@/lib/printify/studio-session";
 import type { StudioDesignPlan, StudioPlan } from "@/lib/printify/studio-plan";
 import { buildPartition, resolveVariantIds } from "@/lib/printify/variants";
+import { verifyProductArtwork } from "@/lib/printify/verify-artwork";
 import type { StudioProductResult, StudioSession } from "@/types/domain";
 
 export interface StudioCreateOverrides {
@@ -102,27 +103,11 @@ export async function createStudioProduct(
       plan.colourIndex,
       item.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
     );
-    console.debug("[studio-create] item.groups:", item.groups.map(g => ({
-      ink: g.ink,
-      colors: g.colors,
-      assetId: g.assetId,
-      label: g.label,
-    })));
-    console.debug("[studio-create] partition.groups:", partition.groups.map(g => ({
-      ink: g.ink,
-      colors: g.colors,
-      variantCount: g.variantIds.length,
-      variantIds: g.variantIds,
-    })));
     const enabled = resolveVariantIds(
       plan.colourIndex,
       item.groups.flatMap((group) => group.colors),
       session.sizes,
     );
-    console.debug("[studio-create] enabled variant count:", enabled.length, "all enabled:", enabled);
-    if (partition.groups.some((g) => g.variantIds.length === 0 && g.colors.length > 0)) {
-      console.warn("[studio-create] WARNING: groups with colors but no variants:", partition.groups.filter((g) => g.variantIds.length === 0 && g.colors.length > 0).map((g) => ({ ink: g.ink, colors: g.colors })));
-    }
     if (enabled.length === 0) {
       return {
         designId: item.designId,
@@ -192,40 +177,40 @@ export async function createStudioProduct(
     if (!response.ok) {
       return failedResult(item, data?.error ?? `HTTP ${response.status}`, { title });
     }
-
-    // Verify the product Printify actually built: every enabled variant must
-    // sit in the group whose artwork we uploaded for it. The create response
-    // carries the whole product, so this costs no extra calls.
-    const product = data?.product ?? {};
-    const shopId = typeof data?.shopId === "number" ? data.shopId : undefined;
-    const uploadedImageByVariant = new Map<number, string>();
-    for (const artwork of data?.artworks ?? []) {
-      const ids = Array.isArray(artwork.variantIds) ? artwork.variantIds : [];
-      for (const variantId of ids) {
-        uploadedImageByVariant.set(Number(variantId), String(artwork.imageId));
-      }
-    }
-    const imageByVariant = new Map<number, string>();
-    for (const areaEntry of product.print_areas ?? []) {
-      for (const placeholder of areaEntry.placeholders ?? []) {
-        for (const image of placeholder.images ?? []) {
-          for (const variantId of areaEntry.variant_ids ?? []) {
-            if (!imageByVariant.has(variantId)) imageByVariant.set(variantId, image.id);
-          }
-        }
-      }
-    }
-    const wrongArtwork: string[] = [];
-    for (const variant of product.variants ?? []) {
-      if (!variant.is_enabled) continue;
-      const got = imageByVariant.get(variant.id);
-      const want = uploadedImageByVariant.get(variant.id);
-      if (got && want && got !== want) wrongArtwork.push(String(variant.id));
-    }
-    if (wrongArtwork.length > 0) {
+    if (!data || typeof data !== "object") {
+      // A 2xx with no readable body: the product may exist, but nothing can be
+      // verified, so do not report success.
       return failedResult(
         item,
-        `Printify attached the wrong artwork to ${wrongArtwork.length} variant(s). Check the print areas before publishing.`,
+        `Printify answered HTTP ${response.status} without a product we could verify. Open the product in Printify before publishing it.`,
+        { title },
+      );
+    }
+
+    // Verify the product Printify actually built: every enabled variant must
+    // carry the exact image we uploaded for it. This check is deliberately
+    // strict - a variant with no image used to pass silently. The create
+    // response carries the whole product, so this costs no extra calls.
+    const product = data.product ?? {};
+    const shopId = typeof data.shopId === "number" ? data.shopId : undefined;
+    const verification = verifyProductArtwork(product, data.artworks ?? []);
+    if (!verification.ok) {
+      const reasons: string[] = [];
+      if (!verification.verified) {
+        reasons.push("Printify returned no print areas we could read back");
+      }
+      if (verification.missingExpected.length > 0) {
+        reasons.push(`no artwork was prepared for ${verification.missingExpected.length} variant(s)`);
+      }
+      if (verification.missingActual.length > 0) {
+        reasons.push(`Printify attached no artwork to ${verification.missingActual.length} variant(s)`);
+      }
+      if (verification.wrongArtwork.length > 0) {
+        reasons.push(`Printify attached the wrong artwork to ${verification.wrongArtwork.length} variant(s)`);
+      }
+      return failedResult(
+        item,
+        `${reasons.join("; ")}. Check the print areas before publishing.`,
         { title, remoteProductId: product.id, shopId },
       );
     }
