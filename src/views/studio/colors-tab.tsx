@@ -18,7 +18,7 @@ import {
   categoriesOfIndex,
   filterBlueprintIndex,
 } from "@/lib/printify/catalog-client";
-import { describeInkContrast, inkContrast, lightness, suggestInk } from "@/lib/printify/colors";
+import { describeInkContrast, inkContrast, suggestInk } from "@/lib/printify/colors";
 import { inkProblems } from "@/lib/printify/studio-session";
 import { ROW_HINTS, ROW_LABELS, ROWS } from "@/lib/printify/studio-session";
 import { cn } from "@/lib/utils";
@@ -148,20 +148,14 @@ export function ColorsTab({
       const isSelecting = !current.includes(name);
       const next = isSelecting ? [...current, name] : current.filter((c) => c !== name);
 
-      let nextBlack = (prev.rows[row]?.blackInkColors ?? []).filter((c: string) => next.includes(c));
-      if (row === "ink" && isSelecting) {
-        // Smart auto-assignment on click:
-        // Light garments (lightness > 0.5) automatically get Black ink.
-        // Dark garments (lightness <= 0.5) automatically get White ink.
-        const hex = hexFor(name);
-        if (lightness(hex) > 0.5) {
-          nextBlack = [...new Set([...nextBlack, name])];
-        }
-      }
-
+      // No automatic ink here. A colour just selected is UNDECIDED: guessing
+      // sent colours to the black design (or, before that, to the white one)
+      // without the user ever saying so. Only the Black ink / White ink
+      // buttons decide, and Create stays blocked while a colour is undecided.
       return {
         colors: next,
-        blackInkColors: nextBlack,
+        blackInkColors: (prev.rows[row]?.blackInkColors ?? []).filter((c) => next.includes(c)),
+        whiteInkColors: (prev.rows[row]?.whiteInkColors ?? []).filter((c) => next.includes(c)),
       };
     });
   };
@@ -190,23 +184,21 @@ export function ColorsTab({
   };
 
   const setInk = (name: string, ink: "black" | "white") => {
-    console.debug("[colors-tab] setInk BEFORE:", { name, ink, blackInkColors: session.rows.ink?.blackInkColors, inkColors: session.rows.ink?.colors });
     updateRow("ink", (prev: StudioSession) => {
-      const inkColors = [...(prev.rows.ink?.colors ?? [])];
+      const colors = [...(prev.rows.ink?.colors ?? [])];
       const black = new Set(prev.rows.ink?.blackInkColors ?? []);
+      const white = new Set(prev.rows.ink?.whiteInkColors ?? []);
       if (ink === "black") {
         black.add(name);
-        // Ensure the color is in the ink panel so loadSession doesn't drop it
-        if (!inkColors.includes(name)) inkColors.push(name);
-        const result = { blackInkColors: [...black], colors: inkColors };
-        console.debug("[colors-tab] setInk AFTER (black):", result);
-        return result;
+        white.delete(name);
+        // Ensure the colour is in the ink panel so loadSession keeps the choice.
+        if (!colors.includes(name)) colors.push(name);
       } else {
+        white.add(name);
         black.delete(name);
-        const result = { blackInkColors: [...black] };
-        console.debug("[colors-tab] setInk AFTER (white):", result);
-        return result;
+        if (!colors.includes(name)) colors.push(name);
       }
+      return { colors, blackInkColors: [...black], whiteInkColors: [...white] };
     });
   };
 
@@ -218,8 +210,12 @@ export function ColorsTab({
   // get, which the white-ink designs get, and which the no-ink designs get.
   const inkColors = session.rows.ink?.colors ?? [];
   const blackInkColors = session.rows.ink?.blackInkColors ?? [];
+  const whiteInkColors = session.rows.ink?.whiteInkColors ?? [];
   const blackInkList = inkColors.filter((c) => blackInkColors.includes(c));
-  const whiteInkList = inkColors.filter((c) => !blackInkColors.includes(c));
+  const whiteInkList = inkColors.filter((c) => whiteInkColors.includes(c) && !blackInkColors.includes(c));
+  const undecidedInkList = inkColors.filter(
+    (c) => !blackInkColors.includes(c) && !whiteInkColors.includes(c),
+  );
   const plainColors = session.rows.plain?.colors ?? [];
 
   // --- the product picker ----------------------------------------------------
@@ -479,6 +475,7 @@ export function ColorsTab({
                         const selected = state?.colors.includes(name) ?? false;
                         const hex = hexFor(name);
                         const isBlack = state?.blackInkColors.includes(name) ?? false;
+                        const isWhite = state?.whiteInkColors.includes(name) ?? false;
                         const isMid = suggestInk(hex) === "ambiguous";
                         return (
                           <div key={name} data-row={row} className="relative">
@@ -492,7 +489,13 @@ export function ColorsTab({
                               selected={selected}
                               showInk={row === "ink" && selected}
                               ink={
-                                row === "ink" ? (isBlack ? ("black" as const) : ("white" as const)) : undefined
+                                row === "ink"
+                                  ? isBlack
+                                    ? ("black" as const)
+                                    : isWhite
+                                      ? ("white" as const)
+                                      : ("ambiguous" as const)
+                                  : undefined
                               }
                               onClick={handleSwatchClick}
                               className="h-7 w-7"
@@ -528,7 +531,11 @@ export function ColorsTab({
                         <div className="flex flex-wrap gap-1.5">
                           {(state?.colors ?? []).map((name) => {
                             const isBlack = state?.blackInkColors.includes(name) ?? false;
-                            const contrast = inkContrast(hexFor(name), isBlack ? "black" : "white");
+                            const isWhite = state?.whiteInkColors.includes(name) ?? false;
+                            const contrast =
+                              isBlack || isWhite
+                                ? inkContrast(hexFor(name), isBlack ? "black" : "white")
+                                : "ok";
                             return (
                               <div
                                 key={name}
@@ -538,7 +545,15 @@ export function ColorsTab({
                                 <span className="max-w-[120px] truncate text-[11px] text-ink">
                                   {name}
                                 </span>
-                                {contrast !== "ok" && (
+                                {!isBlack && !isWhite && (
+                                  <span
+                                    title="This colour has no ink yet - choose Black ink or White ink"
+                                    className="rounded-full bg-warning px-1.5 text-[9px] font-semibold text-white"
+                                  >
+                                    ?
+                                  </span>
+                                )}
+                                {(isBlack || isWhite) && contrast !== "ok" && (
                                   <span
                                     title={describeInkContrast(hexFor(name), isBlack ? "black" : "white")}
                                     className={cn(
@@ -559,8 +574,8 @@ export function ColorsTab({
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant={isBlack ? "outline" : "default"}
-                                  aria-pressed={!isBlack}
+                                  variant={isWhite ? "default" : "outline"}
+                                  aria-pressed={isWhite}
                                   aria-label={`${name}: print with white ink`}
                                   onClick={() => setInk(name, "white")}
                                   className="-ml-px h-6 rounded-r-full px-2 text-[10px]"
@@ -619,9 +634,20 @@ export function ColorsTab({
                 </strong>
                 {inkColors.length > 0 ? ` (${joinShort(inkColors)})` : " — pick colours in its panel"}
                 , of which {blackInkList.length} use black ink and {whiteInkList.length} use white
-                ink.
+                ink.{undecidedInkList.length > 0 ? `, ${undecidedInkList.length} still to decide` : ""}
               </p>
-              {inkColors.length > 0 && whiteInkList.length === 0 && (
+              {undecidedInkList.length > 0 && (
+                <p className="flex items-start gap-1.5 text-[12px] text-warning">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {undecidedInkList.length} colour
+                    {undecidedInkList.length === 1 ? "" : "s"} still need Black ink or White ink (
+                    {joinShort(undecidedInkList)}). Until then they are not printed by either design, and
+                    Create is blocked.
+                  </span>
+                </p>
+              )}
+              {inkColors.length > 0 && blackInkList.length === inkColors.length && (
                 <p className="flex items-start gap-1.5 text-[12px] text-warning">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
@@ -630,7 +656,7 @@ export function ColorsTab({
                   </span>
                 </p>
               )}
-              {inkColors.length > 0 && blackInkList.length === 0 && (
+              {inkColors.length > 0 && whiteInkList.length === inkColors.length && (
                 <p className="flex items-start gap-1.5 text-[12px] text-warning">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>

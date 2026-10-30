@@ -758,8 +758,27 @@ panels, and each design row reads ONLY from its own panel:
   colours.
 - **Has ink variants** (`ink`): a design in this row prints exactly the colours
   selected in that panel, with its ink artwork — black ink on the colours marked
-  **Black ink**, white ink on the rest. It never inherits the plain panel's
-  colours.
+  **Black ink**, white ink on the colours marked **White ink**, and on nothing
+  else. It never inherits the plain panel's colours.
+
+**White ink is an explicit choice, and the two lists are the whole truth.**
+`session.rows.ink` carries `blackInkColors` AND `whiteInkColors`. A colour in
+neither list is **undecided**: it is printed by no design, and
+`undecidedInkProblems(plan)` blocks Create with a message naming the colours.
+That third state exists because white used to be implicit ("everything not
+marked black"), so a colour the user never marked silently went to the
+white-ink design — the exact cross-contamination this model prevents. Selecting
+a colour in the Colors tab leaves it undecided; only the **Black ink / White
+ink** buttons decide, and `setInk` keeps the two lists mutually exclusive (a
+colour in both resolves to black and is dropped from white on load). A session
+saved before `whiteInkColors` existed is migrated ONCE in `loadSession`: its
+white half is derived from the old implicit rule so nothing changes visually,
+whereas an explicit `whiteInkColors: []` keeps its colours undecided. The
+undecided state shows the swatch's existing `ambiguous` badge (`?`), with
+neither ink button pressed. An autopilot run snapshotted before the field
+existed gets the same one-time derivation in `withCurrentRenderState`, so a
+resumed run is not left permanently "undecided" by colours it can no longer
+edit.
 
 The two panels are deliberately independent, and a colour selected in BOTH is
 allowed and intentional: the plain row prints it with the plain artwork, the ink
@@ -797,12 +816,15 @@ no `main` group (the panels are independent), so the absorber falls back to
 `black` — never `white`, because white ink on a light garment is invisible and
 must never be the group that swallows leftovers.
 
-Two things were removed on purpose; do not bring them back:
+Three things were removed on purpose; do not bring them back:
 
 - the product-driven split (`splitDesignsByProduct`), which moved designs
-  between rows when the user changed the product; and
+  between rows when the user changed the product;
 - the one-click `coloursToMoveToPlain` fix, which silently rewrote the
-  user's colour groups.
+  user's colour groups; and
+- the automatic ink assignment — guessing an ink when a colour is clicked and
+  re-balancing the lists on load. Both decided a colour's design on the user's
+  behalf, which is exactly what sent a colour to the wrong artwork.
 
 ### Pairing two uploaded designs as ONE listing
 
@@ -825,9 +847,10 @@ partner and shows a **Black ink / White ink** box, because which design is
 which is the user's decision, not a guess.
 
 - The black-ink design prints the plain colours AND the colours marked for
-  black ink; the white-ink design prints the remaining ink colours. Together
-  they cover every colour exactly once (`pairedColourGroups` and
-  `planPairedDesignColours` in `design-colours.ts`).
+  black ink; the white-ink design prints the colours marked for white ink.
+  Together they cover every DECIDED colour exactly once
+  (`pairedColourGroups` and `planPairedDesignColours` in `design-colours.ts`).
+  A colour in neither ink list is in neither half and blocks Create.
 - **One pair = ONE product.** The partner is excluded from the product loop,
   so it never creates a listing of its own.
 - Both designs must be ticked for the batch: a half-pair is left as two

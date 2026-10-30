@@ -49,8 +49,14 @@ export interface ProductColourGroups {
   plain: string[];
   /** Colours printed with the ink artwork. */
   ink: string[];
-  /** The ink colours printed with the BLACK ink; the rest use the white ink. */
+  /** The ink colours printed with the BLACK ink. */
   blackInk: string[];
+  /**
+   * The ink colours printed with the WHITE ink, when the caller knows them
+   * explicitly. Omit it for legacy callers: white then means "every ink colour
+   * not marked black". The Studio always supplies it.
+   */
+  whiteInk?: string[];
 }
 
 /**
@@ -66,6 +72,9 @@ export function productColourGroups(session: StudioSession): ProductColourGroups
     plain: session.rows.plain?.colors ?? [],
     ink: session.rows.ink?.colors ?? [],
     blackInk: session.rows.ink?.blackInkColors ?? [],
+    // Explicit, so a colour with no ink choice cannot be read as white by the
+    // artwork problems, the colour summary or the listing preview.
+    whiteInk: session.rows.ink?.whiteInkColors ?? [],
   };
 }
 
@@ -97,6 +106,11 @@ export interface DesignColourPlan {
   missing: Array<{ ink: "black" | "white"; colors: string[] }>;
   /** True when the design contributes ink artwork to this product. */
   usesInkArtwork: boolean;
+  /**
+   * Ink-panel colours the user has not marked Black or White. They print on
+   * nothing until decided; the plan blocks creation while this is non-empty.
+   */
+  undecided: string[];
   /** Every colour of the product this design will be printed on. */
   colors: string[];
 }
@@ -139,12 +153,17 @@ export function normaliseColourGroups(groups: ProductColourGroups): {
   ink: string[];
   black: string[];
   white: string[];
+  undecided: string[];
 } {
   const ink = unique(groups.ink);
   const plain = unique(groups.plain);
   const black = ink.filter((c) => groups.blackInk.includes(c));
-  const white = ink.filter((c) => !groups.blackInk.includes(c));
-  return { plain, ink, black, white };
+  // Explicit white when the caller supplies it; legacy implicit white otherwise.
+  const white = groups.whiteInk
+    ? ink.filter((c) => groups.whiteInk!.includes(c) && !black.includes(c))
+    : ink.filter((c) => !black.includes(c));
+  const undecided = ink.filter((c) => !black.includes(c) && !white.includes(c));
+  return { plain, ink, black, white, undecided };
 }
 
 /** The counts the Design panel reports for a listing's colour plan. */
@@ -155,6 +174,8 @@ export interface ColourGroupSummary {
   black: number;
   /** Ink colours printed with the white-ink artwork. */
   white: number;
+  /** Ink colours the user has not marked Black or White. They print on nothing. */
+  undecided: number;
   /** Every colour of the product, counted once (the union of both panels). */
   total: number;
   /**
@@ -173,12 +194,13 @@ export interface ColourGroupSummary {
  * plain is the whole plain panel, and `total` is the union of the two.
  */
 export function summariseColourGroups(groups: ProductColourGroups): ColourGroupSummary {
-  const { plain, ink, black, white } = normaliseColourGroups(groups);
+  const { plain, ink, black, white, undecided } = normaliseColourGroups(groups);
   const inkSet = new Set(ink);
   return {
     plain: plain.length,
     black: black.length,
     white: white.length,
+    undecided: undecided.length,
     total: unique([...plain, ...ink]).length,
     overlap: plain.filter((c) => inkSet.has(c)),
   };
@@ -204,7 +226,7 @@ export function planDesignColours(
   artwork: DesignInkArtwork,
   groups: ProductColourGroups,
 ): DesignColourPlan {
-  const { plain, black, white } = normaliseColourGroups(groups);
+  const { plain, black, white, undecided } = normaliseColourGroups(groups);
 
   // Not ticked: ONE artwork, on the plain panel's colours and nowhere else.
   if (!artwork.hasInkPair) {
@@ -212,6 +234,7 @@ export function planDesignColours(
       groups: plain.length > 0 ? [{ ink: "main", colors: plain }] : [],
       missing: [],
       usesInkArtwork: false,
+      undecided: [],
       colors: plain,
     };
   }
@@ -245,6 +268,7 @@ export function planDesignColours(
     groups: planGroups,
     missing,
     usesInkArtwork: planGroups.length > 0,
+    undecided,
     colors,
   };
 }
@@ -341,16 +365,18 @@ export function withoutInkPair(
  *
  * Both halves live in the INK panel, so the pair takes that panel and only
  * that panel: the black-ink design covers the colours the user marked for
- * black ink, the white-ink design the rest of the ink panel. The plain
- * panel belongs to the no-ink-variants designs and is deliberately NOT
- * handed to either half.
+ * black ink, the white-ink design the rest of the ink panel, and any colour
+ * not marked either way is undecided and prints on nothing. The plain panel
+ * belongs to the no-ink-variants designs and is deliberately NOT handed to
+ * either half.
  */
 export function pairedColourGroups(groups: ProductColourGroups): {
   black: string[];
   white: string[];
+  undecided: string[];
 } {
-  const { black, white } = normaliseColourGroups(groups);
-  return { black, white };
+  const { black, white, undecided } = normaliseColourGroups(groups);
+  return { black, white, undecided };
 }
 
 /**
@@ -370,6 +396,7 @@ export function planPairedDesignColours(
   return {
     groups: colors.length > 0 ? [{ ink: "main", colors }] : [],
     missing: [],
+    undecided: split.undecided,
     usesInkArtwork: true,
     colors,
   };

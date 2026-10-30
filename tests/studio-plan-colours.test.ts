@@ -4,6 +4,7 @@ import {
   emptyPanelProblems,
   studioPartitionProblems,
   studioPlanProblems,
+  undecidedInkProblems,
 } from "@/lib/printify/studio-plan";
 import { buildCatalogueIndex } from "@/lib/printify/variants";
 import type { CatalogVariant } from "@/lib/printify/types";
@@ -55,8 +56,8 @@ function session(patch: Partial<StudioSession> = {}): StudioSession {
   return {
     sizes: SIZES,
     rows: {
-      plain: { colors: [...PLAIN], blackInkColors: [] },
-      ink: { colors: [...BLACK_INK, ...WHITE_INK], blackInkColors: [...BLACK_INK] },
+      plain: { colors: [...PLAIN], blackInkColors: [], whiteInkColors: [] },
+      ink: { colors: [...BLACK_INK, ...WHITE_INK], blackInkColors: [...BLACK_INK], whiteInkColors: [...WHITE_INK] },
     },
     designIds: ["plain-design", "ink-design"],
     inkPairIds: ["ink-design"],
@@ -123,8 +124,8 @@ describe("emptyPanelProblems - a design whose own panel is empty", () => {
   it("blocks a no-ink design when the plain panel is empty", () => {
     const s = session({
       rows: {
-        plain: { colors: [], blackInkColors: [] },
-        ink: { colors: [...BLACK_INK, ...WHITE_INK], blackInkColors: [...BLACK_INK] },
+        plain: { colors: [], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: [...BLACK_INK, ...WHITE_INK], blackInkColors: [...BLACK_INK], whiteInkColors: [...WHITE_INK] },
       },
     });
     const plan = buildStudioPlan(DESIGNS, s, CATALOGUE)!;
@@ -139,8 +140,8 @@ describe("emptyPanelProblems - a design whose own panel is empty", () => {
   it("blocks an ink design when the ink panel is empty", () => {
     const s = session({
       rows: {
-        plain: { colors: [...PLAIN], blackInkColors: [] },
-        ink: { colors: [], blackInkColors: [] },
+        plain: { colors: [...PLAIN], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: [], blackInkColors: [], whiteInkColors: [] },
       },
     });
     const plan = buildStudioPlan(DESIGNS, s, CATALOGUE)!;
@@ -157,8 +158,8 @@ describe("emptyPanelProblems - a design whose own panel is empty", () => {
       inkPairIds: ["a", "b"],
       inkPairs: [{ blackInkDesignId: "a", whiteInkDesignId: "b" }],
       rows: {
-        plain: { colors: [...PLAIN], blackInkColors: [] },
-        ink: { colors: [], blackInkColors: [] },
+        plain: { colors: [...PLAIN], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: [], blackInkColors: [], whiteInkColors: [] },
       },
     });
     const plan = buildStudioPlan([design("a"), design("b")], s, CATALOGUE)!;
@@ -177,8 +178,8 @@ describe("emptyPanelProblems - a design whose own panel is empty", () => {
   it("reaches studioPlanProblems, which is what the autopilot gates on", () => {
     const s = session({
       rows: {
-        plain: { colors: [], blackInkColors: [] },
-        ink: { colors: [...BLACK_INK, ...WHITE_INK], blackInkColors: [...BLACK_INK] },
+        plain: { colors: [], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: [...BLACK_INK, ...WHITE_INK], blackInkColors: [...BLACK_INK], whiteInkColors: [...WHITE_INK] },
       },
     });
     const plan = buildStudioPlan(DESIGNS, s, CATALOGUE)!;
@@ -192,8 +193,8 @@ describe("emptyPanelProblems - a design whose own panel is empty", () => {
   it("is reported for the Studio's Create gate too", () => {
     const s = session({
       rows: {
-        plain: { colors: [...PLAIN], blackInkColors: [] },
-        ink: { colors: [], blackInkColors: [] },
+        plain: { colors: [...PLAIN], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: [], blackInkColors: [], whiteInkColors: [] },
       },
     });
     const plan = buildStudioPlan(DESIGNS, s, CATALOGUE)!;
@@ -203,6 +204,42 @@ describe("emptyPanelProblems - a design whose own panel is empty", () => {
     // problem is the one that names the design and the panel to fix.
     expect(emptyPanelProblems(plan).length).toBe(1);
     expect(problems.length).toBeGreaterThan(0);
+  });
+});
+
+describe("undecided ink colours block creation", () => {
+  it("leaves an undecided colour out of both pair halves and leads studioPlanProblems", () => {
+    const s = session({
+      designIds: ["a", "b"],
+      inkPairIds: ["a", "b"],
+      inkPairs: [{ blackInkDesignId: "a", whiteInkDesignId: "b" }],
+      rows: {
+        plain: { colors: [...PLAIN], blackInkColors: [], whiteInkColors: [] },
+        ink: {
+          colors: [...BLACK_INK, ...WHITE_INK, "Mystery"],
+          blackInkColors: [...BLACK_INK],
+          whiteInkColors: [...WHITE_INK],
+        },
+      },
+    });
+    const plan = buildStudioPlan([design("a"), design("b")], s, CATALOGUE)!;
+    const pair = plan.items[0];
+
+    // "Mystery" is marked neither black nor white, so it prints on nothing.
+    expect(pair.groups.flatMap((g) => g.colors)).not.toContain("Mystery");
+    for (const colour of [...BLACK_INK, ...WHITE_INK]) {
+      expect(pair.groups.flatMap((g) => g.colors)).toContain(colour);
+    }
+
+    // undecidedInkProblems reports it, and studioPlanProblems leads with it.
+    const undecidedProblems = undecidedInkProblems(plan);
+    expect(undecidedProblems.length).toBeGreaterThan(0);
+    expect(undecidedProblems[0]).toContain("Mystery");
+    expect(undecidedProblems[0]).toContain("no ink yet");
+
+    const problems = studioPlanProblems(plan, [design("a"), design("b")], s);
+    expect(problems[0]).toContain("Mystery");
+    expect(problems[0]).toContain("no ink yet");
   });
 });
 

@@ -220,6 +220,53 @@ test("the ink split readout changes when a colour's ink chip is flipped", async 
   await expect(readout).toContainText("White ink: 1 colour (Navy)");
 });
 
+test("a colour with no ink choice prints on nothing and blocks Create", async ({ page }) => {
+  await mockCatalog(page);
+  await page.goto("/printify-studio");
+  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({ timeout: 30_000 });
+
+  // Navy is in the ink panel with NO ink choice, so it must not be guessed onto
+  // either design. An explicit empty white list is what marks it undecided -
+  // an absent one is a legacy session and is migrated to implicit white.
+  await setStudioSession(page, {
+    blueprintId: 6,
+    printProviderId: 30,
+    rows: {
+      plain: { colors: [], blackInkColors: [], whiteInkColors: [] },
+      ink: { colors: ["Black", "Navy"], blackInkColors: ["Black"], whiteInkColors: [] },
+    },
+  });
+
+  await page.setInputFiles("input[type=file]", [fixture("design-a.png")]);
+  await expect(page.getByText("No ink variants (1)")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
+  await expect(page.getByText("Has ink variants (1)")).toBeVisible();
+  // A tick alone is not batch scope: tick the design's own checkbox too.
+  await page.getByRole("checkbox", { name: "Select design-a" }).click();
+
+  // The readout names the undecided colour and says what it means.
+  await page.getByRole("tab", { name: "Colors" }).click();
+  const readout = page.getByText(/Black ink: .* White ink:/);
+  await expect(readout).toContainText("Black ink: 1 colour (Black)");
+  await expect(readout).toContainText("White ink: 0 colours");
+  await expect(page.getByText(/still need Black ink or White ink/)).toContainText("Navy");
+  await expect(page.getByText(/still need Black ink or White ink/)).toContainText("Create is blocked");
+
+  // Create really refuses: the dialog opens, confirming sends nothing, and
+  // the reason is the same one the Colors tab named.
+  await page.getByRole("tab", { name: "Design panel" }).click();
+  let productRequests = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/api/printify/products")) {
+      productRequests += 1;
+    }
+  });
+  await page.getByRole("button", { name: /Create on Printify/ }).click();
+  await page.getByRole("button", { name: "Create drafts" }).click();
+  await expect(page.getByText("Fix the problems above before creating the listings.")).toBeVisible();
+  expect(productRequests).toBe(0);
+});
+
 test("the adjustment preview clips the artwork to the print area", async ({ page }) => {
   await page.goto("/printify-studio");
   await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({ timeout: 30_000 });

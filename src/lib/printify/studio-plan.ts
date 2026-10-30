@@ -21,6 +21,7 @@
 
 import {
   inkArtworkProblems,
+  normaliseColourGroups,
   pairedColourGroups,
   pairedDesignIds,
   planDesignColours,
@@ -98,6 +99,7 @@ export function buildStudioPlan(
     plain: session.rows.plain?.colors ?? [],
     ink: session.rows.ink?.colors ?? [],
     blackInk: session.rows.ink?.blackInkColors ?? [],
+    whiteInk: session.rows.ink?.whiteInkColors ?? [],
   } satisfies ProductColourGroups;
   const split = pairedColourGroups(groups);
   const byId = new Map(designs.map((design) => [design.id, design]));
@@ -199,6 +201,7 @@ export function buildStudioPlan(
   console.debug("[studio-plan] buildStudioPlan result:", {
     inkColors: session.rows.ink?.colors,
     blackInkColors: session.rows.ink?.blackInkColors,
+    whiteInkColors: session.rows.ink?.whiteInkColors,
     inkPairIds: session.inkPairIds,
     items: items.map((i) => ({
       designId: i.designId,
@@ -290,10 +293,30 @@ export function studioPartitionProblems(plan: StudioPlan, session: StudioSession
 }
 
 /**
+ * Ink colours the user has not marked Black or White.
+ *
+ * A colour in the ink panel with no ink choice prints on NOTHING: the black
+ * design only prints black-marked colours and the white design only
+ * white-marked ones. Silently defaulting it to white is what put the wrong
+ * design on a garment, so creation is blocked until every ink colour is decided.
+ */
+export function undecidedInkProblems(plan: StudioPlan): string[] {
+  const { ink, undecided } = normaliseColourGroups(plan.groups);
+  if (undecided.length === 0) return [];
+  return [
+    `${undecided.length} of ${ink.length} ink colour${ink.length === 1 ? "" : "s"} (${joinNames(
+      undecided,
+    )}) have no ink yet. In Colors, mark each one Black ink or White ink - until then it is not printed by any design.`,
+  ];
+}
+
+/**
  * Everything that stops the plan from creating products.
  *
- * The ink artwork problems come first: they name the cause ("no white-ink
- * artwork on Black and Navy") instead of only the partition symptom.
+ * An undecided ink colour is the cause and any partition complaint is only the
+ * symptom, so `undecidedInkProblems` comes first. Then come the ink artwork
+ * problems: they name the cause ("no white-ink artwork on Black and Navy")
+ * instead of only the partition symptom.
  *
  * Then come the EMPTY PANEL problems. Each panel feeds its own row, so a row
  * whose panel has no colours would print on nothing - and Printify would
@@ -316,6 +339,7 @@ export function studioPlanProblems(
   );
 
   return [
+    ...undecidedInkProblems(plan),
     ...artworkProblems.map(
       (problem) => `${problem.designName}: ${describeMissingInk(problem)}`,
     ),

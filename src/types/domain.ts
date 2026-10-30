@@ -476,6 +476,12 @@ export interface StudioRowState {
    * artwork. Everything else in the row uses the white ink.
    */
   blackInkColors: string[];
+  /**
+   * Colour titles printed with the WHITE ink. A colour in NEITHER this list nor
+   * `blackInkColors` is UNDECIDED and is not printed by any design until the
+   * user marks it - white is never inferred.
+   */
+  whiteInkColors: string[];
 }
 
 /**

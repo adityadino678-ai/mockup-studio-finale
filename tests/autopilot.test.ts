@@ -22,6 +22,7 @@ import {
 } from "@/lib/autopilot/plan";
 import type { StudioPlan } from "@/lib/printify/studio-plan";
 import type { AutopilotCopy, AutopilotListing, AutopilotRun } from "@/types/autopilot";
+import type { StudioSession } from "@/types/domain";
 import type { EtsyResearch } from "@/types/etsy";
 
 // ---------------------------------------------------------------------------
@@ -166,6 +167,35 @@ describe("withCurrentRenderState", () => {
     expect(merged.placements).toEqual(current.placements);
     expect(merged.universalPlacement).toEqual(current.universalPlacement);
     expect(merged.listingRenders).toEqual(current.listingRenders);
+  });
+
+  it("derives the old implicit white for a run snapshotted before whiteInkColors", () => {
+    const snapshot = {
+      ...emptySession(),
+      rows: {
+        plain: { colors: ["White"], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: ["Black", "Navy", "Sand"], blackInkColors: ["Black"] },
+      },
+    } as unknown as StudioSession;
+
+    const merged = withCurrentRenderState(snapshot, emptySession());
+    // Same reading the run had when it started: black stays black, the rest
+    // was white. Nothing is left undecided, so the run is not blocked.
+    expect(merged.rows.ink?.whiteInkColors).toEqual(["Navy", "Sand"]);
+    expect(merged.rows.ink?.blackInkColors).toEqual(["Black"]);
+  });
+
+  it("keeps an explicit empty white list - those colours stay undecided", () => {
+    const snapshot = {
+      ...emptySession(),
+      rows: {
+        plain: { colors: [], blackInkColors: [], whiteInkColors: [] },
+        ink: { colors: ["Black", "Navy"], blackInkColors: ["Black"], whiteInkColors: [] },
+      },
+    };
+
+    const merged = withCurrentRenderState(snapshot, emptySession());
+    expect(merged.rows.ink?.whiteInkColors).toEqual([]);
   });
 });
 

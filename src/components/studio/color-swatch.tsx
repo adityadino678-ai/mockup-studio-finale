@@ -55,8 +55,14 @@ export const ColorSwatch = React.memo(function ColorSwatch({
 }: ColorSwatchProps) {
   const isWhite = hex.toLowerCase() === "#ffffff" || hex.toLowerCase() === "#f9f9f9";
   const inkLabel = ink ? INK_LABEL[ink] : "";
+  // "needs an ink choice" is a state, not a printed ink, so it must not read
+  // as "printed with the needs an ink choice".
   const accessibleName =
-    showInk && ink ? `${name}, ${hex}, printed with the ${inkLabel}` : `${name}, ${hex}`;
+    showInk && ink
+      ? ink === "ambiguous"
+        ? `${name}, ${hex}, ${inkLabel}`
+        : `${name}, ${hex}, printed with the ${inkLabel}`
+      : `${name}, ${hex}`;
 
   const content = (
     <>

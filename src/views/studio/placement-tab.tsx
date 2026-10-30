@@ -44,6 +44,7 @@ import {
   emptyPanelProblems,
   planVariantCounts,
   studioPartitionProblems,
+  undecidedInkProblems,
 } from "@/lib/printify/studio-plan";
 import { inkProblems, placementFor, remapListingState, RESULTS_KEY, ROWS } from "@/lib/printify/studio-session";
 import { buildStudioListings } from "@/lib/printify/listing-plan";
@@ -243,7 +244,9 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
         if (row === "plain") return { name, hex };
         const ink = session.rows.ink?.blackInkColors?.includes(name)
           ? ("black" as const)
-          : ("white" as const);
+          : session.rows.ink?.whiteInkColors?.includes(name)
+            ? ("white" as const)
+            : ("ambiguous" as const);
         return { name, hex, ink };
       }),
     [session.rows, hexFor],
@@ -381,11 +384,14 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
   /**
    * Everything that stops the batch from being created.
    *
-   * The ink artwork problems come first: they name the cause. Then the EMPTY
-   * PANEL problems, which name the design and the panel with no colours.
+   * An undecided ink colour comes FIRST: it is the cause, and every other
+   * complaint about a colour with no ink is only its symptom. Then the ink
+   * artwork problems, which name the design. Then the EMPTY PANEL problems,
+   * which name the design and the panel with no colours.
    */
   const problems = React.useMemo(
     () => [
+      ...(plan ? undecidedInkProblems(plan) : []),
       ...artworkProblems.map((p) => `${p.designName}: ${describeMissingInk(p)}`),
       ...(plan ? emptyPanelProblems(plan) : []),
       ...partitionProblems,

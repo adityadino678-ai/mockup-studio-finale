@@ -254,6 +254,7 @@ export function PrintifyStudioPage() {
               ...state,
               colors: kept,
               blackInkColors: state.blackInkColors.filter((c) => kept.includes(c)),
+              whiteInkColors: (state.whiteInkColors ?? []).filter((c) => kept.includes(c)),
             };
           }
           const keptSizes = prev.sizes.filter((s) => sizeNames.has(s));
@@ -312,7 +313,9 @@ export function PrintifyStudioPage() {
         if (row === "plain") return { name, hex };
         const ink = session.rows.ink?.blackInkColors?.includes(name)
           ? ("black" as const)
-          : ("white" as const);
+          : session.rows.ink?.whiteInkColors?.includes(name)
+            ? ("white" as const)
+            : ("ambiguous" as const);
         return { name, hex, ink };
       }),
     [session.rows, hexFor],

@@ -21,7 +21,7 @@ import type {
   StudioSession,
 } from "@/types/domain";
 import { DEFAULT_PLACEMENT } from "@/lib/printify/print-areas";
-import { describeInkContrast, hexForColourName, inkContrast, lightness } from "@/lib/printify/colors";
+import { describeInkContrast, inkContrast } from "@/lib/printify/colors";
 
 export const SESSION_KEY = "printifyStudio:session";
 export const RESULTS_KEY = "printifyStudio:results";
@@ -41,7 +41,7 @@ export const ROW_HINTS: Record<StudioRowId, string> = {
 };
 
 export function emptyRowState(): StudioRowState {
-  return { colors: [], blackInkColors: [] };
+  return { colors: [], blackInkColors: [], whiteInkColors: [] };
 }
 
 export function emptySession(): StudioSession {
@@ -235,25 +235,17 @@ export async function loadSession(): Promise<StudioSession> {
     const rowState = stored.rows?.[row];
     if (!rowState || typeof rowState !== "object") continue;
     const colors = stringArray(rowState.colors);
-    let blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
-    if (colors.length > 0 && row === "ink") {
-      const allBlack = blackInk.length === colors.length;
-      const allWhite = blackInk.length === 0;
-      // If all colors are stuck on black OR all on white (often stale state or previous unassigned state),
-      // auto-rebalance based on garment lightness so light shirts get Black ink and dark shirts get White ink.
-      if (colors.length > 1 && (allBlack || allWhite)) {
-        const smartBlack = colors.filter((c) => lightness(hexForColourName(c)) > 0.5);
-        if (smartBlack.length !== blackInk.length) {
-          console.info("[studio-session] loadSession: auto-rebalanced ink colors by garment lightness:", {
-            total: colors.length,
-            blackInk: smartBlack,
-            whiteInk: colors.filter((c) => !smartBlack.includes(c)),
-          });
-          blackInk = smartBlack;
-        }
-      }
-    }
-    rows[row] = { colors, blackInkColors: blackInk };
+    const blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
+    // White is EXPLICIT. A session saved before this field existed has no
+    // `whiteInkColors` at all, so its white half is derived ONCE from the old
+    // rule (everything not marked black) and then stored - the user sees the
+    // same colours as before, but can now correct them.
+    const whiteInk = Array.isArray(rowState.whiteInkColors)
+      ? stringArray(rowState.whiteInkColors).filter(
+          (c) => colors.includes(c) && !blackInk.includes(c),
+        )
+      : colors.filter((c) => !blackInk.includes(c));
+    rows[row] = { colors, blackInkColors: blackInk, whiteInkColors: whiteInk };
   }
 
   const placements: Record<string, StudioPlacement> = {};
@@ -525,11 +517,17 @@ export function rowColors(session: StudioSession, row: StudioRowId): string[] {
 }
 
 /**
- * The ink a colour uses in the ink row: "black" for the colours the user
- * marked, "white" for the rest.
+ * The ink a colour uses in the ink row: "black" or "white" when the user
+ * marked it, "undecided" when they have not chosen yet.
  */
-export function inkForColor(session: StudioSession, color: string): "black" | "white" {
-  return session.rows.ink?.blackInkColors?.includes(color) ? "black" : "white";
+export function inkForColor(
+  session: StudioSession,
+  color: string,
+): "black" | "white" | "undecided" {
+  const row = session.rows.ink;
+  if (row?.blackInkColors?.includes(color)) return "black";
+  if (row?.whiteInkColors?.includes(color)) return "white";
+  return "undecided";
 }
 
 export interface InkProblem {
@@ -555,6 +553,7 @@ export function inkProblems(
   const problems: InkProblem[] = [];
   for (const name of session.rows.ink?.colors ?? []) {
     const ink = inkForColor(session, name);
+    if (ink === "undecided") continue;
     const hex = hexFor(name);
     const severity = inkContrast(hex, ink);
     if (severity === "ok") continue;

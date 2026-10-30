@@ -685,12 +685,17 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
 export function swatchesForColors(
   colors: string[],
   blackInkColors: string[],
+  whiteInkColors: string[],
   hasInkVariants: boolean,
 ): DesignSwatch[] {
   return colors.map((name) => {
     const hex = hexForColourName(name);
     if (!hasInkVariants) return { name, hex };
-    const ink = blackInkColors.includes(name) ? "black" : "white";
+    const ink = blackInkColors.includes(name)
+      ? "black"
+      : whiteInkColors.includes(name)
+        ? "white"
+        : "ambiguous";
     return { name, hex, ink };
   });
 }

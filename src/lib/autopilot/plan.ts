@@ -202,8 +202,29 @@ export function withCurrentRenderState(
   snapshot: StudioSession,
   current: StudioSession,
 ): StudioSession {
+  // A run snapshotted before `whiteInkColors` existed has no explicit white
+  // list. Derive it ONCE with the old rule (every ink colour not marked black)
+  // - that is exactly how the run read its colours when it started - so a
+  // resumed run is neither blocked as "undecided" nor silently re-split.
+  // An explicit empty list stays empty: those colours were deliberately
+  // undecided, and guessing them now would be the bug this field removed.
+  const ink = snapshot.rows.ink;
+  const base =
+    ink && !Array.isArray(ink.whiteInkColors)
+      ? {
+          ...snapshot,
+          rows: {
+            ...snapshot.rows,
+            ink: {
+              ...ink,
+              whiteInkColors: ink.colors.filter((c) => !ink.blackInkColors.includes(c)),
+            },
+          },
+        }
+      : snapshot;
+
   return {
-    ...snapshot,
+    ...base,
     universalPlacement: current.universalPlacement,
     placements: current.placements,
     listingRenders: current.listingRenders,

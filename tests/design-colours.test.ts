@@ -168,6 +168,56 @@ describe("normaliseColourGroups", () => {
   });
 });
 
+describe("explicit white ink", () => {
+  it("treats a colour in neither list as undecided, in neither black nor white", () => {
+    const normalised = normaliseColourGroups({
+      plain: [],
+      ink: ["Black", "Navy", "Mystery"],
+      blackInk: ["Black"],
+      whiteInk: ["Navy"],
+    });
+
+    expect(normalised.black).toEqual(["Black"]);
+    expect(normalised.white).toEqual(["Navy"]);
+    expect(normalised.undecided).toEqual(["Mystery"]);
+    for (const colour of ["Black", "Navy"]) {
+      expect(normalised.undecided).not.toContain(colour);
+    }
+  });
+
+  it("excludes undecided colours from a ticked design's plan and reports them", () => {
+    const plan = planDesignColours(
+      { hasInkPair: true, hasBlackInk: true, hasWhiteInk: true },
+      {
+        plain: [],
+        ink: ["Black", "Navy", "Mystery"],
+        blackInk: ["Black"],
+        whiteInk: ["Navy"],
+      },
+    );
+
+    expect(plan.groups.map((g) => ({ ink: g.ink, colors: g.colors }))).toEqual([
+      { ink: "black", colors: ["Black"] },
+      { ink: "white", colors: ["Navy"] },
+    ]);
+    expect(plan.undecided).toEqual(["Mystery"]);
+    expect(plan.colors).toEqual(["Black", "Navy"]);
+  });
+
+  it("pairedColourGroups returns undecided colours", () => {
+    const split = pairedColourGroups({
+      plain: [],
+      ink: ["Black", "Navy", "Mystery"],
+      blackInk: ["Black"],
+      whiteInk: ["Navy"],
+    });
+
+    expect(split.black).toEqual(["Black"]);
+    expect(split.white).toEqual(["Navy"]);
+    expect(split.undecided).toEqual(["Mystery"]);
+  });
+});
+
 /**
  * The real case this fix is about: the user picks four colours for the black
  * ink, four for the white ink and a few plain ones. Every one of them must
@@ -264,7 +314,7 @@ describe("summariseColourGroups", () => {
         ink: ["B", "C"],
         blackInk: ["B"],
       }),
-    ).toEqual({ plain: 2, black: 1, white: 1, total: 3, overlap: ["B"] });
+    ).toEqual({ plain: 2, black: 1, white: 1, undecided: 0, total: 3, overlap: ["B"] });
   });
 
   it("reports the four-and-four case without an overlap", () => {
@@ -274,6 +324,7 @@ describe("summariseColourGroups", () => {
       plain: 3,
       black: 4,
       white: 4,
+      undecided: 0,
       total: 11,
       overlap: [],
     });
@@ -647,6 +698,7 @@ describe("pairedColourGroups", () => {
     expect(pairedColourGroups(PRODUCT)).toEqual({
       black: ["Black", "Navy"],
       white: ["Red"],
+      undecided: [],
     });
   });
 
@@ -665,9 +717,12 @@ describe("pairedColourGroups", () => {
   });
 
   it("has no white half when every ink colour uses black ink", () => {
-    expect(pairedColourGroups({ plain: ["White"], ink: ["Black"], blackInk: ["Black"] })).toEqual({
+    expect(
+      pairedColourGroups({ plain: ["White"], ink: ["Black"], blackInk: ["Black"] }),
+    ).toEqual({
       black: ["Black"],
       white: [],
+      undecided: [],
     });
   });
 });
