@@ -19,6 +19,7 @@ import { authedFetch } from "@/lib/client/integrations";
 import { getAssetBlob, logActivity, uid } from "@/lib/db/repo";
 import { db } from "@/lib/db/schema";
 import { clampPlacement } from "@/lib/printify/fit";
+import { artworkFilename } from "@/lib/printify/artwork-name";
 import {
   placementFor,
   priceForListing,
@@ -144,7 +145,11 @@ export async function createStudioProduct(
         printAreaId: placement.position,
         variantIds: activeVariantIds,
         base64,
-        filename: `${item.designName}-${artwork.ink}.png`,
+        filename: artworkFilename({
+          label: artwork.label,
+          designName: item.designName,
+          ink: artwork.ink,
+        }),
         placement: clampPlacement(placement),
       });
     }
