@@ -44,6 +44,8 @@ export const createProductSchema = z.object({
       z.object({
         printAreaId: z.string().min(1),
         variantIds: z.array(z.number()).optional(),
+        /** One variant-id array per colour; the endpoint emits one print area group per array. */
+        variantGroups: z.array(z.array(z.number())).optional(),
         base64: z.string().min(1),
         filename: z.string().min(1),
         placement: z
@@ -52,6 +54,8 @@ export const createProductSchema = z.object({
       }),
     )
     .optional(),
+  /** Catalogue variants this product disables; the endpoint names them last. */
+  leftoverVariantIds: z.array(z.number()).optional(),
 });
 
 // --- PUT /api/printify/products ---

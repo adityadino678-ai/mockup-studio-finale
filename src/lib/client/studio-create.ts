@@ -27,7 +27,11 @@ import {
   renderTitle,
 } from "@/lib/printify/studio-session";
 import type { StudioDesignPlan, StudioPlan } from "@/lib/printify/studio-plan";
-import { buildPartition, resolveVariantIds } from "@/lib/printify/variants";
+import {
+  buildPartition,
+  resolveVariantIds,
+  splitVariantIdsByColour,
+} from "@/lib/printify/variants";
 import { verifyProductArtwork } from "@/lib/printify/verify-artwork";
 import type { StudioProductResult, StudioSession } from "@/types/domain";
 
@@ -129,8 +133,15 @@ export async function createStudioProduct(
       base64: string;
       filename: string;
       placement: { x: number; y: number; scale: number; angle: number };
+      variantGroups?: number[][];
     }> = [];
     const enabledSet = new Set(enabled);
+    // Every catalogue variant this product does NOT enable. Printify appends
+    // unnamed variants to the LAST print group, which would put a disabled
+    // colour at the front of that group and make the editor show the
+    // colour-specific design on the wrong colour. Naming them explicitly keeps
+    // every colour group clean.
+    const leftoverVariantIds = plan.colourIndex.allVariantIds.filter((id) => !enabledSet.has(id));
     for (let index = 0; index < partition.groups.length; index++) {
       const group = partition.groups[index];
       const artwork = item.groups[index];
@@ -141,6 +152,7 @@ export async function createStudioProduct(
       const longEdge = Math.max(context.areaWidth ?? 3000, context.areaHeight ?? 3000);
       const base64 = await artworkToBase64Sized(blob, longEdge);
       const placement = placementFor(session, item.designId);
+      const variantGroups = splitVariantIdsByColour(plan.colourIndex, activeVariantIds);
       artworks.push({
         printAreaId: placement.position,
         variantIds: activeVariantIds,
@@ -151,6 +163,7 @@ export async function createStudioProduct(
           ink: artwork.ink,
         }),
         placement: clampPlacement(placement),
+        variantGroups: variantGroups.length > 1 ? variantGroups : undefined,
       });
     }
 
@@ -176,6 +189,7 @@ export async function createStudioProduct(
         variants: { [String(session.blueprintId)]: enabled },
         price,
         artworks,
+        leftoverVariantIds: leftoverVariantIds.length > 0 ? leftoverVariantIds : undefined,
       }),
     });
     const data = await response.json().catch(() => null);

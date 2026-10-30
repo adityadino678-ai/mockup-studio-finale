@@ -36,6 +36,12 @@ export interface ArtworkGroup {
   variantIds: number[];
   /** The colour titles this group covers (used for diagnostics). */
   colors?: string[];
+  /**
+   * Optional partition of `variantIds` into one inner array per colour. When
+   * present and non-empty, `expandArtworkGroups` emits one group per inner
+   * array, all reusing this group's `imageId`. One upload, one group per colour.
+   */
+  variantGroups?: number[][];
 }
 
 export interface BuildPrintAreasInput {
@@ -65,6 +71,36 @@ export function buildPrintAreas(input: BuildPrintAreasInput): PrintAreaGroup[] {
       variant_ids: [...g.variantIds].sort((a, b) => a - b),
       placeholders: [{ position, images: [{ ...image, id: g.imageId }] }],
     }));
+}
+
+/**
+ * Turns artwork groups into one `ArtworkGroup` per colour partition.
+ *
+ * When a group carries `variantGroups` (one inner array per colour), it emits
+ * one group per inner array - same `imageId`, same `colors` if provided, and
+ * `variantIds` equal to that inner array. Empty inner arrays are dropped.
+ *
+ * When `variantGroups` is absent or empty, the group is returned unchanged
+ * (one group). Never merges across input groups; keeps input order. Pure.
+ */
+export function expandArtworkGroups(groups: ArtworkGroup[]): ArtworkGroup[] {
+  const out: ArtworkGroup[] = [];
+  for (const group of groups) {
+    const variantGroups = group.variantGroups;
+    if (!variantGroups || variantGroups.length === 0) {
+      out.push(group);
+      continue;
+    }
+    for (const inner of variantGroups) {
+      if (inner.length === 0) continue;
+      out.push({
+        imageId: group.imageId,
+        variantIds: [...inner],
+        colors: group.colors,
+      });
+    }
+  }
+  return out;
 }
 
 export interface PartitionProblem {

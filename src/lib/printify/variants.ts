@@ -188,3 +188,22 @@ export function enabledVariantIds(index: ColourIndex, colors: string[], sizes: s
   return resolveVariantIds(index, colors, sizes);
 }
 
+/**
+ * Splits the given variant ids into one array per colour. Walks
+ * `index.variantIds` (colour -> variant ids), keeps the intersection with
+ * `variantIds` for each colour, sorted ascending, at most one array per colour
+ * in Map order. Skips empty intersections. Pure; does not mutate inputs.
+ */
+export function splitVariantIdsByColour(
+  index: ColourIndex,
+  variantIds: number[],
+): number[][] {
+  const enabled = new Set<number>(variantIds);
+  const groups: number[][] = [];
+  for (const ids of index.variantIds.values()) {
+    const group = ids.filter((id) => enabled.has(id)).sort((a, b) => a - b);
+    if (group.length > 0) groups.push(group);
+  }
+  return groups;
+}
+

@@ -3,6 +3,7 @@ import { json } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/server/printify";
 import { clampPlacement } from "@/lib/printify/fit";
+import { expandArtworkGroups } from "@/lib/printify/print-areas";
 import { validateBody } from "@/lib/security/validation";
 
 interface UpdateProductBody {
@@ -52,11 +53,26 @@ interface CreateProductBody {
     printAreaId: string;
     /** The variants this artwork is printed on. Defaults to every variant. */
     variantIds?: number[];
+    /**
+     * Optional partition of `variantIds` into one inner array per colour.
+     * One upload is made per artwork entry and one print area group is
+     * emitted per inner array, all reusing that upload's image id.
+     */
+    variantGroups?: number[][];
     base64: string;
     filename: string;
     /** Placement inside the print area, in Printify's centre-based units. */
     placement?: { x?: number; y?: number; scale?: number; angle?: number };
   }>;
+  /**
+   * Every catalogue variant this product does NOT enable.
+   *
+   * Printify appends any variant no group named to the LAST group, which puts
+   * a disabled colour at the front of that group's `variant_ids` and makes the
+   * editor show the colour-specific design on the wrong colour. Naming them
+   * explicitly in one trailing group keeps every colour group clean.
+   */
+  leftoverVariantIds?: number[];
 }
 
 /**
@@ -258,6 +274,46 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
+    // Validate any present `variantGroups` before uploading anything: each
+    // inner array non-empty, and the flattened ids must equal the artwork's
+    // `variantIds` exactly as a set (same members, no duplicates). When
+    // `variantIds` is absent, the flattened set is the artwork's set.
+    for (const artwork of artworks) {
+      const variantGroups = artwork.variantGroups;
+      if (!variantGroups || variantGroups.length === 0) continue;
+      for (const inner of variantGroups) {
+        if (inner.length === 0) {
+          return json(
+            {
+              error: `An artwork group's variantGroups contains an empty group. Every colour group needs at least one variant.`,
+            },
+            400,
+          );
+        }
+      }
+      const flattened = variantGroups.flat();
+      const unique = new Set<number>(flattened);
+      if (unique.size !== flattened.length) {
+        return json(
+          {
+            error: `An artwork group's variantGroups repeats a variant id. Every variant may appear in only one colour group.`,
+          },
+          400,
+        );
+      }
+      if (artwork.variantIds?.length) {
+        const base = new Set<number>(artwork.variantIds);
+        if (unique.size !== base.size || [...unique].some((id) => !base.has(id))) {
+          return json(
+            {
+              error: `An artwork group's variantGroups does not partition its variantIds exactly: it must name the same variants, once each, with nothing missing or extra.`,
+            },
+            400,
+          );
+        }
+      }
+    }
+
     const totalBytes = artworks.reduce((sum, a) => sum + base64Bytes(a.base64), 0);
     if (totalBytes > MAX_TOTAL_UPLOAD_BYTES) {
       return json(
@@ -282,22 +338,52 @@ export const POST: APIRoute = async ({ request }) => {
       if (base64Bytes(artwork.base64) > MAX_UPLOAD_BYTES) {
         return json({ error: "Artwork exceeds the 8 MB upload limit after processing" }, 413);
       }
+      // One upload per artwork entry, shared by every colour group below.
       const uploaded = await client.uploadImage(artwork.base64, artwork.filename);
+      const imageId = String(uploaded.id);
       const placement = clampPlacement(artwork.placement ?? {});
-      printAreaGroups.push({
-        variantIds: artwork.variantIds?.length ? artwork.variantIds : variantIds,
-        position: artwork.printAreaId,
-        imageId: String(uploaded.id),
-        x: placement.x,
-        y: placement.y,
-        scale: placement.scale,
-        angle: placement.angle,
-      });
+      // Expand into one group per colour (or a single group when variantGroups
+      // is absent), all reusing this upload's image id and placement.
+      const expanded = expandArtworkGroups([
+        {
+          imageId: "",
+          variantIds: artwork.variantIds?.length ? artwork.variantIds : variantIds,
+          variantGroups: artwork.variantGroups,
+        },
+      ]);
+      for (const group of expanded) {
+        printAreaGroups.push({
+          variantIds: group.variantIds,
+          position: artwork.printAreaId,
+          imageId,
+          x: placement.x,
+          y: placement.y,
+          scale: placement.scale,
+          angle: placement.angle,
+        });
+      }
     }
 
     // A product's print areas must partition its variants. Printify rewrites
     // a group to swallow anything nobody named, and a variant that lands in
     // the wrong group is printed with the wrong artwork.
+    const leftovers = body.leftoverVariantIds ?? [];
+    if (leftovers.length > 0 && printAreaGroups.length === 0) {
+      return json({ error: "Attach a design to a print area before creating the product" }, 400);
+    }
+    if (leftovers.length > 0) {
+      const enabled = new Set<number>(variantIds);
+      const seen = new Set<number>(leftovers);
+      if (seen.size !== leftovers.length || leftovers.some((id) => enabled.has(id))) {
+        return json(
+          {
+            error: `The leftover variants overlap the enabled variants. Leftovers are the catalogue variants this product does NOT enable, so they must be disjoint.`,
+          },
+          400,
+        );
+      }
+    }
+
     const covered = new Set<number>();
     for (const group of printAreaGroups) {
       for (const id of group.variantIds) {
@@ -318,6 +404,24 @@ export const POST: APIRoute = async ({ request }) => {
         },
         400,
       );
+    }
+
+    // Name the catalogue variants this product disables LAST, with the first
+    // group's own upload and placement. Without this Printify appends them to
+    // the final colour group, where they sit at the front of `variant_ids` and
+    // the editor then shows that group's colour-specific design on a disabled
+    // colour instead of on the colour that really has it.
+    if (leftovers.length > 0) {
+      const first = printAreaGroups[0];
+      printAreaGroups.push({
+        variantIds: [...leftovers].sort((a, b) => a - b),
+        position: first.position,
+        imageId: first.imageId,
+        x: first.x,
+        y: first.y,
+        scale: first.scale,
+        angle: first.angle,
+      });
     }
 
     // Resolve the shop once per request: the response carries it so the

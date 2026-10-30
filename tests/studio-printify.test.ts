@@ -24,14 +24,18 @@ import {
   buildPartition,
   enabledVariantIds,
   resolveVariantIds,
+  splitVariantIdsByColour,
 } from "@/lib/printify/variants";
+import type { ArtworkGroup } from "@/lib/printify/print-areas";
 import {
   DEFAULT_PLACEMENT,
   assertCompletePartition,
   buildPrintAreas,
   describePartitionProblems,
+  expandArtworkGroups,
 } from "@/lib/printify/print-areas";
 import type { CatalogVariant } from "@/lib/printify/types";
+import { createProductSchema } from "@/lib/security/validation";
 
 /**
  * The live catalogue shape used by the spike: 3 colours x 6 sizes.
@@ -733,5 +737,126 @@ describe("a four-and-four colour selection", () => {
     expect(new Set([...split.black, ...split.white]).size).toBe(
       BLACK_INK.length + WHITE_INK.length,
     );
+  });
+});
+
+describe("split by colour and expand artwork groups", () => {
+  const index = buildCatalogueIndex(CATALOGUE);
+  const allIds = index.allVariantIds;
+
+  it("split by colour returns one array per colour, each with only that colour's enabled ids, sorted", () => {
+    const groups = splitVariantIdsByColour(index, allIds);
+    expect(groups).toHaveLength(3);
+    // Heather Grey: 17391-17396, Solid Black: 17427-17432, Solid White: 17643-17648
+    expect(groups[0]).toEqual([17391, 17392, 17393, 17394, 17395, 17396]);
+    expect(groups[1]).toEqual([17427, 17428, 17429, 17430, 17431, 17432]);
+    expect(groups[2]).toEqual([17643, 17644, 17645, 17646, 17647, 17648]);
+    // Each array holds only its own colour's ids.
+    for (const id of groups[0]) expect(index.variantIds.get("Heather Grey")).toContain(id);
+    for (const id of groups[1]) expect(index.variantIds.get("Solid Black")).toContain(id);
+    for (const id of groups[2]) expect(index.variantIds.get("Solid White")).toContain(id);
+  });
+
+  it("the sizes filter is respected and ids not present in the index are dropped", () => {
+    // Only S and M of each colour.
+    const enabled = [17391, 17392, 17427, 17428, 17643, 17644];
+    // Throw in an id the index does not know - it must be dropped.
+    const groups = splitVariantIdsByColour(index, [...enabled, 999999]);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toEqual([17391, 17392]);
+    expect(groups[1]).toEqual([17427, 17428]);
+    expect(groups[2]).toEqual([17643, 17644]);
+  });
+
+  it("a single-colour split returns one array", () => {
+    const groups = splitVariantIdsByColour(index, [17427, 17428]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toEqual([17427, 17428]);
+  });
+
+  it("expandArtworkGroups returns one group per colour with the SAME imageId", () => {
+    const groups: ArtworkGroup[] = [
+      {
+        imageId: "img-shared",
+        variantIds: allIds,
+        variantGroups: splitVariantIdsByColour(index, allIds),
+      },
+    ];
+    const expanded = expandArtworkGroups(groups);
+    expect(expanded).toHaveLength(3);
+    for (const g of expanded) expect(g.imageId).toBe("img-shared");
+    // Each group keeps its own colour's variants.
+    expect(expanded[0].variantIds).toEqual([17391, 17392, 17393, 17394, 17395, 17396]);
+    expect(expanded[1].variantIds).toEqual([17427, 17428, 17429, 17430, 17431, 17432]);
+    expect(expanded[2].variantIds).toEqual([17643, 17644, 17645, 17646, 17647, 17648]);
+  });
+
+  it("expandArtworkGroups falls back to the single group when variantGroups is absent", () => {
+    const groups: ArtworkGroup[] = [
+      { imageId: "img-solo", variantIds: [17391, 17427] },
+    ];
+    const expanded = expandArtworkGroups(groups);
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0].imageId).toBe("img-solo");
+    expect(expanded[0].variantIds).toEqual([17391, 17427]);
+  });
+
+  it("expandArtworkGroups keeps input order and never merges across input groups", () => {
+    const groups: ArtworkGroup[] = [
+      {
+        imageId: "img-a",
+        variantIds: [17391],
+        variantGroups: [[17391]],
+      },
+      {
+        imageId: "img-b",
+        variantIds: [17427],
+        variantGroups: [[17427]],
+      },
+    ];
+    const expanded = expandArtworkGroups(groups);
+    expect(expanded).toHaveLength(2);
+    expect(expanded[0].imageId).toBe("img-a");
+    expect(expanded[1].imageId).toBe("img-b");
+  });
+});
+
+describe("the create request keeps the routing fields", () => {
+  // Zod strips unknown keys, so a field missing from the schema is silently
+  // dropped between the browser and the endpoint. That is exactly how the
+  // per-colour split reached Printify as one group per artwork instead of one
+  // per colour, and the editor kept showing the wrong design.
+  const base = {
+    confirm: true,
+    title: "Test",
+    blueprintId: 6,
+    variants: { "6": [17391, 17427] },
+    artworks: [
+      {
+        printAreaId: "front",
+        variantIds: [17391, 17427],
+        variantGroups: [[17391], [17427]],
+        base64: "AAAA",
+        filename: "a.png",
+      },
+    ],
+    leftoverVariantIds: [17643],
+  };
+
+  it("keeps every artwork's variantGroups and the leftover variants", () => {
+    const parsed = createProductSchema.parse(base);
+    expect(parsed.artworks?.[0].variantGroups).toEqual([[17391], [17427]]);
+    expect(parsed.leftoverVariantIds).toEqual([17643]);
+  });
+
+  it("accepts a request without either field", () => {
+    const { artworks, leftoverVariantIds, ...rest } = base;
+    const parsed = createProductSchema.parse({
+      ...rest,
+      artworks: [{ ...artworks[0], variantGroups: undefined }],
+    });
+    expect(parsed.artworks?.[0].variantGroups).toBeUndefined();
+    expect(parsed.leftoverVariantIds).toBeUndefined();
+    expect(leftoverVariantIds).toEqual([17643]);
   });
 });

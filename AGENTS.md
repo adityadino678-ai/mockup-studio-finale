@@ -149,6 +149,20 @@ Re-run the spike after any Printify change.
   diagnose a misroute from the canvas alone: read `decorators[0].prints[]`,
   where `variant_ids` → `placeholders[].images[]` is the real mapping, and
   compare the generated mockups.
+- **So the product is created with ONE `print_areas` group per colour.** The
+  client splits each artwork's enabled variants by colour (`splitVariantIdsByColour`)
+  and the endpoint emits one group per colour, all reusing a single upload and
+  the same placement (`expandArtworkGroups`). The first group is still the
+  default design, so its colour is the one the editor calls "default" — it must
+  therefore be a colour whose artwork is the right default (it is: the black-ink
+  group comes first).
+  **Every catalogue variant the product does NOT enable must be named too**
+  (`leftoverVariantIds`), in one trailing group. Printify appends unnamed
+  variants to the LAST group, and because it sorts `variant_ids`, a disabled
+  colour with a lower id (e.g. `Navy 73197`) then sits at the front and the
+  editor shows that group's colour-specific design on the disabled colour —
+  which is what made True Navy (`79081`) fall back to the default. Verified
+  live: with the trailing group, all four colours show their real artwork.
 - `placeholders[].position` comes back expanded to every printable position for
   the variant (`front` **and** `back`), but only the position you named receives
   the image. The other stays empty — that is expected, not a bug.
