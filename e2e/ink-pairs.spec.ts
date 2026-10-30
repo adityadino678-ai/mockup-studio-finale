@@ -51,7 +51,14 @@ async function setStudioSession(page: Page, patch: Record<string, unknown>) {
         .get("printifyStudio:session");
       rq.onsuccess = () => res(rq.result);
     });
-    const session = { ...((read?.value ?? {}) as Record<string, unknown>), ...changes };
+    // Seeds are EXPLICIT-model sessions unless a test opts into legacy data by
+    // setting `inkRevision` itself; otherwise a seed with no inkRevision would
+    // be treated as the old automatic split and cleared on load.
+    const session = {
+      inkRevision: 2,
+      ...((read?.value ?? {}) as Record<string, unknown>),
+      ...changes,
+    };
     await new Promise<void>((res) => {
       const tx = db.transaction(["settings"], "readwrite");
       tx.objectStore("settings").put({ key: "printifyStudio:session", value: session });
@@ -265,6 +272,83 @@ test("a colour with no ink choice prints on nothing and blocks Create", async ({
   await page.getByRole("button", { name: "Create drafts" }).click();
   await expect(page.getByText("Fix the problems above before creating the listings.")).toBeVisible();
   expect(productRequests).toBe(0);
+});
+
+test("a legacy automatic split is cleared once and leaves the plain row untouched", async ({
+  page,
+}) => {
+  await mockCatalog(page);
+  await page.goto("/printify-studio");
+  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({ timeout: 30_000 });
+
+  // The OLD app's data: no explicit white, and the black list is the light/dark
+  // GUESS ("light garments get black ink"). `inkRevision: 1` marks it legacy.
+  await setStudioSession(page, {
+    inkRevision: 1,
+    blueprintId: 6,
+    printProviderId: 30,
+    rows: {
+      plain: { colors: ["White"], blackInkColors: [] },
+      ink: {
+        colors: ["Black", "Navy", "White"],
+        blackInkColors: ["White", "Navy"],
+      },
+    },
+  });
+
+  await page.getByRole("tab", { name: "Colors" }).click();
+
+  // The guess is gone, and the user is told why. Nothing was silently moved to
+  // the other design.
+  const notice = page.locator("[data-ink-reset]");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("only your Black ink / White ink marks decide");
+  const routes = page.locator("[data-ink-route]");
+  await expect(routes).toHaveCount(3);
+  for (const name of ["Black", "Navy", "White"]) {
+    await expect(page.locator(`[data-ink-route="${name}"]`)).toHaveAttribute(
+      "data-ink-route-to",
+      "none",
+    );
+  }
+  // The no-ink row keeps the user's colours: only the ink guess was cleared.
+  await expect(page.getByText(/No ink variants row →/)).toContainText("1 colour (White)");
+
+  // Dismiss first so the reset cannot run again, then make an explicit choice.
+  await notice.getByRole("button", { name: "Dismiss" }).click();
+  await expect(page.locator("[data-ink-reset]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Navy: print with black ink" }).click();
+  await expect(page.locator('[data-ink-route="Navy"]')).toHaveAttribute(
+    "data-ink-route-to",
+    "black",
+  );
+  await expect(page.locator('[data-ink-route="Navy"]')).toContainText("Black-ink design");
+  await expect(page.locator('[data-ink-route="Black"]')).toHaveAttribute(
+    "data-ink-route-to",
+    "none",
+  );
+
+  // The explicit choice survives a reload, and the reset never fires again.
+  await page.waitForTimeout(900);
+  await page.reload();
+  await page.getByRole("tab", { name: "Colors" }).click();
+  await expect(page.locator("[data-ink-reset]")).toHaveCount(0);
+  await expect(page.locator('[data-ink-route="Navy"]')).toHaveAttribute(
+    "data-ink-route-to",
+    "black",
+  );
+  await expect(page.locator('[data-ink-route="Black"]')).toHaveAttribute(
+    "data-ink-route-to",
+    "none",
+  );
+
+  // And "Clear all ink marks" only clears the ink row.
+  await page.getByRole("button", { name: "Clear all ink marks" }).click();
+  await expect(page.locator('[data-ink-route="Navy"]')).toHaveAttribute(
+    "data-ink-route-to",
+    "none",
+  );
+  await expect(page.getByText(/No ink variants row →/)).toContainText("1 colour (White)");
 });
 
 test("the adjustment preview clips the artwork to the print area", async ({ page }) => {

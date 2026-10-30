@@ -51,6 +51,8 @@ export function emptySession(): StudioSession {
     designIds: [],
     inkPairIds: [],
     inkPairs: [],
+    inkRevision: 2,
+    inkReset: false,
     universalPlacement: { ...DEFAULT_PLACEMENT },
     placements: {},
     priceCents: 1999,
@@ -231,20 +233,43 @@ export async function loadSession(): Promise<StudioSession> {
   if (!stored || typeof stored !== "object") return base;
 
   const rows = { ...base.rows };
+  /**
+   * Sessions saved before `inkRevision: 2` hold the OLD automatic light/dark
+   * split in their ink lists. Replaying it is what made "only the black
+   * garment got the white-ink design" survive every reload, so a legacy
+   * session clears the INK row ONCE. The plain ("No ink variants") row is
+   * never touched: its colours are the user's own selection and carry no ink.
+   */
+  const inkRevision = finiteNumber(stored.inkRevision) ?? 1;
+  const legacyInk = inkRevision < 2;
+  let legacySplitCleared = false;
+
   for (const row of ROWS) {
     const rowState = stored.rows?.[row];
     if (!rowState || typeof rowState !== "object") continue;
     const colors = stringArray(rowState.colors);
     const blackInk = stringArray(rowState.blackInkColors).filter((c) => colors.includes(c));
-    // White is EXPLICIT. A session saved before this field existed has no
-    // `whiteInkColors` at all, so its white half is derived ONCE from the old
-    // rule (everything not marked black) and then stored - the user sees the
-    // same colours as before, but can now correct them.
+    // White is EXPLICIT. An explicit `whiteInkColors: []` keeps its colours
+    // undecided; only a pre-`whiteInkColors` session used to derive white from
+    // "everything not marked black", and that derivation is gone - it was the
+    // old automatic split.
     const whiteInk = Array.isArray(rowState.whiteInkColors)
       ? stringArray(rowState.whiteInkColors).filter(
           (c) => colors.includes(c) && !blackInk.includes(c),
         )
       : colors.filter((c) => !blackInk.includes(c));
+    if (row === "plain") {
+      // The plain row has no ink split at all - its designs print one artwork
+      // on every selected colour. Keeping empty lists makes that explicit and
+      // guarantees a legacy migration cannot write an ink choice here.
+      rows[row] = { colors, blackInkColors: [], whiteInkColors: [] };
+      continue;
+    }
+    if (legacyInk) {
+      if (blackInk.length > 0 || whiteInk.length > 0) legacySplitCleared = true;
+      rows[row] = { colors, blackInkColors: [], whiteInkColors: [] };
+      continue;
+    }
     rows[row] = { colors, blackInkColors: blackInk, whiteInkColors: whiteInk };
   }
 
@@ -288,6 +313,10 @@ export async function loadSession(): Promise<StudioSession> {
     designIds: stringArray(stored.designIds),
     inkPairIds: stringArray(stored.inkPairIds),
     inkPairs: inkPairArray(stored.inkPairs),
+    // Always 2 after a load: the next save records the explicit model, so the
+    // one-time reset cannot run twice.
+    inkRevision: 2,
+    inkReset: legacySplitCleared || stored.inkReset === true,
     universalPlacement,
     placements,
     priceCents: positiveCents(stored.priceCents) ?? base.priceCents,
@@ -322,7 +351,9 @@ export async function loadSession(): Promise<StudioSession> {
 }
 
 export async function saveSession(session: StudioSession): Promise<void> {
-  await setSetting(SESSION_KEY, { ...session, updatedAt: Date.now() });
+  // Every save is explicit-model data from here on, even if the caller still
+  // carries a legacy-shaped row object.
+  await setSetting(SESSION_KEY, { ...session, inkRevision: 2, updatedAt: Date.now() });
 }
 
 export async function clearSession(): Promise<void> {

@@ -2388,7 +2388,14 @@ async function setStudioSession(page: Page, patch: Record<string, unknown>) {
       );
       rq.onsuccess = () => res(rq.result);
     });
-    const session = { ...((read?.value ?? {}) as Record<string, unknown>), ...changes };
+    // Seeds are EXPLICIT-model sessions unless a test opts into legacy data by
+    // setting `inkRevision` itself; otherwise a seed with no inkRevision would
+    // be treated as the old automatic split and cleared on load.
+    const session = {
+      inkRevision: 2,
+      ...((read?.value ?? {}) as Record<string, unknown>),
+      ...changes,
+    };
     await new Promise<void>((res) => {
       const tx = db.transaction(["settings"], "readwrite");
       tx.objectStore("settings").put({ key: "printifyStudio:session", value: session });

@@ -771,10 +771,14 @@ white-ink design — the exact cross-contamination this model prevents. Selectin
 a colour in the Colors tab leaves it undecided; only the **Black ink / White
 ink** buttons decide, and `setInk` keeps the two lists mutually exclusive (a
 colour in both resolves to black and is dropped from white on load). A session
-saved before `whiteInkColors` existed is migrated ONCE in `loadSession`: its
-white half is derived from the old implicit rule so nothing changes visually,
-whereas an explicit `whiteInkColors: []` keeps its colours undecided. The
-undecided state shows the swatch's existing `ambiguous` badge (`?`), with
+with no `inkRevision` (or `< 2`) was saved while the app still guessed inks
+from garment lightness; those lists ARE that guess, so `loadSession` clears the
+**ink row once** (`inkRevision: 2`, `inkReset: true`) instead of replaying it.
+The "No ink variants" row is never touched: its colours carry no ink and are
+kept exactly as saved. `saveSession` stamps `inkRevision: 2`, so the reset
+cannot run twice; `inkReset` drives a dismissible notice that says the old
+automatic split was cleared. The undecided state shows the swatch's existing
+`ambiguous` badge (`?`), with
 neither ink button pressed. An autopilot run snapshotted before the field
 existed gets the same one-time derivation in `withCurrentRenderState`, so a
 resumed run is not left permanently "undecided" by colours it can no longer
@@ -815,6 +819,15 @@ catalogue, so unclaimed variants land inside one group while staying disabled
 no `main` group (the panels are independent), so the absorber falls back to
 `black` — never `white`, because white ink on a light garment is invisible and
 must never be the group that swallows leftovers.
+
+**The Colors tab shows the route, not just the marks.** "Where each colour
+prints" (`data-ink-routing`) lists every ink-row colour with its Black ink /
+White ink control and the design that will print it (`data-ink-route-to` =
+`black` | `white` | `none`), named from the library: the pair's halves when the
+colour is paired, otherwise the ink-ticked design that actually has that ink
+artwork. An undecided colour says "No design yet — pick an ink" and is tinted
+`warning-soft`, so a misroute is visible before Create. "Clear all ink marks"
+clears ONLY the ink row. No arrow is inferred from lightness.
 
 Three things were removed on purpose; do not bring them back:
 

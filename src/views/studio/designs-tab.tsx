@@ -38,7 +38,7 @@ import { InkVariantsDialog } from "@/components/studio/ink-variants-dialog";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { hexForColourName, suggestInk } from "@/lib/printify/colors";
+import { hexForColourName } from "@/lib/printify/colors";
 import { remapListingState, ROWS } from "@/lib/printify/studio-session";
 import type { Design, StudioRowId, StudioSession } from "@/types/domain";
 import { Loader2, Link2, Search, Trash2, Wand2 } from "lucide-react";
@@ -698,9 +698,4 @@ export function swatchesForColors(
         : "ambiguous";
     return { name, hex, ink };
   });
-}
-
-/** The ink a colour would use by default, from the colour's own lightness. */
-export function autoInkForColor(name: string): "black" | "white" | "ambiguous" {
-  return suggestInk(hexForColourName(name));
 }

@@ -16,7 +16,7 @@ import {
   type ColourSource,
 } from "@/lib/printify/catalog-client";
 import { emptySession, loadSession, saveSession, ROWS } from "@/lib/printify/studio-session";
-import { hexForColourName, primaryHex, suggestInk } from "@/lib/printify/colors";
+import { hexForColourName, primaryHex } from "@/lib/printify/colors";
 import type { CatalogBlueprint, CatalogProvider, CatalogVariant } from "@/lib/printify/types";
 import type { StudioRowId, StudioSession } from "@/types/domain";
 import { Cloud, Layers, Palette, Wand2 } from "lucide-react";
@@ -384,9 +384,4 @@ export function PrintifyStudioPage() {
       </Tabs>
     </div>
   );
-}
-
-/** The ink a colour would use if the user has not decided. */
-export function defaultInkForColor(name: string, hex: string): "black" | "white" | "ambiguous" {
-  return suggestInk(hex);
 }

@@ -583,6 +583,22 @@ export interface StudioSession {
    */
   inkPairs: StudioInkPair[];
   /**
+   * The ink model this session was saved with.
+   *
+   * `2` means the Black ink / White ink lists are the user's explicit choices
+   * only. A session without it (or with `1`) was saved while the app still
+   * guessed inks from colour lightness; its lists are that guess, so
+   * `loadSession` clears the INK row once instead of replaying it.
+   */
+  inkRevision?: number;
+  /**
+   * A one-time notice that a legacy automatic ink split was cleared.
+   *
+   * Dismissing it writes `false`; the flag exists so the user is told why the
+   * ink colours are suddenly undecided, instead of assuming the app broke.
+   */
+  inkReset?: boolean;
+  /**
    * The placement a design starts from when it has no override yet.
    *
    * Every new design uses this default. Editing a design writes its own entry

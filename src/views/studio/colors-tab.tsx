@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge, Card, CardContent, Separator } from "@/components/ui/card";
@@ -13,12 +14,12 @@ import {
   SelectValue,
 } from "@/components/ui/primitives";
 import { ColorSwatch } from "@/components/studio/color-swatch";
+import { db } from "@/lib/db/schema";
 import {
   buildBlueprintIndex,
   categoriesOfIndex,
   filterBlueprintIndex,
 } from "@/lib/printify/catalog-client";
-import { describeInkContrast, inkContrast, suggestInk } from "@/lib/printify/colors";
 import { inkProblems } from "@/lib/printify/studio-session";
 import { ROW_HINTS, ROW_LABELS, ROWS } from "@/lib/printify/studio-session";
 import { cn } from "@/lib/utils";
@@ -218,6 +219,46 @@ export function ColorsTab({
   );
   const plainColors = session.rows.plain?.colors ?? [];
 
+  // --- which design actually prints each side --------------------------------
+  // The arrow in the routing table must name the real design, not "the white
+  // one" in the abstract. Names come from the library, the same rows the
+  // Designs tab shows. A pair wins; otherwise a design counts on a side when
+  // its INK ARTWORK for that side exists. Never a lightness guess.
+  const designs = useLiveQuery(async () => {
+    const all = await db.designs.toArray();
+    return all
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        blackInkAssetId: d.blackInkAssetId,
+        whiteInkAssetId: d.whiteInkAssetId,
+        createdAt: d.createdAt,
+      }))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }, []);
+
+  const inkRoutes = React.useMemo(() => {
+    const byId = new Map((designs ?? []).map((d) => [d.id, d]));
+    const ticked = session.inkPairIds
+      .map((id) => byId.get(id))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d));
+    const pair = session.inkPairs.find(
+      (p) =>
+        session.inkPairIds.includes(p.blackInkDesignId) &&
+        session.inkPairIds.includes(p.whiteInkDesignId),
+    );
+    const names = (ids: string[]) =>
+      ids.map((id) => byId.get(id)?.name).filter((n): n is string => Boolean(n));
+    return {
+      black: names(
+        pair ? [pair.blackInkDesignId] : ticked.filter((d) => d.blackInkAssetId).map((d) => d.id),
+      ),
+      white: names(
+        pair ? [pair.whiteInkDesignId] : ticked.filter((d) => d.whiteInkAssetId).map((d) => d.id),
+      ),
+    };
+  }, [designs, session.inkPairIds, session.inkPairs]);
+
   // --- the product picker ----------------------------------------------------
   const pickBlueprint = (id: number) => {
     // The print provider must serve the new blueprint, so the old one is
@@ -244,6 +285,27 @@ export function ColorsTab({
 
   return (
     <div className="space-y-5">
+      {session.inkReset && (
+        <div
+          role="status"
+          data-ink-reset=""
+          className="flex items-start justify-between gap-3 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2"
+        >
+          <p className="text-[12px] leading-relaxed text-ink">
+            The old automatic colour split was cleared. A colour no longer inherits the ink of a
+            similar shade — <strong>only your Black ink / White ink marks decide</strong>. Your
+            &ldquo;No ink variants&rdquo; colours were not touched.
+          </p>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0"
+            onClick={() => update({ inkReset: false })}
+          >
+            Dismiss
+          </Button>
+        </div>
+      )}
       {/* --- the product --------------------------------------------------- */}
       <Card>
         <CardContent className="space-y-4 p-4">
@@ -476,7 +538,6 @@ export function ColorsTab({
                         const hex = hexFor(name);
                         const isBlack = state?.blackInkColors.includes(name) ?? false;
                         const isWhite = state?.whiteInkColors.includes(name) ?? false;
-                        const isMid = suggestInk(hex) === "ambiguous";
                         return (
                           <div key={name} data-row={row} className="relative">
                             {/* The same handler for every swatch: the colour is
@@ -500,12 +561,6 @@ export function ColorsTab({
                               onClick={handleSwatchClick}
                               className="h-7 w-7"
                             />
-                            {isMid && selected && (
-                              <span
-                                title="Mid-tone colour — check the ink"
-                                className="absolute -left-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-warning ring-2 ring-surface"
-                              />
-                            )}
                           </div>
                         );
                       })}
@@ -518,8 +573,8 @@ export function ColorsTab({
                       <div className="space-y-2">
                         <p className="text-[12px] text-ink-muted">
                           Switch each colour between <strong>Black ink</strong> and{" "}
-                          <strong>White ink</strong>. The colour marked black prints with the black
-                          ink; every other colour here prints with the white ink.
+                          <strong>White ink</strong>. A colour prints with the ink you mark and with
+                          nothing else — an unmarked colour is not printed by either design.
                         </p>
                         <p className="text-[12px] font-medium text-ink">
                           Black ink: {blackInkList.length} colour
@@ -528,64 +583,9 @@ export function ColorsTab({
                           ink: {whiteInkList.length} colour{whiteInkList.length === 1 ? "" : "s"}
                           {whiteInkList.length > 0 ? ` (${joinShort(whiteInkList)})` : ""}
                         </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(state?.colors ?? []).map((name) => {
-                            const isBlack = state?.blackInkColors.includes(name) ?? false;
-                            const isWhite = state?.whiteInkColors.includes(name) ?? false;
-                            const contrast =
-                              isBlack || isWhite
-                                ? inkContrast(hexFor(name), isBlack ? "black" : "white")
-                                : "ok";
-                            return (
-                              <div
-                                key={name}
-                                className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface py-0.5 pl-1 pr-0.5"
-                              >
-                                <ColorSwatch name={name} hex={hexFor(name)} className="h-4 w-4" />
-                                <span className="max-w-[120px] truncate text-[11px] text-ink">
-                                  {name}
-                                </span>
-                                {!isBlack && !isWhite && (
-                                  <span
-                                    title="This colour has no ink yet - choose Black ink or White ink"
-                                    className="rounded-full bg-warning px-1.5 text-[9px] font-semibold text-white"
-                                  >
-                                    ?
-                                  </span>
-                                )}
-                                {(isBlack || isWhite) && contrast !== "ok" && (
-                                  <span
-                                    title={describeInkContrast(hexFor(name), isBlack ? "black" : "white")}
-                                    className={cn(
-                                      "h-2 w-2 shrink-0 rounded-full",
-                                      contrast === "none" ? "bg-danger" : "bg-warning",
-                                    )}
-                                  />
-                                )}
-                                <Button
-                                  size="sm"
-                                  variant={isBlack ? "default" : "outline"}
-                                  aria-pressed={isBlack}
-                                  aria-label={`${name}: print with black ink`}
-                                  onClick={() => setInk(name, "black")}
-                                  className="h-6 rounded-l-full px-2 text-[10px]"
-                                >
-                                  Black ink
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant={isWhite ? "default" : "outline"}
-                                  aria-pressed={isWhite}
-                                  aria-label={`${name}: print with white ink`}
-                                  onClick={() => setInk(name, "white")}
-                                  className="-ml-px h-6 rounded-r-full px-2 text-[10px]"
-                                >
-                                  White ink
-                                </Button>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {/* The per-colour controls live in "Where each colour
+                            prints" below, so there is ONE control per colour -
+                            two would let the same label address two buttons. */}
                         {problems.length > 0 && (
                           <div className="space-y-1">
                             {invisible.length > 0 && (
@@ -617,6 +617,101 @@ export function ColorsTab({
               </Card>
             );
           })}
+
+          {/* --- where each colour prints ----------------------------------- */}
+          {inkColors.length > 0 && (
+            <Card data-ink-routing="">
+              <CardContent className="space-y-3 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h2 className="text-[14px] font-semibold text-ink">Where each colour prints</h2>
+                    <p className="text-[12px] text-ink-muted">
+                      One row per ink colour. The arrow names the design that will print it, so a
+                      misroute is visible before you create anything.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => updateRow("ink", { blackInkColors: [], whiteInkColors: [] })}
+                  >
+                    Clear all ink marks
+                  </Button>
+                </div>
+                <ul className="divide-y divide-border-subtle">
+                  {inkColors.map((name) => {
+                    const isBlack = blackInkColors.includes(name);
+                    const isWhite = whiteInkColors.includes(name) && !isBlack;
+                    const undecided = !isBlack && !isWhite;
+                    const names = isBlack ? inkRoutes.black : isWhite ? inkRoutes.white : [];
+                    return (
+                      <li
+                        key={name}
+                        data-ink-route={name}
+                        data-ink-route-to={undecided ? "none" : isBlack ? "black" : "white"}
+                        className={cn(
+                          "flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5",
+                          undecided && "-mx-2 rounded-md bg-warning-soft px-2",
+                        )}
+                      >
+                        <span className="flex min-w-[130px] flex-1 items-center gap-2">
+                          <ColorSwatch name={name} hex={hexFor(name)} className="h-5 w-5" />
+                          <span className="truncate text-[13px] text-ink">{name}</span>
+                        </span>
+                        <span className="flex items-center">
+                          <Button
+                            size="sm"
+                            variant={isBlack ? "default" : "outline"}
+                            aria-pressed={isBlack}
+                            aria-label={`${name}: print with black ink`}
+                            onClick={() => setInk(name, "black")}
+                            className="h-7 rounded-l-md px-2.5 text-[11px]"
+                          >
+                            Black ink
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={isWhite ? "default" : "outline"}
+                            aria-pressed={isWhite}
+                            aria-label={`${name}: print with white ink`}
+                            onClick={() => setInk(name, "white")}
+                            className="-ml-px h-7 rounded-r-md px-2.5 text-[11px]"
+                          >
+                            White ink
+                          </Button>
+                        </span>
+                        <span
+                          className={cn(
+                            "min-w-[190px] flex-1 text-[12px]",
+                            undecided ? "text-warning" : "text-forest",
+                          )}
+                        >
+                          {undecided ? (
+                            <>
+                              <span aria-hidden="true">! </span>
+                              No design yet — pick an ink
+                            </>
+                          ) : names.length > 0 ? (
+                            <>
+                              <span aria-hidden="true">→ </span>
+                              {isBlack ? "Black-ink design" : "White-ink design"} ·{" "}
+                              {joinShort(names)}
+                            </>
+                          ) : (
+                            <>
+                              <span aria-hidden="true">→ </span>
+                              {isBlack ? "Black-ink design" : "White-ink design"} — no design with
+                              that ink artwork yet
+                            </>
+                          )}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
 
           {/* --- the live split readout ------------------------------------- */}
           <Card>
