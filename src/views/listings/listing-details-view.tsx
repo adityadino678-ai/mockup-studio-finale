@@ -47,6 +47,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import { Link, navigate } from "@/lib/client/nav";
+import { publishActiveListing } from "@/lib/client/agent-context";
 import { AssetThumb } from "@/components/asset-thumb";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent } from "@/components/ui/card";
@@ -336,6 +337,17 @@ export function ListingDetailsView() {
     [listings, activeId],
   );
   const openKey = applyAll ? BATCH_KEY : (openListing?.listingId ?? BATCH_KEY);
+
+  // Tell the agent panel which listing is open. The panel is mounted in the
+  // app shell, so it cannot read this page's state directly.
+  React.useEffect(() => {
+    publishActiveListing(
+      openListing
+        ? { listingId: openListing.listingId, designName: openListing.designName }
+        : undefined,
+    );
+    return () => publishActiveListing(undefined);
+  }, [openListing]);
 
   // --- the forms -------------------------------------------------------------
   /**

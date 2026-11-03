@@ -57,10 +57,11 @@ import {
   extensionReloadMessage,
 } from "@/lib/client/extension";
 import { mockupImageForUpload } from "@/lib/client/mockup-upload";
-import { confirmPrintifyProduct } from "@/lib/client/tools";
+import { confirmPrintifyProduct } from "@/agent-tools/runners";
 import { fetchVariants } from "@/lib/printify/catalog-client";
 import { Link } from "@/lib/client/nav";
 import { AssetThumb } from "@/components/asset-thumb";
+import { AssetImage } from "@/components/asset-image";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -81,6 +82,7 @@ import {
 import {
   emptySession,
   listingMockupIds,
+  applyGlobalOrder,
   listingRenderFor,
   loadSession,
   placementFor,
@@ -97,6 +99,10 @@ import {
   mockupsAlreadyApplied,
   withAppliedMockups,
 } from "@/lib/printify/listing-mockups";
+import {
+  infoCardsForListing,
+  productMockups,
+} from "@/lib/mockups/info-cards";
 import {
   bridgePayloadJson,
   buildBridgePayload,
@@ -671,9 +677,13 @@ export function ListingPreviewView() {
     return map;
   }, [results, productDrafts]);
 
-  /** Every mockup in library order - the default selection, as on Listing images. */
+  /**
+   * Every PRODUCT mockup in library order - the default selection, as on
+   * Listing images. Info cards are not product photos, so they are never
+   * offered as a main image here either.
+   */
   const allMockupIds = React.useMemo(
-    () => (mockups ?? []).map((mockup) => mockup.id),
+    () => productMockups(mockups ?? []).map((mockup) => mockup.id),
     [mockups],
   );
   const adoptionIndex = React.useMemo(
@@ -686,7 +696,9 @@ export function ListingPreviewView() {
    *
    * Identical to Listing images, deliberately: an explicit list wins, an
    * explicit Clear means none, and a listing that was never configured starts
-   * with every mockup. The preview must not have its own idea of the order,
+   * with every mockup. The default branch applies the GLOBAL order too — the
+   * drag decides which photograph is the main image on every listing,
+   * configured or not. The preview must not have its own idea of the order,
    * because the first id IS the main image of the product.
    */
   const effectiveIdsFor = React.useCallback(
@@ -696,7 +708,7 @@ export function ListingPreviewView() {
         return listingMockupIds(session, listing.listingId).filter((id) => mockupsById.has(id));
       }
       if (session.listingImageCleared?.[listing.listingId] === true) return [];
-      return allMockupIds;
+      return applyGlobalOrder(session, allMockupIds);
     },
     [session, mockupsById, allMockupIds],
   );
@@ -749,6 +761,47 @@ export function ListingPreviewView() {
   );
 
   /**
+   * The info cards attached to a listing, ordered.
+   *
+   * Cards attach by the category of the product mockups INCLUDED in the
+   * listing (no Printify catalogue needed), and their order follows the
+   * listing image order shared with the mockups strip.
+   */
+  const cardsFor = React.useCallback(
+    (listing: StudioListing): Mockup[] => {
+      if (!mockups) return [];
+      const attached = infoCardsForListing(mockups, effectiveIdsFor(listing));
+      return applyGlobalOrder(
+        session,
+        attached.map((card) => card.id),
+      )
+        .map((id) => mockupsById.get(id))
+        .filter((card): card is Mockup => !!card);
+    },
+    [mockups, effectiveIdsFor, session, mockupsById],
+  );
+
+  /**
+   * The signature images for a listing: product mockups first, then cards.
+   */
+  const signatureImagesFor = React.useCallback(
+    (listing: StudioListing): Array<{ mockupId: string; fingerprint: string }> | undefined => {
+      const images: Array<{ mockupId: string; fingerprint: string }> = [];
+      for (const image of selectionFor(listing)) {
+        const entry = currentEntry(image);
+        if (!entry) return undefined;
+        images.push({ mockupId: image.mockup.id, fingerprint: entry.fingerprint });
+      }
+      for (const card of cardsFor(listing)) {
+        images.push({ mockupId: card.id, fingerprint: `info-card:${card.assetId}` });
+      }
+      if (images.length === 0) return undefined;
+      return images;
+    },
+    [selectionFor, currentEntry, cardsFor],
+  );
+
+  /**
    * The signature of what this listing would upload right now.
    *
    * Undefined when any selected image has no current render: a partial set is
@@ -756,16 +809,11 @@ export function ListingPreviewView() {
    */
   const signatureFor = React.useCallback(
     (listing: StudioListing, productId: string): string | undefined => {
-      const images: Array<{ mockupId: string; fingerprint: string }> = [];
-      for (const image of selectionFor(listing)) {
-        const entry = currentEntry(image);
-        if (!entry) return undefined;
-        images.push({ mockupId: image.mockup.id, fingerprint: entry.fingerprint });
-      }
-      if (images.length === 0) return undefined;
+      const images = signatureImagesFor(listing);
+      if (!images) return undefined;
       return listingMockupSignature(productId, images);
     },
-    [selectionFor, currentEntry],
+    [signatureImagesFor],
   );
 
   /**
@@ -1289,6 +1337,51 @@ export function ListingPreviewView() {
       title = data.title ?? title;
     }
 
+    // Info cards upload after the product mockups, in strip order. They are
+    // static pixels, so their payload is read up front in chunks of eight.
+    const attachedCards = cardsFor(params.listing);
+    for (let start = 0; start < attachedCards.length; start += MAX_IMAGES_PER_UPLOAD) {
+      const chunk = attachedCards.slice(start, start + MAX_IMAGES_PER_UPLOAD);
+      patchStep("images", {
+        status: "running",
+        detail: `Uploading info cards ${Math.min(
+          start + chunk.length,
+          attachedCards.length,
+        )}/${attachedCards.length}…`,
+      });
+      const payloadImages: Array<{ base64: string; filename: string }> = [];
+      for (const card of chunk) {
+        const blob = await getAssetBlob(card.assetId);
+        if (!blob) {
+          throw new Error(`Info card "${card.name}" has no stored image`);
+        }
+        payloadImages.push(
+          await mockupImageForUpload(blob, `${params.listing.designName}-info-${card.name}`),
+        );
+      }
+      const response = await authedFetch("/api/printify/mockups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirm: true,
+          shopId,
+          productId: params.productId,
+          expectedTitle: title,
+          images: payloadImages,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as UploadResponse | null;
+      if (!response.ok) {
+        throw new Error(upstreamError(data, response.status));
+      }
+      if (!Array.isArray(data?.uploads) || data.uploads.length !== chunk.length) {
+        throw new Error("Printify did not return one custom mockup per info card.");
+      }
+      uploads.push(...data.uploads);
+      shopId = data.shopId ?? shopId;
+      title = data.title ?? title;
+    }
+
     if (shopId == null || !Number.isFinite(shopId) || shopId <= 0) {
       throw new Error("Printify did not return the shop for this product.");
     }
@@ -1494,15 +1587,11 @@ export function ListingPreviewView() {
       // its reason - it is never sent a shorter selection.
       const appliedSignatures: Record<string, StudioListingMockupsApplied> = {};
       const activeSignature = signatureFor(listing, productId);
-      if (activeSignature) {
+      const activeImages = signatureImagesFor(listing);
+      if (activeSignature && activeImages) {
         appliedSignatures[listing.listingId] = appliedMockupRecord(
           productId,
-          selectionFor(listing).flatMap((image) => {
-            const entry = currentEntry(image);
-            return entry
-              ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
-              : [];
-          }),
+          activeImages,
         );
       }
       const prepared: PrintifyBridgeProduct[] = [
@@ -1545,15 +1634,11 @@ export function ListingPreviewView() {
           });
           included.add(linkedOther.productId);
           const otherSignature = signatureFor(other, linkedOther.productId);
-          if (otherSignature) {
+          const otherSignatureImages = signatureImagesFor(other);
+          if (otherSignature && otherSignatureImages) {
             appliedSignatures[other.listingId] = appliedMockupRecord(
               linkedOther.productId,
-              otherImages.flatMap((image) => {
-                const entry = currentEntry(image);
-                return entry
-                  ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
-                  : [];
-              }),
+              otherSignatureImages,
             );
           }
           prepared.push({
@@ -1804,14 +1889,35 @@ export function ListingPreviewView() {
   const listing = activeListing;
   const listingCopy = listing ? copyFor(listing) : null;
   const selected = listing ? selectionFor(listing) : [];
-  const main = selected[0];
-  const mainEntry = main ? currentEntry(main) : undefined;
   const linkedProduct = listing ? productsByListing.get(listing.listingId) : undefined;
   const publishedState = listing ? published[listing.listingId] : undefined;
   const blockers = listing ? blockersFor(listing) : [];
   const checks = listing ? checksFor(listing) : [];
   const cleared =
     listing ? session.listingImageCleared?.[listing.listingId] === true : false;
+
+  // --- attached info cards, in upload order -----------------------------------
+  const cards = React.useMemo(() => (listing ? cardsFor(listing) : []), [listing, cardsFor]);
+  const totalItems = selected.length + cards.length;
+
+  // --- preview index for the interactive thumbnail rail ------------------------
+  const [previewIndex, setPreviewIndex] = React.useState(0);
+  React.useEffect(() => {
+    setPreviewIndex(0);
+  }, [listing?.listingId, totalItems]);
+
+  // Clamp the index when selection shrinks.
+  const clampedIndex = React.useMemo(
+    () => Math.max(0, Math.min(previewIndex, totalItems - 1)),
+    [previewIndex, totalItems],
+  );
+
+  // Cards always show (they need no render); product images keep their
+  // not-rendered state.
+  const previewCard = clampedIndex >= selected.length ? cards[clampedIndex - selected.length] : undefined;
+  const previewImage = previewCard ? undefined : selected[clampedIndex];
+  const previewEntry = previewImage ? currentEntry(previewImage) : undefined;
+  const isMainPreview = clampedIndex === 0;
 
   // The dialog is about the run's own listing, not whichever tab happens to be
   // open. A live session write behind the modal must not be able to change the
@@ -1928,23 +2034,38 @@ export function ListingPreviewView() {
                 <div className="grid gap-4 lg:grid-cols-2">
                   {/* --- the gallery ------------------------------------- */}
                   <div className="space-y-2">
-                    {main ? (
-                      mainEntry ? (
+                    {previewCard ? (
+                      <div className="relative overflow-hidden rounded-md border border-border-subtle bg-surface-muted">
+                        <AssetThumb
+                          assetId={previewCard.assetId}
+                          className="aspect-square w-full"
+                          alt={previewCard.name}
+                        />
+                        <span className="absolute left-2 top-2 rounded bg-ink px-1.5 py-0.5 text-[10px] font-medium text-white">
+                          Info card
+                        </span>
+                        <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-[10px] text-white">
+                          {previewCard.name} — uploads after the mockups
+                        </span>
+                      </div>
+                    ) : previewImage ? (
+                      previewEntry ? (
                         <div className="relative overflow-hidden rounded-md border border-border-subtle bg-surface-muted">
-                          <AssetThumb
-                            assetId={mainEntry.assetId}
+                          <AssetImage
+                            assetId={previewEntry.assetId}
                             className="aspect-square w-full"
-                            alt={`${main.mockup.name} — the main image for ${listing.designName}`}
+                            alt={`${previewImage.mockup.name} — ${isMainPreview ? "main image" : `preview ${clampedIndex + 1} of ${selected.length}`} for ${listing.designName}`}
+                            placeholder={<AssetThumb assetId={previewEntry.assetId} className="aspect-square w-full" alt="" />}
                           />
                           <span className="absolute left-2 top-2 rounded bg-forest px-1.5 py-0.5 text-[10px] font-medium text-white">
-                            Main image
+                            {isMainPreview ? "Main image" : `${clampedIndex + 1} / ${selected.length}`}
                           </span>
                           <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-[10px] text-white">
-                            {main.mockup.name}
+                            {previewImage.mockup.name}
                           </span>
                         </div>
                       ) : (
-                        // The FIRST selected image, unrendered. Shown as a
+                        // The selected image at this index, unrendered. Shown as a
                         // hole, because a stand-in photo would be a listing
                         // image the product does not have.
                         <Link
@@ -1954,7 +2075,9 @@ export function ListingPreviewView() {
                           <CircleDashed className="h-6 w-6 text-ink-subtle" />
                           <span className="font-medium text-ink">Not rendered yet</span>
                           <span>
-                            The main image, {main.mockup.name}, has no current render.
+                            {isMainPreview
+                              ? `The main image, ${previewImage.mockup.name}, has no current render.`
+                              : `Preview ${clampedIndex + 1} (${previewImage.mockup.name}) has no current render.`}
                           </span>
                           <span className="text-forest underline">Render it on Listing images</span>
                         </Link>
@@ -1976,42 +2099,79 @@ export function ListingPreviewView() {
                       </div>
                     )}
 
-                    {selected.length > 1 && (
+                    {totalItems > 1 && (
                       <div
                         className="flex gap-2 overflow-x-auto pb-1"
                         aria-label={`Images for ${listing.designName}`}
+                        role="group"
                       >
-                        {selected.slice(1).map((image) => {
+                        {selected.map((image, idx) => {
                           const entry = currentEntry(image);
+                          const isActive = idx === clampedIndex;
                           return entry ? (
-                            <div
+                            <button
                               key={image.mockup.id}
-                              className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border-subtle bg-surface-muted"
-                              title={image.mockup.name}
+                              type="button"
+                              onClick={() => setPreviewIndex(idx)}
+                              aria-label={isMainPreview && idx === 0 ? `Preview main image: ${image.mockup.name}` : `Preview ${idx + 1} of ${selected.length}: ${image.mockup.name}`}
+                              aria-pressed={isActive}
+                              className={`h-16 w-16 shrink-0 overflow-hidden rounded border-2 transition-colors ${
+                                isActive
+                                  ? "ring-2 ring-forest border-forest"
+                                  : "border-border-subtle hover:border-forest/50"
+                              } bg-surface-muted`}
                             >
                               <AssetThumb
                                 assetId={entry.assetId}
                                 className="h-full w-full"
-                                alt={image.mockup.name}
+                                alt={isActive ? `${image.mockup.name} (active preview)` : image.mockup.name}
                               />
-                            </div>
+                            </button>
                           ) : (
                             <Link
                               key={image.mockup.id}
                               href="/listing-images"
                               title={`${image.mockup.name} is not rendered yet`}
                               className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded border border-dashed border-border-strong bg-surface-muted/40 text-center text-[9px] leading-tight text-ink-muted transition-colors hover:bg-surface-muted"
+                              aria-label={`${image.mockup.name} — not rendered yet`}
                             >
                               <CircleDashed className="h-3.5 w-3.5" />
                               not rendered
                             </Link>
                           );
                         })}
+                        {cards.map((card, offset) => {
+                          const idx = selected.length + offset;
+                          const isActive = idx === clampedIndex;
+                          return (
+                            <button
+                              key={card.id}
+                              type="button"
+                              onClick={() => setPreviewIndex(idx)}
+                              aria-label={`Info card ${offset + 1} of ${cards.length}: ${card.name}`}
+                              aria-pressed={isActive}
+                              className={`relative h-16 w-16 shrink-0 overflow-hidden rounded border-2 transition-colors ${
+                                isActive
+                                  ? "ring-2 ring-forest border-forest"
+                                  : "border-border-subtle hover:border-forest/50"
+                              } bg-surface-muted`}
+                            >
+                              <AssetThumb
+                                assetId={card.assetId}
+                                className="h-full w-full"
+                                alt={card.name}
+                              />
+                              <span className="absolute bottom-1 right-1 rounded bg-ink/70 px-1 py-0.5 text-[8px] font-medium text-white">
+                                Info
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
 
                     <p className="text-[11px] text-ink-subtle">
-                      {selected.length} image{selected.length === 1 ? "" : "s"} — the first is the
+                      {totalItems} image{totalItems === 1 ? "" : "s"} — the first is the
                       main image — chosen on{" "}
                       <Link href="/listing-images" className="text-forest underline">
                         Listing images

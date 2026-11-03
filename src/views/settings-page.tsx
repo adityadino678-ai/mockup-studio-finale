@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, Separator, B
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { ProviderLogo } from "@/components/integrations/provider-logo";
 import { cn, formatBytes } from "@/lib/utils";
 import {
   EMPTY_INTEGRATIONS,
@@ -33,8 +34,6 @@ import {
   Check,
   CircleCheck,
   CircleX,
-  Cloud,
-  Database,
   Download,
   Eye,
   EyeOff,
@@ -47,7 +46,6 @@ import {
   Search,
   Server,
   Settings as SettingsIcon,
-  Sparkles,
   Trash2,
   User,
   UserPlus,
@@ -481,6 +479,7 @@ const counts = useLiveQuery(async () => {
         <Card className="mb-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
+              <ProviderLogo id="supabase" className="h-4 w-4" />
               {authUser ? (
                 <LogOut className="h-4 w-4 text-forest" />
               ) : (
@@ -609,7 +608,7 @@ const counts = useLiveQuery(async () => {
               <section className="space-y-2 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    <Cloud className="h-4 w-4 text-ink-subtle" /> Printify
+                    <ProviderLogo id="printify" className="h-4 w-4 text-ink-subtle" /> Printify
                   </div>
                   <StatusBadge status={printifyStatus} />
                 </div>
@@ -722,7 +721,7 @@ const counts = useLiveQuery(async () => {
               <section className="space-y-2 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    <Search className="h-4 w-4 text-ink-subtle" /> Etsy research
+                    <ProviderLogo id="etsy" className="h-4 w-4 text-ink-subtle" /> Etsy research
                   </div>
                   <Badge variant="outline" className="shrink-0">
                     Read-only
@@ -792,7 +791,7 @@ const counts = useLiveQuery(async () => {
               <section className="space-y-3 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    <Sparkles className="h-4 w-4 text-ink-subtle" /> AI model
+                    <ProviderLogo id={config.activeProvider} className="h-4 w-4 text-ink-subtle" /> AI model
                   </div>
                   <StatusBadge status={aiStatus} />
                 </div>
@@ -1010,7 +1009,7 @@ function StatusBadge({ status }: { status?: IntegrationStatus }) {
   if (!status) {
     return (
       <Badge variant="muted" className="shrink-0">
-        <Database className="h-3 w-3" /> checking…
+        <Loader2 className="h-3 w-3 animate-spin" /> checking…
       </Badge>
     );
   }

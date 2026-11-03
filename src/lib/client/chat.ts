@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { db, getSetting, setSetting } from "@/lib/db/schema";
-import { authedFetch } from "@/lib/client/integrations";
+import { authedFetch, integrationHeaders, loadIntegrations } from "@/lib/client/integrations";
 import { SseParser, decodeSseData, type SseFrame } from "@/lib/ai/sse";
 import type { ChatMessage, ChatRole, Conversation, MessagePart, ToolCallData } from "@/types/domain";
 
@@ -329,18 +329,40 @@ export async function streamReply(
     tools?: string[];
     /** Explicit output-token budget; used to retry a truncated reply with more room. */
     maxTokens?: number;
+    /** Surface context (page, open listing, model role) injected into the prompt. */
+    context?: string;
+    /**
+     * Explicit provider headers.
+     *
+     * The agent panel picks a model PER SURFACE: the Listing agent uses a
+     * vision model and the Studio agent an image model. The saved "active
+     * model" is a global setting, so these headers have to be able to
+     * override it - which is why they are applied LAST here.
+     */
+    headers?: Record<string, string>;
     signal?: AbortSignal;
     debug?: boolean;
   } & StreamCallbacks = {},
 ): Promise<StreamResult> {
-  const res = await authedFetch("/api/ai/chat", {
+  const config = await loadIntegrations();
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    ...integrationHeaders(config),
+    ...(options.headers ?? {}),
+  });
+  // The Agents Brain applies to every turn - every agent surface sends it.
+  const brain = await getSetting<string>("agent:brain", "");
+  const trimmedBrain = brain.trim();
+  const res = await fetch("/api/ai/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       messages,
       effort: options.effort,
       ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
       ...(options.tools?.length ? { tools: options.tools } : {}),
+      ...(options.context ? { context: options.context } : {}),
+      ...(trimmedBrain ? { brain: trimmedBrain } : {}),
       ...(options.debug ? { debug: true } : {}),
     }),
     signal: options.signal,

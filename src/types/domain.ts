@@ -78,6 +78,22 @@ export interface Mockup {
   /** user = uploaded by the user; provider = fetched from an external provider. */
   source: "user" | "provider";
   /**
+   * What this row is. Absent means a product mockup, so every existing record
+   * keeps its meaning without a schema migration. `info-card` rows are the
+   * fixed information images that follow the mockups on a listing; they live
+   * in the same table so they get the same library UI, but every product
+   * surface filters them out.
+   */
+  kind?: "product" | "info-card";
+  /**
+   * The user-created named template inside the main category, e.g. "Hanging"
+   * or "Front flat". Absent means "Default", so existing mockups need no
+   * migration and the first save assigns a real label.
+   */
+  subCategory?: string;
+  /** Info-card placement order, after the product mockups. */
+  infoCardOrder?: number;
+  /**
    * The print area drawn on this mockup, if the user set one.
    *
    * It maps a REAL Printify print area onto the photo: the box's size is the
@@ -648,6 +664,19 @@ export interface StudioSession {
    */
   listingImageCleared?: Record<string, true>;
   /**
+   * The GLOBAL image order: product mockup ids, in the order the user dragged
+   * them.
+   *
+   * One order is shared by every listing, so the main image is the same
+   * photograph on every product in the batch. `listingImages` still says
+   * WHICH mockups a listing uses; this says in what order they go.
+   *
+   * A mockup that is not in this list sorts after the ones that are, so a
+   * newly uploaded mockup appends instead of jumping to the front. Info cards
+   * are NOT in this list: they are fixed after every product mockup.
+   */
+  listingImageOrder?: string[];
+  /**
    * The last successful render for a listing/mockup pair.
    *
    * The fingerprint makes "reuse unchanged images" honest: a changed design
@@ -786,11 +815,27 @@ export interface ImagePartData {
   dataUrl: string;
 }
 
+export type ChecklistStatus = "pending" | "active" | "done" | "failed";
+
+export interface AgentChecklistItem {
+  label: string;
+  status: ChecklistStatus;
+}
+
+/** A question the agent asks mid-turn; the panel pauses until it is answered. */
+export interface AgentQuestion {
+  question: string;
+  options: string[];
+  allowCustom: boolean;
+}
+
 export type MessagePart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "tool"; call: ToolCallData }
-  | { type: "image"; image: ImagePartData };
+  | { type: "image"; image: ImagePartData }
+  | { type: "checklist"; items: AgentChecklistItem[] }
+  | { type: "question"; question: AgentQuestion; answer?: string };
 
 export interface ChatMessage {
   id: string;

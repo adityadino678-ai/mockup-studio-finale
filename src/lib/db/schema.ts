@@ -1,5 +1,4 @@
 import Dexie, { type EntityTable } from "dexie";
-import type { AutopilotRun } from "@/types/autopilot";
 import type {
   ActivityRecord,
   AssetMeta,
@@ -55,7 +54,6 @@ export class MockupStudioDB extends Dexie {
   settings!: EntityTable<SettingRecord, "key">;
   conversations!: EntityTable<Conversation, "id">;
   messages!: EntityTable<ChatMessage, "id">;
-  autopilotRuns!: EntityTable<AutopilotRun, "id">;
 
   constructor() {
     super("mockup-studio");
@@ -90,6 +88,10 @@ export class MockupStudioDB extends Dexie {
     this.version(4).stores({
       autopilotRuns: "id, status, stage, updatedAt",
     });
+    // v5: the Autopilot page, engine and its stored runs are gone. Dexie
+    // deletes a table by naming it with `null`; the v4 block stays because an
+    // installed v4 database still has to upgrade through it.
+    this.version(5).stores({ autopilotRuns: null });
   }
 }
 

@@ -123,7 +123,8 @@ export const chatSchema = z.object({
     .array(
       z.object({
         role: z.enum(["system", "user", "assistant", "tool"]),
-        content: z.string().nullable(),
+        // A vision turn sends OpenAI-style content parts, not a bare string.
+        content: z.union([z.string(), z.array(z.any())]).nullable(),
         tool_calls: z.array(z.any()).optional(),
         tool_call_id: z.string().optional(),
       }),
@@ -132,7 +133,20 @@ export const chatSchema = z.object({
   effort: optionalString,
   tools: z.array(z.string()).optional(),
   maxTokens: z.number().int().positive().optional(),
+  context: optionalString,
+  /** The user's Agents Brain instructions - appended to the system prompt. */
+  brain: optionalString,
   debug: optionalBoolean,
+});
+
+// --- POST /api/ai/images ---
+
+export const imagesSchema = z.object({
+  prompt: z.string().min(1).max(4000),
+  model: optionalString,
+  size: optionalString,
+  /** Wrapper the Studio chat uses; the listing agent never sends this. */
+  kind: z.enum(["image"]).optional(),
 });
 
 // --- POST /api/ai/seo ---
@@ -169,6 +183,8 @@ export const titleSchema = z.object({
 
 export const modelsSchema = z.object({
   provider: z.string().min(1).optional(),
+  /** Which kind of model the picker that asked wants. */
+  kind: z.enum(["chat", "vision", "image"]).optional(),
 });
 
 // --- POST /api/integrations/test ---
@@ -187,6 +203,7 @@ export const endpointSchemas: Record<string, z.ZodTypeAny> = {
   "POST /api/etsy/research": etsyResearchSchema,
   "POST /api/ai/assistant": assistantSchema,
   "POST /api/ai/chat": chatSchema,
+  "POST /api/ai/images": imagesSchema,
   "POST /api/ai/seo": seoSchema,
   "POST /api/ai/title": titleSchema,
   "POST /api/integrations/models": modelsSchema,

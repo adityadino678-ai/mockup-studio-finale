@@ -10,6 +10,7 @@
 import { db } from "@/lib/db/schema";
 import { getPlacement, uid, logActivity } from "@/lib/db/repo";
 import {
+  applyGlobalOrder,
   listingMockupIds,
   listingRenderFor,
   parseTags,
@@ -19,6 +20,7 @@ import {
   renderTitle,
 } from "@/lib/printify/studio-session";
 import { listingImageFingerprint } from "@/lib/printify/listing-render";
+import { infoCardsForListing } from "@/lib/mockups/info-cards";
 import type { StudioListing } from "@/lib/printify/listing-plan";
 import type { ListingDraft, StudioSession } from "@/types/domain";
 
@@ -92,6 +94,12 @@ export function nextListingImageState(params: {
   existing?: Pick<ListingDraft, "imageAssetIds" | "imageSelectionLocked"> | null;
   explicitClear: boolean;
   lockSelection: boolean;
+  /**
+   * The asset ids of the info cards attached to the listing, in strip order.
+   * They follow the product mockups in the locked selection (the order the
+   * ZIP export and Printify both use).
+   */
+  cardIds?: string[];
 }): ListingImageState {
   const existing = params.existing;
   if (params.explicitClear) {
@@ -102,7 +110,7 @@ export function nextListingImageState(params: {
     params.selectedCount > 0 && params.renderedIds.length === params.selectedCount;
   if (fullSelection) {
     return {
-      imageAssetIds: params.renderedIds,
+      imageAssetIds: [...params.renderedIds, ...(params.cardIds ?? [])],
       imageSelectionLocked:
         params.lockSelection || existing?.imageSelectionLocked ? true : undefined,
     };
@@ -152,9 +160,19 @@ export async function saveStudioListingDrafts(params: {
   const now = Date.now();
   let created = 0;
   let updated = 0;
+  // Cards live in the same `mockups` table; load them once for the whole batch.
+  const allMockups = await db.mockups.toArray();
 
   for (const listing of listings) {
     const selected = listingMockupIds(session, listing.listingId);
+    // Info cards attach by the category of the mockups used in the listing;
+    // they follow the renders in the locked selection.
+    const cardIds = applyGlobalOrder(
+      session,
+      infoCardsForListing(allMockups, selected).map((card) => card.id),
+    )
+      .map((id) => allMockups.find((mockup) => mockup.id === id)?.assetId)
+      .filter((assetId): assetId is string => typeof assetId === "string");
     // Recompute the fingerprint rather than trusting the stored entry. A
     // placement/artwork/mockup change between render and save must not lock
     // obsolete pixels into the Export Center.
@@ -173,6 +191,7 @@ export async function saveStudioListingDrafts(params: {
       existing,
       explicitClear: session.listingImageCleared?.[listing.listingId] === true,
       lockSelection,
+      cardIds,
     });
 
     const products = await db.productDrafts.where("designId").equals(listing.listingId).toArray();

@@ -4,7 +4,7 @@ import {
   createCallTracker,
   MAX_IDENTICAL_CALLS,
   MAX_TURN_STEPS,
-} from "@/lib/ai/step-limits";
+} from "@/agent-tools/step-limits";
 
 describe("turn step limits", () => {
   it("allows enough steps for real multi-step work", () => {

@@ -56,6 +56,54 @@ export function MessageItem({
               />
             );
           }
+          if (part.type === "checklist") {
+            return (
+              <ul key={i} className="mb-1 space-y-1 rounded-md border border-border-subtle p-2">
+                {part.items.map((item, j) => (
+                  <li key={j} className="flex items-center gap-2 text-[12px]">
+                    <span
+                      className={
+                        item.status === "done"
+                          ? "text-status-ok"
+                          : item.status === "failed"
+                            ? "text-status-error"
+                            : item.status === "active"
+                              ? "text-ink"
+                              : "text-ink-subtle"
+                      }
+                    >
+                      {item.status === "done" ? "✓" : item.status === "failed" ? "✕" : item.status === "active" ? "▸" : "○"}
+                    </span>
+                    <span className={item.status === "pending" ? "text-ink-subtle" : ""}>{item.label}</span>
+                  </li>
+                ))}
+              </ul>
+            );
+          }
+          if (part.type === "question") {
+            return (
+              <div
+                key={i}
+                className="mb-2 rounded-md border border-border-subtle bg-surface-raised p-2 text-[12px]"
+              >
+                <p className="mb-1 font-medium">{part.question.question}</p>
+                <div className="flex flex-wrap gap-1">
+                  {part.question.options.map((option, j) => (
+                    <span
+                      key={j}
+                      className={
+                        part.answer === option
+                          ? "rounded-full border border-ink bg-ink px-2 py-0.5 text-surface"
+                          : "rounded-full border border-border-subtle px-2 py-0.5 text-ink-subtle"
+                      }
+                    >
+                      {option}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          }
           if (isUser) {
             return (
               <p key={i} className="whitespace-pre-wrap text-[13px] leading-relaxed">
@@ -63,6 +111,7 @@ export function MessageItem({
               </p>
             );
           }
+          // Every other part type returned above, so what is left is text.
           return part.text.trim() ? (
             <Markdown key={i} content={part.text} />
           ) : streaming ? (

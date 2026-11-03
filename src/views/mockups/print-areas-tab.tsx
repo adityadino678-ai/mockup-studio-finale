@@ -98,7 +98,13 @@ export function PrintAreasTab({
   /** The mockup the page already chose (from a card's "Set the print area"). */
   initialMockupId?: string | null;
 } = {}) {
-  const mockups = useLiveQuery(() => db.mockups.orderBy("name").toArray(), []);
+  // Info cards are information images, not product photos: they never get a
+  // print area, so they are filtered out here and never appear in this tab.
+  const mockups = useLiveQuery(
+    async () =>
+      (await db.mockups.orderBy("name").toArray()).filter((m) => m.kind !== "info-card"),
+    [],
+  );
   const designs = useLiveQuery(() => db.designs.orderBy("name").toArray(), []);
   const templates = useLiveQuery(
     () => db.templates.where("category").equals("print-area").toArray(),
@@ -1091,9 +1097,6 @@ export function PrintAreasTab({
             </span>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={fitToArea} disabled={!area || !design}>
-              Fit to area
-            </Button>
             {area ? (
               <Button size="sm" variant="ghost" onClick={removeArea} title="Remove the print area">
                 <Trash2 className="h-3.5 w-3.5" />

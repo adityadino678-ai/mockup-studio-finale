@@ -67,6 +67,7 @@
     "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/simple-icons": "^5.8.0",
     "@vitejs/plugin-react": "^6.1.2",
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.8",

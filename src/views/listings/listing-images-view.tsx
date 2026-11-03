@@ -32,6 +32,7 @@
 import * as React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
+import { Reorder, useDragControls } from "framer-motion";
 import { zip, type Zippable } from "fflate";
 import { db, getSetting } from "@/lib/db/schema";
 import { getAssetBlob, logActivity } from "@/lib/db/repo";
@@ -64,8 +65,10 @@ import {
   type StudioListing,
 } from "@/lib/printify/listing-plan";
 import {
+  applyGlobalOrder,
   listingMockupIds,
   listingRenderFor,
+  mergeGlobalOrder,
   placementFor,
   RESULTS_KEY,
   ROW_HINTS,
@@ -93,6 +96,10 @@ import {
   saveSession,
 } from "@/lib/printify/studio-session";
 import { printAreaOf } from "@/lib/mockups/print-area";
+import {
+  infoCardsForListing,
+  productMockups,
+} from "@/lib/mockups/info-cards";
 import { useListingCatalog } from "@/views/listings/listing-catalog";
 import {
   adoptedRenderEntry,
@@ -116,6 +123,7 @@ import {
   Check,
   Download,
   ExternalLink,
+  GripVertical,
   Images,
   Loader2,
   Send,
@@ -224,6 +232,56 @@ function SendStep({
       </p>
       <p className="mt-0.5 pl-[22px] text-[10px] text-ink-muted">{detail}</p>
     </li>
+  );
+}
+
+/**
+ * One draggable tile.
+ *
+ * The drag starts from the HANDLE, never from the tile itself, so a plain
+ * click still takes the mockup in or out of the listing. The handle is
+ * handed to the caller so it can live OUTSIDE the tile's button: a button
+ * inside a button is not valid HTML and the browser would swallow the click.
+ */
+function DraggableTile({
+  value,
+  label,
+  disabled,
+  children,
+}: {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  children: (handle: React.ReactNode) => React.ReactNode;
+}) {
+  const controls = useDragControls();
+  const handle = (
+    <button
+      type="button"
+      aria-label={`Reorder ${label}`}
+      disabled={disabled}
+      onPointerDown={(event) => {
+        // The handle is the only drag surface: a drag that started on the
+        // picture would fight the click that toggles the mockup.
+        event.preventDefault();
+        event.stopPropagation();
+        controls.start(event);
+      }}
+      className="flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink active:cursor-grabbing disabled:opacity-40"
+    >
+      <GripVertical className="h-3.5 w-3.5" />
+    </button>
+  );
+  return (
+    <Reorder.Item
+      as="div"
+      value={value}
+      dragListener={false}
+      dragControls={controls}
+      className="relative w-[132px] shrink-0"
+    >
+      {children(handle)}
+    </Reorder.Item>
   );
 }
 
@@ -422,10 +480,26 @@ export function ListingImagesView() {
     return map;
   }, [results]);
 
-  /** Every mockup in library order - the default selection for a new listing. */
+  /**
+   * Every PRODUCT mockup in library order - the default selection for a new
+   * listing.
+   *
+   * Info cards are not product photos: they never become a Printify mockup,
+   * so they are not part of a listing's image selection.
+   */
   const allMockupIds = React.useMemo(
-    () => (mockups ?? []).map((mockup) => mockup.id),
+    () => productMockups(mockups ?? []).map((mockup) => mockup.id),
     [mockups],
+  );
+  /**
+   * The product mockups in the GLOBAL order.
+   *
+   * The order is shared by every listing, so the strip below reads the same
+   * everywhere and a drag in one row moves the photographs on every product.
+   */
+  const orderedMockupIds = React.useMemo(
+    () => applyGlobalOrder(session, allMockupIds),
+    [session, allMockupIds],
   );
   const adoptionIndex = React.useMemo(
     () => buildAdoptionIndex((renderAssets ?? []) as AssetMeta[]),
@@ -447,7 +521,9 @@ export function ListingImagesView() {
    *
    * An explicit list (or an explicit Clear) wins. A listing that has NEVER
    * been configured starts with everything: the page exists to review and
-   * remove, not to tick fifty mockups by hand. The distinction matters to the
+   * remove, not to tick fifty mockups by hand — and the default selection is
+   * in the GLOBAL order, so the drag decides which photograph is the main
+   * image on every listing, configured or not. The distinction matters to the
    * drafts engine, which treats "never configured" and "deliberately empty"
    * differently, so this helper never invents an empty list.
    */
@@ -460,9 +536,29 @@ export function ListingImagesView() {
         );
       }
       if (session.listingImageCleared?.[listing.listingId] === true) return [];
-      return allMockupIds;
+      return orderedMockupIds;
     },
-    [session, mockupsById, allMockupIds],
+    [session, mockupsById, orderedMockupIds],
+  );
+
+  /**
+   * The info cards attached to this listing.
+   *
+   * Cards attach by the category of the product mockups included in the
+   * listing - no Printify key needed. Product photos upload first, then the
+   * cards in this order, which is also their global order (shared with the
+   * mockups strip, so a drag here persists like any other listing image).
+   */
+  const infoCardsFor = React.useCallback(
+    (listing: StudioListing): Mockup[] => {
+      if (!mockups) return [];
+      const attached = infoCardsForListing(mockups, effectiveIdsFor(listing));
+      const ids = attached.map((card) => card.id);
+      return applyGlobalOrder(session, ids)
+        .map((id) => mockupsById.get(id))
+        .filter((card): card is Mockup => !!card);
+    },
+    [mockups, effectiveIdsFor, session, mockupsById],
   );
 
   /** The current render for a selection row: the session entry, else an adopted asset. */
@@ -882,10 +978,13 @@ export function ListingImagesView() {
 
   const resetListing = React.useCallback(
     (listing: StudioListing) => {
-      update(selectionPatch(listing.listingId, allMockupIds, false));
+      // The reset goes back to "every mockup", in the GLOBAL order — the same
+      // sequence the default selection now uses, so the persisted list agrees
+      // with what the strip shows and with the main-image badge.
+      update(selectionPatch(listing.listingId, orderedMockupIds, false));
       if (removal?.listingId === listing.listingId) setRemoval(null);
     },
-    [allMockupIds, update, selectionPatch, removal],
+    [orderedMockupIds, update, selectionPatch, removal],
   );
 
   /**
@@ -908,12 +1007,14 @@ export function ListingImagesView() {
           listingImages[listing.listingId] === undefined &&
           base.listingImageCleared?.[listing.listingId] !== true
         ) {
-          listingImages[listing.listingId] = allMockupIds;
+          // The default becomes explicit in the GLOBAL order, so what Printify
+          // receives later matches the strip the user has been dragging.
+          listingImages[listing.listingId] = orderedMockupIds;
         }
       }
       return listingImages;
     },
-    [allMockupIds],
+    [orderedMockupIds],
   );
 
   /**
@@ -1151,6 +1252,10 @@ export function ListingImagesView() {
         const result = resultsByListing.get(listing.listingId);
         const selected = selectionFor(listing);
         const images = selected.filter((image) => Boolean(currentEntry(image)));
+        // Info cards upload after the product mockups, in strip order. They are
+        // static pixels, so they need no render and no fingerprint.
+        const cards = infoCardsFor(listing);
+
         if (!result?.remoteProductId) {
           skipped.push(`${listing.designName}: create the Printify product first`);
           continue;
@@ -1174,6 +1279,18 @@ export function ListingImagesView() {
           const uploads: PrintifyMockupUpload[] = [];
           let shopId = result.shopId;
           let productTitle = result.title;
+          // Cards need no render, so their pixels are read up front, in strip
+          // order, and uploaded after the product mockups.
+          const cardPayloads: Array<{ base64: string; filename: string }> = [];
+          for (const card of cards) {
+            const blob = await getAssetBlob(card.assetId);
+            if (!blob) {
+              throw new Error(`Info card "${card.name}" has no stored image`);
+            }
+            cardPayloads.push(
+              await mockupImageForUpload(blob, `${listing.designName}-info-${card.name}`),
+            );
+          }
           for (let start = 0; start < images.length; start += MAX_IMAGES_PER_UPLOAD) {
             const chunk = images.slice(start, start + MAX_IMAGES_PER_UPLOAD);
             setSendProgress({
@@ -1219,16 +1336,54 @@ export function ListingImagesView() {
             shopId = data.shopId ?? shopId;
             productTitle = data.title ?? productTitle;
           }
+          for (let start = 0; start < cardPayloads.length; start += MAX_IMAGES_PER_UPLOAD) {
+            const chunk = cardPayloads.slice(start, start + MAX_IMAGES_PER_UPLOAD);
+            setSendProgress({
+              done: index,
+              total: targets.length,
+              label: `${listing.designName}: uploading info cards ${Math.min(
+                start + chunk.length,
+                cardPayloads.length,
+              )}/${cardPayloads.length}…`,
+            });
+            const response = await authedFetch("/api/printify/mockups", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                confirm: true,
+                shopId,
+                productId: result.remoteProductId,
+                expectedTitle: result.title,
+                images: chunk,
+              }),
+            });
+            const data = (await response.json()) as UploadResponse;
+            if (!response.ok) {
+              throw new Error(data.error ?? `HTTP ${response.status}`);
+            }
+            if (!Array.isArray(data.uploads) || data.uploads.length !== chunk.length) {
+              throw new Error("Printify did not return one custom mockup per info card");
+            }
+            uploads.push(...data.uploads);
+            shopId = data.shopId ?? shopId;
+            productTitle = data.title ?? productTitle;
+          }
           if (shopId == null || !Number.isFinite(shopId) || shopId <= 0) {
             throw new Error("Printify did not return the shop for this product");
           }
-          const signatureImages = images.flatMap((image) => {
-            const entry = currentEntry(image);
-            return entry
-              ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
-              : [];
-          });
-          if (signatureImages.length === images.length) {
+          const signatureImages = [
+            ...images.flatMap((image) => {
+              const entry = currentEntry(image);
+              return entry
+                ? [{ mockupId: image.mockup.id, fingerprint: entry.fingerprint }]
+                : [];
+            }),
+            ...cards.map((card) => ({
+              mockupId: card.id,
+              fingerprint: `info-card:${card.assetId}`,
+            })),
+          ];
+          if (signatureImages.length === images.length + cards.length) {
             appliedSignaturesRef.current[listing.listingId] = appliedMockupRecord(
               result.remoteProductId,
               signatureImages,
@@ -1440,6 +1595,7 @@ export function ListingImagesView() {
 
   const renderListingRow = (listing: StudioListing) => {
     const selected = selectionFor(listing);
+    const cards = infoCardsFor(listing);
     const current = selected.filter((image) => Boolean(currentEntry(image))).length;
     const result = resultsByListing.get(listing.listingId);
     const markedIds =
@@ -1481,6 +1637,7 @@ export function ListingImagesView() {
                   {listing.partnerName
                     ? `One listing with ${listing.partnerName} · the first included tile is the main image`
                     : "The first included tile is the main image"}
+                  {" · drag the handle to reorder"}
                 </p>
               </div>
             </div>
@@ -1515,7 +1672,7 @@ export function ListingImagesView() {
               size="sm"
               variant="outline"
               onClick={() => selectAll(listing)}
-              disabled={rendering || sending || (mockups ?? []).length === 0}
+              disabled={rendering || sending || orderedMockupIds.length === 0}
             >
               <Check className="h-3.5 w-3.5" /> Include all
             </Button>
@@ -1594,7 +1751,7 @@ export function ListingImagesView() {
             </div>
           )}
 
-          {(mockups ?? []).length === 0 ? (
+          {orderedMockupIds.length === 0 ? (
             <p className="rounded-md bg-surface-muted px-3 py-2 text-[12px] text-ink-muted">
               No mockups in the library yet. Add some on the{" "}
               <a className="text-forest underline" href="/mockups">
@@ -1603,142 +1760,234 @@ export function ListingImagesView() {
               , then come back.
             </p>
           ) : (
-            <div
-              className="flex gap-3 overflow-x-auto pb-1"
-              role="list"
-              aria-label={`Mockups for ${listing.designName}`}
-            >
-              {(mockups ?? []).map((mockup) => {
-                const image = selected.find((entry) => entry.mockup.id === mockup.id);
-                const order = image
-                  ? selected.findIndex((entry) => entry.mockup.id === mockup.id) + 1
-                  : 0;
-                const entry = image ? currentEntry(image) : undefined;
-                const marked = markedIds?.has(mockup.id) ?? false;
-                // The label is about THIS listing's design, not the shared
-                // default: a per-design frame is still a mapped area.
-                const area = printAreaOf(mockup, listing.designId);
-                return (
-                  <div
-                    key={mockup.id}
-                    role="listitem"
-                    data-tile={mockup.id}
-                    data-included={image ? "true" : "false"}
-                    className={`relative w-[132px] shrink-0 overflow-hidden rounded-md border transition-colors ${
-                      marked
-                        ? "border-warning opacity-50"
-                        : image
-                          ? "border-forest bg-forest-soft/20"
-                          : "border-border-subtle bg-surface"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      className="block w-full text-left disabled:cursor-not-allowed"
-                      onClick={() => onTileClick(listing, mockup.id)}
-                      onPointerDown={startPress(listing, mockup.id)}
-                      onPointerMove={movePress}
-                      onPointerUp={releasePress}
-                      onPointerLeave={releasePress}
-                      onPointerCancel={releasePress}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        beginRemoval(listing, mockup.id);
-                      }}
+            <>
+              <Reorder.Group
+                as="div"
+                axis="x"
+                values={orderedMockupIds}
+                onReorder={(next) =>
+                  update({ listingImageOrder: mergeGlobalOrder(session, next) })
+                }
+                className="flex gap-3 overflow-x-auto pb-1"
+                role="list"
+                aria-label={`Mockups for ${listing.designName}`}
+              >
+                {orderedMockupIds.map((mockupId) => {
+                  const mockup = mockupsById.get(mockupId);
+                  if (!mockup) return null;
+                  const image = selected.find((entry) => entry.mockup.id === mockup.id);
+                  const order = image
+                    ? selected.findIndex((entry) => entry.mockup.id === mockup.id) + 1
+                    : 0;
+                  const entry = image ? currentEntry(image) : undefined;
+                  const marked = markedIds?.has(mockup.id) ?? false;
+                  // The label is about THIS listing's design, not the shared
+                  // default: a per-design frame is still a mapped area.
+                  const area = printAreaOf(mockup, listing.designId);
+                  return (
+                    <DraggableTile
+                      key={mockup.id}
+                      value={mockup.id}
+                      label={mockup.name}
                       disabled={rendering || sending}
-                      aria-pressed={Boolean(image)}
-                      aria-label={`${image ? "Remove" : "Use"} ${mockup.name} for ${listing.designName}`}
                     >
-                      <div className="relative aspect-square overflow-hidden bg-surface-muted">
-                        <AssetThumb
-                          assetId={entry?.assetId ?? mockup.assetId}
-                          className="h-full w-full"
-                          alt={mockup.name}
-                        />
-                        {order > 0 && (
-                          <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-forest px-1.5 text-[11px] font-semibold text-white shadow-subtle">
-                            {order}
-                          </span>
-                        )}
-                        {order === 1 && (
-                          <span className="absolute right-2 top-2 rounded bg-forest px-1.5 py-0.5 text-[10px] font-medium text-white">
-                            main
-                          </span>
-                        )}
-                        <span
-                          className={
-                            `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                              !image
-                                ? "bg-ink-subtle text-white"
-                                : image.overridden
-                                  ? "bg-amber text-white"
-                                  : entry
-                                    ? entry.source === "mockups"
-                                      ? "bg-forest text-white"
-                                      : "bg-default text-white"
-                                    : "bg-warning text-white"
-                            }`
-                          }
+                      {(handle) => (
+                        <div
+                          role="listitem"
+                          data-tile={mockup.id}
+                          data-included={image ? "true" : "false"}
+                          className={`relative h-full w-full overflow-hidden rounded-md border transition-colors ${
+                            marked
+                              ? "border-warning opacity-50"
+                              : image
+                                ? "border-forest bg-forest-soft/20"
+                                : "border-border-subtle bg-surface"
+                          }`}
                         >
-                          {marked
-                            ? "Will be removed"
-                            : !image
-                              ? "Excluded"
-                              : image.overridden
-                                ? "Override: Mockups"
-                                : entry
-                                  ? entry.source === "mockups"
-                                    ? "From Mockups"
-                                    : "Rendered here"
-                                  : "Not rendered"}
-                        </span>
-                      </div>
-                      <div className="space-y-0.5 p-2">
-                        <p className="truncate text-[12px] font-medium text-ink" title={mockup.name}>
-                          {mockup.name}
-                        </p>
-                        <p className="text-[10px] text-ink-subtle">
-                          {area ? "Print area mapped" : "No print area"}
-                        </p>
-                      </div>
-                    </button>
-                    {image && image.entry && !image.fresh && !image.adopted && (
-                      <div className="mt-1 flex items-center gap-1 px-2 pb-2">
-                        {image.overridden ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => clearTileOverride(listing, mockup.id)}
-                            className="text-[10px] text-amber hover:bg-amber-soft"
+                          <button
+                            type="button"
+                            className="block w-full text-left disabled:cursor-not-allowed"
+                            onClick={() => onTileClick(listing, mockup.id)}
+                            onPointerDown={startPress(listing, mockup.id)}
+                            onPointerMove={movePress}
+                            onPointerUp={releasePress}
+                            onPointerLeave={releasePress}
+                            onPointerCancel={releasePress}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              beginRemoval(listing, mockup.id);
+                            }}
+                            disabled={rendering || sending}
+                            aria-pressed={Boolean(image)}
+                            aria-label={`${image ? "Remove" : "Use"} ${mockup.name} for ${listing.designName}`}
                           >
-                            Clear override
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              lockedListings.has(listing.listingId)
-                                ? setLockedConfirm({
-                                    listingName: listing.designName,
-                                    apply: () => forceTileOverride(listing, mockup.id),
-                                  })
-                                : forceTileOverride(listing, mockup.id)
-                            }
-                            className="text-[10px] text-amber hover:bg-amber-soft"
+                            <div className="relative aspect-square overflow-hidden bg-surface-muted">
+                              <AssetThumb
+                                assetId={entry?.assetId ?? mockup.assetId}
+                                className="h-full w-full"
+                                alt={mockup.name}
+                              />
+                              {order > 0 && (
+                                <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-forest px-1.5 text-[11px] font-semibold text-white shadow-subtle">
+                                  {order}
+                                </span>
+                              )}
+                              {order === 1 && (
+                                <span className="absolute right-2 top-2 rounded bg-forest px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                  main
+                                </span>
+                              )}
+                              <span
+                                className={
+                                  `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                    !image
+                                      ? "bg-ink-subtle text-white"
+                                      : image.overridden
+                                        ? "bg-amber text-white"
+                                        : entry
+                                          ? entry.source === "mockups"
+                                            ? "bg-forest text-white"
+                                            : "bg-default text-white"
+                                          : "bg-warning text-white"
+                                  }`
+                                }
+                              >
+                                {marked
+                                  ? "Will be removed"
+                                  : !image
+                                    ? "Excluded"
+                                    : image.overridden
+                                      ? "Override: Mockups"
+                                      : entry
+                                        ? entry.source === "mockups"
+                                          ? "From Mockups"
+                                          : "Rendered here"
+                                        : "Not rendered"}
+                              </span>
+                            </div>
+                          </button>
+                          <div className="flex items-center gap-1 p-2">
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <p
+                                className="truncate text-[12px] font-medium text-ink"
+                                title={mockup.name}
+                              >
+                                {mockup.name}
+                              </p>
+                              <p className="text-[10px] text-ink-subtle">
+                                {area ? "Print area mapped" : "No print area"}
+                              </p>
+                            </div>
+                            {handle}
+                          </div>
+                          {image && image.entry && !image.fresh && !image.adopted && (
+                            <div className="flex items-center gap-1 px-2 pb-2">
+                              {image.overridden ? (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => clearTileOverride(listing, mockup.id)}
+                                  className="text-[10px] text-amber hover:bg-amber-soft"
+                                >
+                                  Clear override
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    lockedListings.has(listing.listingId)
+                                      ? setLockedConfirm({
+                                          listingName: listing.designName,
+                                          apply: () => forceTileOverride(listing, mockup.id),
+                                        })
+                                      : forceTileOverride(listing, mockup.id)
+                                  }
+                                  className="text-[10px] text-amber hover:bg-amber-soft"
+                                >
+                                  Use Mockups render
+                                </Button>
+                              )}
+                              <span className="text-[10px] text-ink-subtle">
+                                {image.overridden
+                                  ? "using saved render"
+                                  : "saved render is out of date"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </DraggableTile>
+                  );
+                })}
+              </Reorder.Group>
+
+              {cards.length > 0 && (
+                <div className="space-y-1.5 border-t border-border-subtle pt-2">
+                  <p className="text-[11px] text-ink-subtle">
+                    Info cards attach automatically - the categories of the mockups used in
+                    this listing. They are uploaded to Printify after the mockups, in this
+                    order. Drag to reorder.
+                  </p>
+                  <Reorder.Group
+                    as="div"
+                    axis="x"
+                    values={cards.map((card) => card.id)}
+                    onReorder={(next) =>
+                      update({ listingImageOrder: mergeGlobalOrder(session, next) })
+                    }
+                    className="flex gap-3 overflow-x-auto pb-1"
+                    role="list"
+                    aria-label={`Info cards for ${listing.designName}`}
+                  >
+                    {cards.map((card, index) => (
+                      <DraggableTile
+                        key={card.id}
+                        value={card.id}
+                        label={card.name}
+                        disabled={rendering || sending}
+                      >
+                        {(handle) => (
+                          <div
+                            role="listitem"
+                            data-info-card={card.id}
+                            className="relative h-full w-full overflow-hidden rounded-md border border-forest bg-forest-soft/20 transition-colors"
                           >
-                            Use Mockups render
-                          </Button>
+                            <div className="relative aspect-square overflow-hidden bg-surface-muted">
+                              <AssetThumb
+                                assetId={card.assetId}
+                                className="h-full w-full"
+                                alt={card.name}
+                              />
+                              <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-ink px-1.5 text-[11px] font-semibold text-white shadow-subtle">
+                                {selected.length + index + 1}
+                              </span>
+                              <span className="absolute bottom-2 left-2 rounded bg-ink-subtle px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                Info card
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 p-2">
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                <p
+                                  className="truncate text-[12px] font-medium text-ink"
+                                  title={card.name}
+                                >
+                                  {card.name}
+                                </p>
+                                <p className="text-[10px] text-ink-subtle">
+                                  after the mockups
+                                </p>
+                              </div>
+                              {handle}
+                            </div>
+                          </div>
                         )}
-                        <span className="text-[10px] text-ink-subtle">
-                          {image.overridden ? "using saved render" : "saved render is out of date"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      </DraggableTile>
+                    ))}
+                  </Reorder.Group>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -1778,7 +2027,9 @@ export function ListingImagesView() {
                 to pick. Tiles show the render saved in the Mockups panel when it is still
                 current; the banner can link older saved renders that predate fingerprints.
                 Long-press a tile to start removing mockups from a listing; the numbers are the
-                image order and the first tile is the main image.
+                image order and the first tile is the main image. Drag a tile by its handle to
+                change the order - the order is shared by every listing, so the same photograph
+                is the main image on every product in the batch.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

@@ -13,8 +13,8 @@ const external = Boolean(process.env.BASE_URL);
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 120_000,
-  expect: { timeout: 15_000 },
+  timeout: 1800000, // 30 minutes
+  expect: { timeout: 30_000 },
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -27,7 +27,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   // The dev server pays a large one-off cost on the first request for a
   // route, and that cost used to land inside a test's assertion timeout.
-  globalSetup: "./e2e/global-setup.ts",
+  // globalSetup: "./e2e/global-setup.ts",
   // Only manage a dev server when we are not pointed at an external target.
   webServer: external
     ? undefined

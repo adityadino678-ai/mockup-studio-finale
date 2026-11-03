@@ -3,7 +3,7 @@ import {
   agentTool,
   AGENT_TOOLS,
   toOpenAiTools,
-} from "@/lib/ai/tools";
+} from "@/agent-tools/registry";
 import {
   executeTool,
   CONFIRM_TOOL_RUNNERS,
@@ -15,7 +15,7 @@ import {
   confirmRemoveBackground,
   confirmSaveChatImage,
   confirmSaveListingDetails,
-} from "@/lib/client/tools";
+} from "@/agent-tools/runners";
 import { db } from "@/lib/db/schema";
 import {
   analyzeSeoPatterns,
@@ -42,6 +42,10 @@ const READ_TOOLS = [
   "browse_printify_catalog",
   "draft_listing",
   "etsy_research",
+  "read_design_image",
+  "ask_user",
+  "update_checklist",
+  "spawn_research_pass",
 ] as const;
 
 async function resetDb() {
@@ -82,8 +86,8 @@ function callsUrl(fetchMock: ReturnType<typeof vi.fn>, index = 0): string {
 }
 
 describe("W7 Agent tool audit — registry", () => {
-  it("registers exactly 14 tools, 8 of them confirm-writes", () => {
-    expect(AGENT_TOOLS).toHaveLength(14);
+  it("registers exactly 18 tools, 8 of them confirm-writes", () => {
+    expect(AGENT_TOOLS).toHaveLength(18);
     const writes = AGENT_TOOLS.filter((t) => t.confirm === true).map((t) => t.name).sort();
     expect(writes).toEqual([...WRITE_TOOLS].sort());
     const reads = AGENT_TOOLS.filter((t) => t.confirm !== true).map((t) => t.name).sort();

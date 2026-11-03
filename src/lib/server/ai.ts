@@ -7,7 +7,7 @@
 import { serverEnv } from "@/lib/server/env";
 import { DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL, type AiCredentials } from "@/lib/server/creds";
 import { authHeaders, baseUrlFor, getProvider, normalizeModels, type ModelInfo } from "@/lib/ai/providers";
-import type { OpenAiToolDef } from "@/lib/ai/tools";
+import type { OpenAiToolDef } from "@/agent-tools/registry";
 
 export type AiContentPart =
   | { type: "text"; text: string }

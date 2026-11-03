@@ -378,6 +378,82 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: [],
     },
   },
+  {
+    name: "read_design_image",
+    description:
+      "Load ONE of the user's design images so you can actually look at it before writing a description. Reads a single design per call and returns the image to you. If the image cannot be read, say so plainly and call ask_user; never guess what it shows.",
+    parameters: {
+      type: "object",
+      properties: {
+        design: {
+          type: "string",
+          description:
+            "Design name (or exact id). Omit only when exactly one design is in scope for this listing.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "ask_user",
+    description:
+      "Pause the turn and ask the user ONE question with short answer chips. Use only when genuinely blocked: the design image is unreadable, two designs match the name, or a required choice has no safe default. The turn stops until the user answers.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "The question, in one sentence." },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "Two to five short answer chips. The user can always type their own answer.",
+        },
+        allowCustom: {
+          type: "boolean",
+          description: "Show a free-text field as well as the chips. Defaults to true.",
+        },
+      },
+      required: ["question", "options"],
+    },
+  },
+  {
+    name: "update_checklist",
+    description:
+      "Replace the live task checklist shown to the user while you work. Send the WHOLE list every time (it is not a patch), and mark exactly one item active at a time. Statuses: pending, active, done, failed.",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Short task label." },
+              status: {
+                type: "string",
+                enum: ["pending", "active", "done", "failed"],
+                description: "Where this task stands right now.",
+              },
+            },
+            required: ["label", "status"],
+          },
+          description: "The complete checklist, in the order it should be shown.",
+        },
+      },
+      required: ["items"],
+    },
+  },
+  {
+    name: "spawn_research_pass",
+    description:
+      "Run ONE bounded Etsy research pass in the background, using the app's existing research endpoint. At most two passes per turn are allowed; each pass is shown in the checklist. Returns observed titles, recurring title terms and a median price. Never invents search volume, sales or rankings.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The exact Etsy search query for this pass." },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 const BY_NAME = new Map(AGENT_TOOLS.map((t) => [t.name, t]));

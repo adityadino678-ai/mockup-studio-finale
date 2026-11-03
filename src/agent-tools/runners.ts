@@ -54,6 +54,8 @@ import { writeBackStudioPlacement } from "@/lib/mockups/resolve";
 import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render";
 import {
   DEFAULT_TRANSFORM,
+  type AgentChecklistItem,
+  type AgentQuestion,
   type ImagePartData,
   type InkVariant,
   type MockupCategory,
@@ -80,11 +82,19 @@ export interface ToolExecResult {
   /** Set when the tool proposes a write the user must confirm first. */
   confirmation?: ToolConfirmation;
   error?: string;
+  /** Images a tool read for the model (data URLs). The loop replays them. */
+  images?: ImagePartData[];
+  /** Set by ask_user: the loop pauses and renders an inline question card. */
+  question?: AgentQuestion;
+  /** Set by update_checklist: the live checklist the panel renders. */
+  checklist?: AgentChecklistItem[];
 }
 
 /** Extra browser-side context a tool may need (e.g. images attached in chat). */
 export interface ToolContext {
   attachments?: ImagePartData[];
+  /** Bounded research: the loop owns the count so a turn cannot run away. */
+  research?: { passes: number; max: number };
 }
 
 /** Printify rejects a product with more than this many enabled variants. */
@@ -1894,6 +1904,172 @@ export async function executeTool(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Inline agent tools: vision, questions, checklist, bounded research
+// ---------------------------------------------------------------------------
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the image."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Reads ONE design's artwork so the model can look at it.
+ *
+ * It deliberately reads the MAIN artwork (the cutout when one exists), never a
+ * mockup render: a description is written about the design, not the garment.
+ * When there is no artwork, or the name is ambiguous, it asks instead of
+ * guessing - the honesty rule applies to pixels too.
+ */
+async function readDesignImage(args: Record<string, unknown>): Promise<ToolExecResult> {
+  const all = await db.designs.toArray();
+  if (!all.length) {
+    return { summary: "No designs yet", error: "The design library is empty." };
+  }
+  const wanted = String(args.design ?? "").trim();
+  const names = all.slice(0, 5).map((d) => d.name);
+  const design = wanted
+    ? all.find((d) => d.id === wanted) ?? pickByName(all, wanted)
+    : all.length === 1
+      ? all[0]
+      : undefined;
+  if (!design) {
+    return {
+      summary: "Which design?",
+      question: {
+        question: wanted
+          ? `I couldn't find a design named “${wanted}”. Which one did you mean?`
+          : "Which design should I look at?",
+        options: names,
+        allowCustom: true,
+      },
+    };
+  }
+  const assetId = designMainAssetId(design);
+  const blob = assetId ? await getAssetBlob(assetId) : undefined;
+  if (!blob) {
+    return {
+      summary: `“${design.name}” has no artwork`,
+      question: {
+        question: `“${design.name}” has no artwork saved, so I can't see it. Upload the artwork, or should I skip this design?`,
+        options: ["I'll upload it", "Skip this design"],
+        allowCustom: true,
+      },
+    };
+  }
+  let dataUrl: string;
+  try {
+    dataUrl = await blobToDataUrl(blob);
+  } catch {
+    return {
+      summary: "Unreadable image",
+      question: {
+        question: `I couldn't read the artwork for “${design.name}”. What does it show?`,
+        options: ["Describe it for me", "Skip this design"],
+        allowCustom: true,
+      },
+    };
+  }
+  return {
+    summary: `Looked at “${design.name}”`,
+    result: {
+      design: design.name,
+      designId: design.id,
+      note: "The image is attached in the next message. Describe only what you can actually see.",
+    },
+    images: [
+      {
+        name: `${design.name}.${blob.type === "image/jpeg" ? "jpg" : "png"}`,
+        mime: blob.type || "image/png",
+        dataUrl,
+      },
+    ],
+  };
+}
+
+/** Pauses the turn: the panel renders an inline question card. */
+function askUser(args: Record<string, unknown>): ToolExecResult {
+  const question = String(args.question ?? "").trim();
+  const options = Array.isArray(args.options)
+    ? args.options.map((o) => String(o).trim()).filter(Boolean).slice(0, 6)
+    : [];
+  if (!question) {
+    return { summary: "Nothing to ask", error: "ask_user needs a question." };
+  }
+  return {
+    summary: question,
+    result: { question, options },
+    question: {
+      question,
+      options: options.length ? options : ["Yes", "No"],
+      allowCustom: args.allowCustom !== false,
+    },
+  };
+}
+
+/** Replaces the live checklist; the loop stores it on the assistant message. */
+function updateChecklist(args: Record<string, unknown>): ToolExecResult {
+  const raw = Array.isArray(args.items) ? args.items : [];
+  const items: AgentChecklistItem[] = [];
+  for (const entry of raw.slice(0, 20)) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const label = String(row.label ?? "").trim();
+    if (!label) continue;
+    const status = row.status;
+    items.push({
+      label,
+      status:
+        status === "active" || status === "done" || status === "failed" ? status : "pending",
+    });
+  }
+  if (!items.length) {
+    return { summary: "Empty checklist", error: "update_checklist needs at least one labelled item." };
+  }
+  return {
+    summary: `${items.filter((i) => i.status === "done").length}/${items.length} done`,
+    result: { items },
+    checklist: items,
+  };
+}
+
+/**
+ * One bounded Etsy research pass. The loop owns the budget (max two passes),
+ * so this refuses the third instead of letting a turn fan out.
+ */
+async function spawnResearchPass(
+  args: Record<string, unknown>,
+  ctx?: ToolContext,
+): Promise<ToolExecResult> {
+  const query = String(args.query ?? "").trim();
+  if (!query) return { summary: "No query", error: "spawn_research_pass needs a query." };
+  const budget = ctx?.research ?? { passes: 0, max: 2 };
+  if (budget.passes >= budget.max) {
+    return {
+      summary: "Research budget used",
+      error: `Both research passes are already used. Work with what you have and say what is still unverified.`,
+      result: { exhausted: true, max: budget.max },
+    };
+  }
+  budget.passes += 1;
+  try {
+    const research = await researchEtsy(query);
+    return {
+      summary: `Researched “${query}” (pass ${budget.passes}/${budget.max})`,
+      result: { pass: budget.passes, query, research },
+    };
+  } catch (error) {
+    return {
+      summary: "Research failed",
+      error: error instanceof Error ? error.message : "Etsy research failed.",
+    };
+  }
+}
+
 async function runToolProposal(
   name: string,
   args: Record<string, unknown>,
@@ -1928,6 +2104,14 @@ async function runToolProposal(
       return await proposeSaveChatImage(args, ctx);
     case "create_printify_product":
       return await proposePrintifyProduct(args, ctx);
+    case "read_design_image":
+      return await readDesignImage(args);
+    case "ask_user":
+      return askUser(args);
+    case "update_checklist":
+      return updateChecklist(args);
+    case "spawn_research_pass":
+      return await spawnResearchPass(args, ctx);
     default:
       return { summary: `Unknown tool “${name}”`, error: `No tool named ${name}.` };
   }

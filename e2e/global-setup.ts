@@ -24,7 +24,6 @@ import { chromium } from "@playwright/test";
  */
 const ROUTES = [
   "/",
-  "/agent",
   "/mockups",
   "/export",
   "/activity",
@@ -35,7 +34,6 @@ const ROUTES = [
   "/listing-images",
   "/listing-details",
   "/listing-preview",
-  "/autopilot",
 ];
 
 /** Utility pages that render outside the sidebar shell. */

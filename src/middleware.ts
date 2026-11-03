@@ -10,6 +10,7 @@ const MUTATING_PATHS = [
   "/api/etsy/research",
   "/api/ai/assistant",
   "/api/ai/chat",
+  "/api/ai/images",
   "/api/ai/seo",
   "/api/ai/title",
   "/api/integrations/models",
