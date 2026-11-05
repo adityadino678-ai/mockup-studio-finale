@@ -329,7 +329,11 @@ test.describe("core workflow", () => {
     // and the default. The 200% placement was written for design-a: select
     // its tab explicitly anyway.
     await page.getByRole("button", { name: "design-a", exact: true }).click();
-    await expect(page.getByText(/200% of the print area/)).toBeVisible({ timeout: 30_000 });
+    // The mockup follows the Studio: the placement readout shows the exact
+    // number the design panel wrote.
+    await expect(page.getByText(/Design 200% of the print area width/)).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Save the composed mockup. This is the same renderComposition the
     // agent's create_mockup_render tool calls.
@@ -541,13 +545,11 @@ test.describe("core workflow", () => {
       "/printify-bookmarklet",
     ];
     for (const route of routes) {
-      // "/" is the picture-book landing page: no app shell, so wait for its
-      // hero instead of the sidebar. Console errors are still collected for it.
+      // "/" is a static redirect to the Studio (the landing page is gone).
+      // Console errors are still collected for the redirecting page.
       if (route === "/") {
         await page.goto(route);
-        await expect(page.locator("main", { hasText: /Turn Art into Income/ })).toBeVisible({
-          timeout: 30_000,
-        });
+        await expect(page).toHaveURL(/\/printify-studio\/?$/, { timeout: 15_000 });
         continue;
       }
       // The fresh profile sees the standalone onboarding walkthrough, which is

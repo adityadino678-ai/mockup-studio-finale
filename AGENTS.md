@@ -1008,7 +1008,7 @@ controls, renders — is that design only:
   area" from a library card still wins over the memory.
 - `Set as the placeholder for all designs` is the explicit bulk action: it
   makes the placement on screen the shared default and clears per-design
-  overrides. "Fit to area" writes only the picked design.
+  overrides.
 
 Saves are debounced; leaving the panel or switching mockups flushes a pending
 draft. Every pending draft carries its own `mockupId` + `designId`, and a
@@ -1084,6 +1084,22 @@ position pickers here:
   design afterwards gives that design its own placement again.
 
 **Traps in this feature:**
+
+- **A mockup with no saved area auto-drafts one, and the seed is never a
+  write.** The seeded area (`seedPrintArea` in `print-area.ts`) picks the
+  Studio's exact area when it is known, else the category's typical size
+  (`presetsForCategory`), else nothing. It lives only in component state with
+  **no dirty flag**, so the debounced auto-save never persists it by itself;
+  persisting happens only on explicit action: **Save on this mockup** writes
+  this design's area on **this mockup only** (scope `this`); **Render on
+  every mockup** first writes the draft to every same-type mockup and then
+  renders them (scope `category`). An explicit earlier choice always
+  wins: a stored area resolves normally, and a `null` override written by
+  **Remove area** never re-seeds - the tab shows blank exactly as before. A
+  pending away-tab draft that is flushed is not papered over by a seed in the
+  same pass either. Because the seed is non-null, the **Visible window**
+  card appears and the save/render buttons enable - that is deliberate, not a
+  bug, and there is deliberately NO hint line explaining it.
 
 - **Konva's pointer is in CANVAS pixels, not mockup pixels.** The stage is
   scaled down to fit the panel, so every pointer reading must be divided by
@@ -1164,6 +1180,17 @@ position pickers here:
   discovered dep, so warm the routes before trusting a first e2e run. The
   suite only passed reliably with a server started outside Playwright and
   left running (`reuseExistingServer: true`).
+
+## Do not re-add this
+
+- **The "Fit to area" button does not exist and must never come back.** It
+  was removed on purpose (Nov 2026) by the project owner. The placement is
+  edited in the Printify Studio's Design panel, never from the mockups tab.
+  That means: no `Fit to area` button, no `fitToArea` / `computeFit` helper,
+  no "fit the artwork to the area" auto-scale control in `print-areas-tab.tsx`,
+  and no per-design auto-fit shortcut wired to the placement. Any agent or
+  maintainer adding it (or proposing it as a "helpful" feature) must not.
+  A guard test (`tests/no-fit-to-area.test.ts`) fails if it reappears.
 
 ## Traps that will bite you again
 

@@ -529,6 +529,66 @@ export function printAreaOf(
   return normalisePrintArea(mockup.printArea);
 }
 
+/** What the auto-draft is allowed to seed from, best first. */
+export interface PrintAreaSeedSource {
+  /** The area's pixel size. */
+  width: number;
+  height: number;
+  /** Short label, e.g. the position or the preset's name. */
+  label: string;
+  source: PrintAreaSource;
+}
+
+/**
+ * The auto-draft for a mockup that has no stored area at all.
+ *
+ * Returns a READY-TO-PLACE area, or `null` when the mockup must stay blank:
+ *
+ *  - an override row for THIS design exists (even a `null` "deliberately
+ *    none" written by Remove area, even a valid area from before) → `null`;
+ *  - a shared `printArea` base exists → `null` (it already resolves);
+ *  - otherwise the caller's best-known size is used: the Studio's exact area
+ *    when available, else the first preset for the category, else give up.
+ *
+ * The draft is never persisted by this function and never gains a dirty flag:
+ * saving happens only when the user acts (auto-save is dirty-gated), so a
+ * seeded area cannot leak onto disk on its own.
+ */
+export function seedPrintArea(
+  mockup: {
+    printArea?: unknown;
+    designAreas?: Record<string, unknown> | null;
+    width?: number | null;
+    height?: number | null;
+  },
+  designId: string | null | undefined,
+  studio: PrintAreaSeedSource | null | undefined,
+  preset: PrintAreaSeedSource | null | undefined,
+): MockupPrintArea | null {
+  if (designId) {
+    const overrides = mockup.designAreas;
+    if (overrides && Object.prototype.hasOwnProperty.call(overrides, designId)) {
+      return null;
+    }
+  }
+  if (normalisePrintArea(mockup.printArea)) return null;
+  const pick = studio ?? preset ?? null;
+  if (!pick) return null;
+  return {
+    areaWidth: pick.width,
+    areaHeight: pick.height,
+    label: pick.label,
+    source: pick.source,
+    frame: defaultFrame(
+      { areaWidth: pick.width, areaHeight: pick.height },
+      mockup.width ?? 0,
+      mockup.height ?? 0,
+    ),
+    clipMode: "area",
+    updatedAt: Date.now(),
+  };
+}
+
 /**
  * Normalises a stored print area.
  *

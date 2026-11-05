@@ -40,7 +40,6 @@ import { emptySession, loadSession, saveSession } from "@/lib/printify/studio-se
 import { fetchVariants } from "@/lib/printify/catalog-client";
 import { presetsForCategory } from "@/lib/printify/presets";
 import { CATEGORY_SINGULAR } from "@/lib/mockups/categories";
-import { computeFit } from "@/lib/printify/fit";
 import {
   areaCrop,
   areaInches,
@@ -52,10 +51,10 @@ import {
   printAreaFromTemplate,
   printAreaOf,
   printAreaTemplateFrom,
+  seedPrintArea,
   type AreaCrop,
   type PrintAreaOption,
 } from "@/lib/mockups/print-area";
-import { writeStudioPlacement } from "@/lib/mockups/resolve";
 import {
   applyPrintAreaToMockups,
   printAreaScopeTargets,
@@ -164,6 +163,14 @@ export function PrintAreasTab({
    * design. Only a user edit (`markAreaDirty`) claims a draft.
    */
   const draftOwner = React.useRef<string | null>(null);
+  /**
+   * The mockup+design key of an auto-seeded area that the user has not
+   * touched yet. The seed is a draft, never a write: the debounced autosave
+   * only arms on `dirty`, and the seed never sets it. Explicit actions that
+   * promise pixels of exactly what is on screen (Save/Render) DO persist the
+   * seed, so what is stored matches the preview.
+   */
+  const untouchedSeedRef = React.useRef<string | null>(null);
   /** The live debounce handle, so an explicit remove can cancel it. */
   const autoSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -190,6 +197,7 @@ export function PrintAreasTab({
    * `area` state has not been reloaded yet.
    */
   const markAreaDirty = React.useCallback(() => {
+    untouchedSeedRef.current = null;
     draftOwner.current = `${activeMockupId ?? ""}:${designId ?? ""}`;
     draftVersion.current += 1;
     setDirty(true);
@@ -248,6 +256,14 @@ export function PrintAreasTab({
     () => designs?.find((d) => d.id === designId) ?? null,
     [designs, designId],
   );
+  // Read as primitives so the effect below can depend on them honestly: it
+  // re-seeds when the Studio's exact area resolves.
+  const studioBlueprint = session.blueprintId;
+  const studioProvider = session.printProviderId;
+  const categoryPresets = React.useMemo(
+    () => (mockup ? presetsForCategory(mockup.category) : []),
+    [mockup],
+  );
 
   // The ACTIVE design's saved area on this mockup becomes the draft whenever
   // the mockup OR the design tab changes. Each design owns its own frame per
@@ -258,6 +274,7 @@ export function PrintAreasTab({
   // scope the user chose (same type by default).
   React.useEffect(() => {
     if (!mockup) {
+      untouchedSeedRef.current = null;
       setArea(null);
       setDirty(false);
       lastMockupId.current = null;
@@ -266,6 +283,7 @@ export function PrintAreasTab({
     }
     const mockupChanged = lastMockupId.current !== mockup.id;
     const designChanged = lastDesignId.current !== designId;
+    let justFlushed = false;
     if (mockupChanged || designChanged) {
       // Switching away from a draft that has not hit its debounce yet: write
       // it against the OLD mockup AND the old design before the new tab
@@ -276,6 +294,7 @@ export function PrintAreasTab({
         (pending.mockupId !== mockup.id || pending.designId !== designId)
       ) {
         pendingDraft.current = null;
+        justFlushed = true;
         void applyPrintAreaToMockups({
           sourceMockupId: pending.mockupId,
           designId: pending.designId ?? undefined,
@@ -297,9 +316,56 @@ export function PrintAreasTab({
       return;
     }
 
-    setArea(printAreaOf(mockup, designId) ?? null);
+    const stored = printAreaOf(mockup, designId) ?? null;
+    if (stored) {
+      untouchedSeedRef.current = null;
+      setArea(stored);
+      setDirty(false);
+      return;
+    }
+    // Nothing stored: auto-draft a pick the user can save - the Studio's
+    // exact area first, the category's typical size otherwise, nothing when
+    // both are unavailable or the user deliberately removed the area (a null
+    // override wins over any suggestion). A seed never arms the autosave;
+    // persisting it happens on explicit Save/Render. When we JUST flushed the
+    // user's away-switched draft, the stored area is on its way back from
+    // the write, so do not paper over it with a seed this run.
+    if (justFlushed) {
+      untouchedSeedRef.current = null;
+      setArea(null);
+      setDirty(false);
+      return;
+    }
+    const seeded = seedPrintArea(
+      mockup,
+      designId,
+      studioArea && studioBlueprint && studioProvider
+        ? {
+            width: studioArea.width,
+            height: studioArea.height,
+            label: `${studioArea.position}${studioArea.method ? ` (${studioArea.method})` : ""}`,
+            source: {
+              kind: "studio",
+              blueprintId: studioBlueprint,
+              printProviderId: studioProvider,
+              position: studioArea.position,
+              method: studioArea.method,
+            },
+          }
+        : null,
+      categoryPresets[0]
+        ? {
+            width: categoryPresets[0].width,
+            height: categoryPresets[0].height,
+            label: categoryPresets[0].label,
+            source: { kind: "preset", presetId: categoryPresets[0].id },
+          }
+        : null,
+    );
+    untouchedSeedRef.current = seeded ? `${mockup.id}:${designId ?? ""}` : null;
+    setArea(seeded);
     setDirty(false);
-  }, [mockup, dirty, designId]);
+  }, [mockup, dirty, designId, studioArea, studioBlueprint, studioProvider, categoryPresets]);
 
   // The Studio placement for the picked design. Each design owns its
   // placement; every mockup uses it inside that mockup's own frame.
@@ -352,10 +418,6 @@ export function PrintAreasTab({
   // --- the area --------------------------------------------------------------
   const mockupW = mockup?.width ?? 0;
   const mockupH = mockup?.height ?? 0;
-  const categoryPresets = React.useMemo(
-    () => (mockup ? presetsForCategory(mockup.category) : []),
-    [mockup],
-  );
 
   /** Creates the area with a size, keeping the frame where it is. */
   const applyAreaSize = (next: {
@@ -500,11 +562,35 @@ export function PrintAreasTab({
    * false when the write failed, so the caller stops instead of rendering from
    * a half-applied state.
    */
-  const flushDraft = React.useCallback(async (): Promise<boolean> => {
-    if (!dirty || !area) return true;
-    const result = await persistArea(area);
+  /**
+   * Persists the current draft for an explicit user action.
+   *
+   * The scope is ALWAYS explicit at the call site: "Save on this mockup"
+   * stores this design's area on this mockup only, while "Render on every
+   * mockup" applies the draft to every mockup of this type first (so the
+   * renders exist) and then renders them. Neither goes through the broad
+   * `areaScope` default, which stays for the tab-switch and debounce writes
+   * of the staged workflow.
+   */
+  const flushDraft = React.useCallback(async (scope: PrintAreaScope): Promise<boolean> => {
+    if (!dirty) {
+      if (area) {
+        const key = `${mockup?.id ?? ""}:${designId ?? ""}`;
+        if (untouchedSeedRef.current === key) {
+          // An explicit action the user asked for (Save/Render) persists the
+          // auto-seeded area exactly as shown, so the stored pixels match the
+          // preview. The seed itself never arms the autosave.
+          const result = await persistArea(area, { scope });
+          if (result.updated > 0) untouchedSeedRef.current = null;
+          return result.updated > 0;
+        }
+      }
+      return true;
+    }
+    if (!area) return true;
+    const result = await persistArea(area, { scope });
     return result.updated > 0;
-  }, [dirty, area, persistArea]);
+  }, [dirty, area, persistArea, mockup, designId]);
 
   /** The exact print area of the product selected in the Printify Studio. */
   const _useStudioArea = () => {
@@ -581,30 +667,9 @@ export function PrintAreasTab({
   };
 
   // --- the Studio's placement ------------------------------------------------
-  const commitPlacement = async (next: StudioPlacement) => {
-    if (!designId) return;
-    const current = session.placements[designId] ?? session.universalPlacement;
-    const unchanged =
-      current.x === next.x &&
-      current.y === next.y &&
-      current.scale === next.scale &&
-      current.angle === next.angle;
-    if (unchanged) return;
-    // One placement per design. This button changes the picked design only.
-    const updated = await writeStudioPlacement(designId, next, { scope: "design" });
-    setSession(updated);
-  };
-
-  const fitToArea = () => {
-    if (!area || !placement || designMeta.w <= 0) return;
-    const fit = computeFit({
-      artworkWidth: designMeta.w,
-      artworkHeight: designMeta.h,
-      areaWidth: area.areaWidth,
-      areaHeight: area.areaHeight,
-    });
-    void commitPlacement({ ...placement, scale: fit.scale });
-  };
+  // Placement is edited in the Printify Studio (the Design panel). This is
+  // the only writer of placements. The auto-fit action was removed on
+  // purpose and must never come back.
 
   /**
    * Makes this the mockup's placeholder for EVERY design.
@@ -761,8 +826,10 @@ export function PrintAreasTab({
     try {
       // Save the draft FIRST: the fingerprint and the pixels must come from
       // the area that is actually stored, or an unsaved frame would record a
-      // fingerprint the saved area does not reproduce.
-      if (!(await flushDraft())) return;
+      // fingerprint the saved area does not reproduce. This button means
+      // THIS mockup - the button for the whole type is "Render on every
+      // mockup" next to it.
+      if (!(await flushDraft("this"))) return;
       const savedMockup = (await db.mockups.get(mockup.id)) ?? mockup;
       // Resolve transform AND clip from the SAVED design-specific area.
       // renderComposition receives both, so it cannot re-read a different
@@ -866,8 +933,9 @@ export function PrintAreasTab({
     let failed = 0;
     try {
       // Save the active design's draft first, so neither the target set nor a
-      // fingerprint can be derived from an unsaved frame.
-      if (!(await flushDraft())) return;
+      // fingerprint can be derived from an unsaved frame. The draft goes to
+      // every mockup of this type, which is what makes them all renderable.
+      if (!(await flushDraft("category"))) return;
       const freshMockups = await db.mockups.toArray();
       const targets = freshMockups.filter((m) => printAreaOf(m, design.id));
       if (targets.length === 0) {

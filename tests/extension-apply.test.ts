@@ -133,7 +133,7 @@ afterEach(() => {
 });
 
 describe("the extension's replacement apply", () => {
-  it("replaces the whole selection and clears every group's old mockup ids", async () => {
+  it("replaces the whole selection and drops the groups it emptied", async () => {
     installFetch(layout);
 
     const result = await applyMockups(payload(true));
@@ -144,7 +144,11 @@ describe("the extension's replacement apply", () => {
     // earlier uploads are gone.
     expect(body.selected_mockups.map((entry) => entry.id)).toEqual(["new-1", "new-2"]);
     // Every group keeps its identity and variant partition, but none keeps an
-    // old mockup id.
+    // old mockup id - and the groups that now hold no mockup ids are dropped
+    // from the PUT entirely: today's Printify validator rejects a variant
+    // group with an empty mockup_ids (HTTP 400), so Printify's own UI omits
+    // empty groups, and the server keeps the omitted ones server-side (they
+    // come back re-derived against the new selection).
     expect(body.groups).toEqual([
       {
         group_key: "not_linked",
@@ -152,9 +156,20 @@ describe("the extension's replacement apply", () => {
         variant_ids: [1],
         mockup_ids: ["new-1", "new-2"],
       },
-      { group_key: "front", label: "Front", variant_ids: [2, 3], mockup_ids: [] },
-      { group_key: "back", label: "Back", variant_ids: [4], mockup_ids: [] },
     ]);
+  });
+
+  it("never sends a variant group with an empty mockup_ids in replacement", async () => {
+    installFetch(layout);
+
+    await applyMockups(payload(true));
+
+    const body = putBody();
+    for (const group of body.groups) {
+      // The validator's rule ("required when variant_ids is present") makes an
+      // empty variant group a guaranteed HTTP 400.
+      expect(group.variant_ids.length > 0 && group.mockup_ids.length === 0).toBe(false);
+    }
   });
 
   it("still merges when the payload explicitly says replace:false", async () => {
