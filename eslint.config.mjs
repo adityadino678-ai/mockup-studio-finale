@@ -11,6 +11,8 @@ export default [
       "node_modules/**",
       "dist/**",
       ".astro/**",
+      // Wrangler writes bundles of generated code here on every `wrangler dev`.
+      ".wrangler/**",
       "test-results/**",
       "public/**",
       // Local scratch scripts and the standalone Printify bridge extension are

@@ -71,15 +71,28 @@ export function AgentLauncher() {
 
   return (
     <>
-      {/* The panel slides in over the page; the page underneath is untouched. */}
+      {/* The panel slides in over the page; the page underneath is untouched.
+          While it is CLOSED the box must not exist for the mouse at all.
+          `opacity-0` does not stop hit-testing, and the inner wrapper carries
+          `pointer-events-auto`, so an unopened panel used to leave an
+          invisible 380x540 block in the bottom-right corner that swallowed
+          every click on the page beneath it - the Studio's selection bar
+          ("Select all", "Delete") and anything else in that corner simply did
+          not respond. `invisible` removes it from hit-testing entirely, and
+          pointer-events is only re-enabled while it is actually open. */}
       <div
         className={cn(
           "pointer-events-none fixed bottom-20 right-5 z-40 transition-transform duration-200",
-          open ? "translate-x-0 opacity-100" : "translate-x-6 opacity-0",
+          open ? "visible translate-x-0 opacity-100" : "invisible translate-x-6 opacity-0",
         )}
         aria-hidden={!open}
       >
-        <div className="pointer-events-auto h-[540px] w-[380px] max-w-[calc(100vw-2rem)]">
+        <div
+          className={cn(
+            "h-[540px] w-[380px] max-w-[calc(100vw-2rem)]",
+            open ? "pointer-events-auto" : "pointer-events-none",
+          )}
+        >
           {open && <AgentPanel surface={surface} onClose={toggle} />}
         </div>
       </div>

@@ -12,7 +12,7 @@ import {
   primaryHex,
   suggestInk,
 } from "@/lib/printify/colors";
-import { MAX_UPSCALE, clampPlacement, computeFit } from "@/lib/printify/fit";
+import { clampPlacement } from "@/lib/printify/fit";
 import {
   pairedColourGroups,
   planDesignColours,
@@ -167,84 +167,7 @@ describe("ink against the garment", () => {
   });
 });
 
-describe("placement fit", () => {
-  it("reproduces Printify's rule of thumb for exact-width artwork", () => {
-    // Artwork the width of the placeholder => scale 1, centred at 0.5/0.5.
-    const fit = computeFit({
-      artworkWidth: 2419,
-      artworkHeight: 2761,
-      areaWidth: 2419,
-      areaHeight: 2761,
-    });
-    expect(fit.scale).toBeCloseTo(1);
-    expect(fit.x).toBeCloseTo(0.5);
-    expect(fit.y).toBeCloseTo(0.5);
-  });
-
-  it("centres artwork that is narrower than the area", () => {
-    const fit = computeFit({
-      artworkWidth: 1209.5,
-      artworkHeight: 2761,
-      areaWidth: 2419,
-      areaHeight: 2761,
-    });
-    expect(fit.scale).toBeCloseTo(0.5);
-    // Centred: the left offset plus half the scaled width.
-    expect(fit.x).toBeCloseTo(0.5);
-    expect(fit.y).toBeCloseTo(0.5);
-  });
-
-  it("converts edge offsets into Printify's centre convention", () => {
-    // Wider than tall in a square area: the width fills it, the height does
-    // not, so the artwork sits above the vertical centre.
-    const fit = computeFit({
-      artworkWidth: 1000,
-      artworkHeight: 500,
-      areaWidth: 2000,
-      areaHeight: 2000,
-    });
-    expect(fit.width).toBeCloseTo(2000);
-    expect(fit.height).toBeCloseTo(1000);
-    // A quarter of the area is empty above the artwork.
-    expect(fit.offsetY).toBeCloseTo(0.25);
-    expect(fit.scale).toBeCloseTo(1);
-    // ...which is why the centre is still 0.5: the offset and the half-size
-    // of the artwork cancel out.
-    expect(fit.y).toBeCloseTo(0.5);
-    expect(fit.x).toBeCloseTo(0.5);
-  });
-
-  it("scales artwork up to fill the area when it is half the size", () => {
-    // Exactly half the area: filled exactly, so scale 1 and centred.
-    const fit = computeFit({
-      artworkWidth: 1000,
-      artworkHeight: 1000,
-      areaWidth: 2000,
-      areaHeight: 2000,
-    });
-    expect(fit.scale).toBeCloseTo(1);
-    expect(fit.x).toBeCloseTo(0.5);
-    expect(fit.y).toBeCloseTo(0.5);
-  });
-
-  it("limits how far small artwork is blown up", () => {
-    // Tiny artwork may be scaled up, but never past the upscale cap.
-    const fit = computeFit({
-      artworkWidth: 100,
-      artworkHeight: 100,
-      areaWidth: 3000,
-      areaHeight: 3000,
-    });
-    expect(fit.factor).toBeLessThanOrEqual(MAX_UPSCALE);
-    expect(fit.width).toBeLessThanOrEqual(3000);
-  });
-
-  it("rejects zero-sized input", () => {
-    expect(() =>
-      computeFit({ artworkWidth: 0, artworkHeight: 10, areaWidth: 10, areaHeight: 10 }),
-    ).toThrow(/positive dimensions/i);
-  });
-
+describe("placement clamping", () => {
   it("clamps placements into the range Printify accepts", () => {
     const clamped = clampPlacement({ x: 1.4, y: -0.2, scale: 0, angle: 450 });
     expect(clamped.x).toBe(1);

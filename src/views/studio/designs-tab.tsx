@@ -259,6 +259,26 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       .sort((a, b) => a.createdAt - b.createdAt);
   }, []);
 
+  /**
+   * Drops ticked ids whose design no longer exists.
+   *
+   * The batch scope lives in the session (`designIds`) so it can survive a
+   * reload, but a design can disappear while it is ticked: its card menu, the
+   * agent, another tab, or a delete whose record was already gone. Nothing
+   * re-checked the ids against the library, so the bar kept reporting
+   * "1 design selected" over an empty list and both Select all and Delete
+   * looked broken - they were operating on a ghost.
+   *
+   * Only the ids that still exist are kept; the guard on the length stops the
+   * write once the scope is clean, so this cannot loop.
+   */
+  React.useEffect(() => {
+    if (!designs) return;
+    const alive = new Set(designs.map((d) => d.id));
+    const pruned = selected.filter((id) => alive.has(id));
+    if (pruned.length !== selected.length) update({ designIds: pruned });
+  }, [designs, selected, update]);
+
   /** The design whose ink artwork the dialog edits, read fresh from the DB. */
   React.useEffect(() => {
     let cancelled = false;
@@ -449,15 +469,58 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
 
   const removeSelected = async () => {
     if (selected.length === 0) return;
-    for (const id of selected) await deleteDesign(id);
-    toast.success(`Deleted ${selected.length} design${selected.length > 1 ? "s" : ""}`);
-    setSelected([]);
+    // `setSelected` writes the studio session, so it takes an ARRAY, not an
+    // updater - passing a function stored the function as the selection.
+    const ids = [...selected];
+    const alive = new Set((designs ?? []).map((d) => d.id));
+    // Delete one at a time and keep going: a single design whose records are
+    // inconsistent used to reject the whole loop, so NOTHING was deleted and
+    // the click looked dead. Every failure is now named in a toast.
+    const failed: string[] = [];
+    const removed: string[] = [];
+    let deleted = 0;
+    for (const id of ids) {
+      // A ghost id (already deleted elsewhere) just leaves the scope; there is
+      // nothing to delete and no error to report.
+      if (!alive.has(id)) {
+        removed.push(id);
+        continue;
+      }
+      try {
+        await deleteDesign(id);
+        removed.push(id);
+        deleted++;
+      } catch (e) {
+        failed.push(`${(designs ?? []).find((d) => d.id === id)?.name ?? id}: ${e instanceof Error ? e.message : "unknown error"}`);
+      }
+    }
+    // Only the designs that really went away leave the selection, so a failed
+    // one stays ticked and can be retried.
+    setSelected(ids.filter((id) => !removed.includes(id)));
+    if (deleted > 0) {
+      toast.success(`Deleted ${deleted} design${deleted > 1 ? "s" : ""}`);
+    } else if (removed.length > 0) {
+      toast.success("Selection cleared — those designs were already gone");
+    }
+    if (failed.length > 0) {
+      toast.error(
+        `Could not delete ${failed.length} design${failed.length > 1 ? "s" : ""}: ${failed[0]}`,
+      );
+    }
+    if (removed.length === 0 && failed.length === 0) toast.error("Nothing to delete");
   };
 
   /** Deletes ONE design, from that card's menu. */
   const removeOne = async (id: string) => {
     const row = (designs ?? []).find((d) => d.id === id);
-    await deleteDesign(id);
+    try {
+      await deleteDesign(id);
+    } catch (e) {
+      toast.error(
+        `Could not delete${row ? ` "${row.name}"` : ""}: ${e instanceof Error ? e.message : "unknown error"}`,
+      );
+      return;
+    }
     setSelected(selected.filter((x) => x !== id));
     toast.success(row ? `Deleted "${row.name}"` : "Design deleted");
   };
