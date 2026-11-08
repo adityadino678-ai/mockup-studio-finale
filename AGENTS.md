@@ -68,7 +68,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
 npm run test          # 666 unit tests across 40 test files
-npm run test:e2e      # 49 acceptance tests (local dev server)
+npm run test:e2e      # 59 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -119,6 +119,13 @@ Both must pass. The production run has caught bugs the local run missed.
   link is opened at `/auth/confirm`. The landing dialog and `/login` both read
   `/api/auth/status` first, so they never offer a path the deployment cannot
   serve.
+- **`/login` is an entry point, not a destination.** A successful sign-up,
+  sign-in or email confirmation sends the visitor straight to
+  `/printify-studio`; a visitor who already has a valid token is redirected
+  there on load too. Only `?stay=1` keeps the signed-in card (and its Sign out
+  button) on the page. Sign-out lives in Settings, so the redirect cannot trap
+  a session. The landing dialog used to call `location.assign('/login')`, which
+  is what produced the "Signed in as …" dead end.
 - **No `Buffer`.** `atob` + `Uint8Array` in `api/printify/products.ts`.
 
 ## The Printify product contract (verified live, Oct 2026)
@@ -1208,16 +1215,18 @@ position pickers here:
   exactly that). Note the catalogue itself is cached per URL at the edge without
   the key, so a cache hit can still answer 200 while the key is rejected — the
   data is public and identical for everyone, so that is not a lie about the key.
-- **The Worker's `PRINTIFY_API_KEY` was REJECTED by Printify and has been
-  removed** (401 `Unauthenticated`, verified Oct 2026 with a cache-busting
-  catalogue request). While it was present, `/api/integrations/status` reported
-  `configured: true` because that only means a secret exists, the catalogue could
-  still answer 200 from the edge cache, and every real Printify call (print
-  providers, variants, product creation) failed. The owner's decision (Nov 2026)
-  is to keep **no Printify key on the server at all**: Printify is
-  bring-your-own-key, so a stale operator key is silently inherited by every
-  visitor who has not pasted one, and its 401 looks like their mistake. With no
-  server key, a run without a browser key answers an honest 503 asking for one.
+- **The Worker's `PRINTIFY_API_KEY` was present and WORKING, and was removed on
+  2026-11-08.** A cache-busting catalogue request with no browser key returned
+  200 and the full blueprint list, and `/api/integrations/status` reported
+  `configured: true, source: "server"`, so anonymous visitors were spending the
+  operator's quota. An earlier note claimed the key had been rejected with a 401;
+  that was false at the time of removal (the edge cache did not explain a
+  cache-busted 200). The owner's decision is to keep **no Printify key on the
+  server at all**: Printify is bring-your-own-key, so any operator key is
+  silently inherited by every visitor who has not pasted one. After the deletion
+  the Worker holds only `SUPABASE_URL`, `SUPABASE_ANON_KEY` and
+  `SUPABASE_SERVICE_ROLE`, and a run without a browser key answers an honest 503
+  asking for one.
 - **The mockup-selection write is proven by contract, not by a live session.**
   The upload endpoint, the BFF GET/PUT shape, the replacement/merge body and
   the bookmarklet are implemented and unit-tested, but CI has no Printify web

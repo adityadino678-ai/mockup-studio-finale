@@ -95,6 +95,7 @@ const description =
 <script>
   (function () {
     const TOKEN_KEY = "mockup-studio:auth-token";
+    const STUDIO_HREF = "/printify-studio";
     const form = document.getElementById("auth-form") as HTMLFormElement;
     const unavailable = document.getElementById("auth-unavailable") as HTMLElement;
     const signedIn = document.getElementById("auth-signed-in") as HTMLElement;
@@ -148,6 +149,11 @@ const description =
         if (me.ok) {
           const data = await me.json();
           showSignedIn(data.user.email);
+          // /login is not a destination once you have a session — the Studio is.
+          // `?stay=1` keeps this page (and its sign-out button) reachable.
+          if (!new URL(location.href).searchParams.has("stay")) {
+            location.assign(STUDIO_HREF);
+          }
         } else {
           localStorage.removeItem(TOKEN_KEY);
         }
@@ -182,7 +188,8 @@ const description =
         if (body.accessToken) {
           localStorage.setItem(TOKEN_KEY, body.accessToken);
           showSignedIn(body.user.email);
-          say("Signed in.");
+          say("Signed in. Opening the Studio…");
+          location.assign(STUDIO_HREF);
           return;
         }
 

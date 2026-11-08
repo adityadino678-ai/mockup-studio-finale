@@ -62,8 +62,8 @@ const description = "Finish creating a ListBulkly account by confirming your ema
       localStorage.setItem(TOKEN_KEY, token);
       // Keep the token out of the address bar and out of history.
       history.replaceState(null, "", location.pathname);
-      say("Email confirmed. Taking you to your account…");
-      setTimeout(() => location.replace("/login"), 900);
+      say("Email confirmed. Taking you to the Studio…");
+      setTimeout(() => location.replace("/printify-studio"), 900);
       return;
     }
 
@@ -77,8 +77,8 @@ const description = "Finish creating a ListBulkly account by confirming your ema
           }
           localStorage.setItem(TOKEN_KEY, body.accessToken);
           history.replaceState(null, "", location.pathname);
-          say("Email confirmed. Taking you to your account…");
-          setTimeout(() => location.replace("/login"), 900);
+          say("Email confirmed. Taking you to the Studio…");
+          setTimeout(() => location.replace("/printify-studio"), 900);
         })
         .catch(() => say("Could not reach the server. Try the link again."));
       return;

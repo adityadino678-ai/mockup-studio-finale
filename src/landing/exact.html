@@ -309,7 +309,7 @@ $('#af').addEventListener('submit',async e=>{e.preventDefault();
    const res=await fetch('/api/auth/'+(m==='up'?'signup':'signin'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em,password:pw})});
    const d=await res.json().catch(()=>({}));
    if(!res.ok){am.textContent=d.message||'That did not work. Try again.'}
-   else if(d.accessToken){localStorage.setItem('mockup-studio:auth-token',d.accessToken);am.textContent='Signed in. Opening your account…';setTimeout(()=>location.assign('/login'),700)}
+   else if(d.accessToken){localStorage.setItem('mockup-studio:auth-token',d.accessToken);am.textContent='Signed in. Opening the Studio…';setTimeout(()=>location.assign('/printify-studio'),700)}
    else{am.textContent='Account created — check your email to confirm, then log in.'}
   }catch{am.textContent='Could not reach the server. Check your connection and try again.'}
   finally{ab.disabled=false}

@@ -58,4 +58,65 @@ test.describe("account screens", () => {
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Confirm your email");
     await expect(page.locator("#confirm-text")).toContainText("no confirmation token");
   });
+
+  // /login is an entry point, not a destination: a related bug sent a
+  // successfully signed-in visitor to /login, where the page showed "Signed in
+  // as …" and left them there. The Studio must load instead.
+  const STUDIO = /\/printify-studio\/?$/;
+
+  async function stubStudio(page: import("@playwright/test").Page) {
+    await page.route(STUDIO, (route) =>
+      route.fulfill({ contentType: "text/html", body: "<h1>Studio</h1>" }),
+    );
+  }
+
+  test("a visitor who already has a session is sent to the Studio", async ({ page }) => {
+    await page.route("**/api/auth/status", (route) =>
+      route.fulfill({ json: { configured: true, serviceRole: true, signupMode: "instant" } }),
+    );
+    await page.route("**/api/auth/me", (route) =>
+      route.fulfill({ json: { user: { id: "u1", email: "seller@example.test" } } }),
+    );
+    await stubStudio(page);
+    await page.addInitScript(() =>
+      localStorage.setItem("mockup-studio:auth-token", "test-token"),
+    );
+
+    await page.goto("/login");
+    await page.waitForURL(STUDIO, { timeout: 15000 });
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Studio");
+  });
+
+  test("logging in goes straight to the Studio and keeps the token", async ({ page }) => {
+    await page.route("**/api/auth/status", (route) =>
+      route.fulfill({ json: { configured: true, serviceRole: true, signupMode: "instant" } }),
+    );
+    await page.route("**/api/auth/me", (route) =>
+      route.fulfill({ status: 401, json: { error: "unauthorized" } }),
+    );
+    await page.route("**/api/auth/signin", (route) =>
+      route.fulfill({
+        json: {
+          ok: true,
+          mode: "instant",
+          needsEmailConfirmation: false,
+          user: { id: "u1", email: "seller@example.test" },
+          accessToken: "token-from-signin",
+          refreshToken: "refresh",
+          expiresAt: 1,
+        },
+      }),
+    );
+    await stubStudio(page);
+
+    await page.goto("/login");
+    await page.fill("#auth-email-input", "seller@example.test");
+    await page.fill("#auth-password-input", "password123");
+    await page.click("#auth-submit");
+
+    await page.waitForURL(STUDIO, { timeout: 15000 });
+    expect(
+      await page.evaluate(() => localStorage.getItem("mockup-studio:auth-token")),
+    ).toBe("token-from-signin");
+  });
 });
