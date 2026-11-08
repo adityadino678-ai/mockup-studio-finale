@@ -2,7 +2,7 @@
 
 A premium, local-first workspace for print-on-demand sellers: upload designs, place them on a real Printify print area, map that area onto mockup photos, render mockups, create ink variants, remove backgrounds, and export organized ZIP archives — all stored in your browser, no account required.
 
-`/` is the public ListBulkly landing page; the workspace starts at **Printify Studio** and continues through **Mockups**, **Listing images**, **Listing details**, **Listing preview**, **Export Center**, **Activity**, **Onboarding**, **Settings** and the bookmarklet install page. There is no separate agent page: the agent is an in-page panel on Printify Studio and Listing details. `/styleguide` is internal (`noindex`). The public **Privacy**, **Terms**, **Refunds**, **Cookies** and **Contact** pages are honest launch drafts (legal identity/contact marked PLACEHOLDER), `/404` + `/500` are real error pages rather than redirects, and **`/login`** + **`/auth/confirm`** are the optional account screens.
+`/` is the public ListBulkly landing page; the workspace starts at **Printify Studio** and continues through **Mockups**, **Listing images**, **Listing details**, **Listing preview**, **Export Center**, **Activity**, **Onboarding**, **Settings** and the bookmarklet install page. There is no separate agent page: the agent is an in-page panel on Printify Studio and Listing details. `/styleguide` is internal (`noindex`). The public **Privacy**, **Terms**, **Refunds**, **Cookies** and **Contact** pages are honest launch drafts: legal identity, jurisdiction and price are still PLACEHOLDER, and the contact address (`listbulkly@gmail.com`) is real. `/404` + `/500` are real error pages rather than redirects, and **`/login`** + **`/auth/confirm`** are the optional account screens.
 
 ## Quick start
 
@@ -30,11 +30,13 @@ Optional integrations can be connected two ways:
    model from the agent panel without losing the others. Keys are stored only
    in your browser's IndexedDB and attached to the relevant requests — never
    saved on the server.
-2. **On the server** (`.env.local` / `wrangler secret put`):
+2. **Optionally, on your own server** (`.env.local` / `wrangler secret put`) —
+   only for a self-hosted or preview deployment. The public Worker deliberately
+   ships without these, because every visitor pastes their own:
 
 ```bash
-PRINTIFY_API_KEY=...      # live Printify catalog + product creation
-AI_API_KEY=...            # any OpenAI-compatible provider (Agent chat + listing copy)
+PRINTIFY_API_KEY=...      # optional server fallback for Printify calls
+AI_API_KEY=...            # optional server fallback for agent chat + listing copy
 AI_BASE_URL=...           # default: https://api.openai.com/v1
 AI_MODEL=...              # default: gpt-4o-mini
 ```
@@ -75,13 +77,18 @@ and `dist/_routes.json` excludes them from the Worker. Only the twenty-two `/api
 endpoints run on demand, each opting in with `export const prerender = false`.
 `/` is the static ListBulkly landing page; `/printify-studio` is the workspace.
 
-**Secrets:** none are required and none are deployed by default. The whole core
-workflow runs without any key, and the AI/Printify panels show an honest
-"not configured" state. To enable them in production:
+**Secrets:** the deployed Worker has **no** Printify or AI key, on purpose — this
+is a bring-your-own-key app. A visitor pastes their Printify token (and any AI
+key) in **Settings → API connections**; it lives in that browser's IndexedDB and
+travels on the request as `x-printify-key`, never through the server's storage.
+Without a key, the panels say "not configured" instead of borrowing someone
+else's, and the core workflow is unaffected.
+
+Only for a self-hosted or preview deployment would you add server-side fallbacks:
 
 ```powershell
-npx wrangler secret put PRINTIFY_API_KEY
-npx wrangler secret put AI_API_KEY
+npx wrangler secret put PRINTIFY_API_KEY   # optional, not used on the public Worker
+npx wrangler secret put AI_API_KEY         # optional
 ```
 
 Secrets are read through `getSecret()` from `astro:env/server`, which is
@@ -139,10 +146,12 @@ signed-in client can push to `/api/sync/*`; the local tools never require it.
 
 ## Known limitations (honest)
 
-- **Not proven live yet.** The production Worker's `PRINTIFY_API_KEY` is
-  rejected by Printify (401), so Send/Publish have not been exercised against
-  the live Worker; Send also stops at an unpublished draft and Publish is always
-  a separate click. Pricing and legal text are PLACEHOLDER. The companion
+- **Not proven live yet.** The Send/Publish path has not been exercised against
+  the live Worker with a real key and a real printify.com session, so treat it as
+  verified-by-contract, not verified-by-use; Send also stops at an unpublished
+  draft and Publish is always a separate click. There is no server-side Printify
+  key and none is planned: each visitor pastes their own in Settings. Pricing and
+  legal text are PLACEHOLDER. The companion
   extension is a beta unpacked prototype. There is no custom domain yet, so
   production mail (Resend; Supabase verification/reset mail until then),
   reliable account-confirmation mail and Razorpay live mode remain launch

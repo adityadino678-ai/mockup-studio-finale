@@ -124,29 +124,39 @@ Invoke-WebRequest https://mockup-studio.adityadino678.workers.dev -UseBasicParsi
 (Invoke-WebRequest https://mockup-studio.adityadino678.workers.dev/api/integrations/status -UseBasicParsing).Content
 ```
 
-Every route should return 200. On a fresh deployment with no secrets the
-status endpoint reports `configured: false` for `printify`, `etsy` and `ai`; a
-deployment that has a `PRINTIFY_API_KEY` set reports `configured: true` for
-`printify` (this is about the secret being *present*, not accepted - see below).
+Every route should return 200. On the public Worker the status endpoint reports
+`configured: false` for `printify`, `etsy` and `ai`, because this is a
+bring-your-own-key deployment. `configured` means the secret is *present*, not
+that it is accepted (see below).
 
 ## Integrations and secrets
 
-No API keys are required. That is deliberate: the core workflow — upload, place,
-print areas, render, background removal, ink variants, ZIP export — needs no keys,
-and with none present every integration endpoint returns 503 before doing any
-work, so the public attack surface is effectively nil.
+No API keys are required, and the public Worker deliberately has **no** Printify
+or AI key. That is the product decision, not an omission: every visitor pastes
+their own Printify token (and any AI key) in **Settings → API connections**, it
+is stored in that browser's IndexedDB, and it travels on the request as
+`x-printify-key` / `x-ai-key`. The server never stores or inherits it, so one
+seller's key can never be spent by another visitor's batch.
+
+The core workflow — upload, place, print areas, render, background removal, ink
+variants, ZIP export — needs no keys at all, and with none present every
+integration endpoint returns 503 before doing any work.
 
 A key that is present but rejected by the provider is reported the same way by
 `/api/printify/catalog`: upstream 401/403 becomes **503** with
-`configured: false` and a message naming the rejected key, never a bare 502. A
-stale secret therefore reads as "fix the key", not "Printify is down".
+`configured: false` and a message naming the rejected key, never a bare 502.
 
-To enable in production:
+Only a self-hosted or preview deployment would add server-side fallbacks — a
+browser-saved key always wins over these:
 
 ```powershell
-npx wrangler secret put PRINTIFY_API_KEY
-npx wrangler secret put AI_API_KEY
+npx wrangler secret put PRINTIFY_API_KEY   # optional, do NOT set on the public Worker
+npx wrangler secret put AI_API_KEY         # optional
 ```
+
+`npm run spike:printify` is a local contract check, not a deployment step: it
+reads `PRINTIFY_API_KEY` from the environment or `.dev.vars` and deletes what it
+creates. Keep that key on your machine; it does not belong in Wrangler.
 
 Supported names: `PRINTIFY_API_KEY`, `ETSY_API_KEY`, `ETSY_ACCESS_TOKEN`,
 `ETSY_SHOP_ID`, `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`, `OPENAI_API_KEY`,

@@ -18,10 +18,11 @@ There are **twenty-one pages**: the twelve product routes in `src/pages/*.astro`
 (`src/pages/404.astro` and `src/pages/500.astro`, rendered as `/404.html` and
 `/500.html`), and two account pages (`/login`, `/auth/confirm`). There is no
 `/autopilot` and no `/agent` route; the agent is an in-page panel on Printify
-Studio and Listing details. The five legal pages are honest drafts whose legal
-identity and contact facts are marked PLACEHOLDER; `src/layouts/LegalLayout.astro`
-is their shared shell. `public/robots.txt` keeps `/api/` and `/styleguide` out
-of crawlers.
+Studio and Listing details. The five legal pages are honest drafts: the legal
+identity, jurisdiction, transfer mechanism and price are still PLACEHOLDER, while
+the contact address (`listbulkly@gmail.com`) is real and published on all five;
+`src/layouts/LegalLayout.astro` is their shared shell. `public/robots.txt` keeps
+`/api/` and `/styleguide` out of crawlers.
 
 The two listing tabs that used to live inside the Studio were promoted to their
 own pages (below), and the Studio went back to three tabs: Designs, Colors,
@@ -1146,12 +1147,14 @@ position pickers here:
 
 ## Known gaps
 
-- **Current launch blockers (as of this branch).** The production Worker's
-  `PRINTIFY_API_KEY` is rejected by Printify (401), so Send/Publish are not
-  proven live yet. There is no custom domain, so production mail (Resend behind
-  an adapter; Supabase sends its own verification/reset mail) and canonical URLs
-  still depend on a purchased domain. Razorpay is not in live mode. The
-  companion extension is a beta unpacked prototype, not a store build.
+- **Current launch blockers (as of this branch).** There is no custom domain, so
+  production mail (Resend behind an adapter; Supabase sends its own
+  verification/reset mail) and canonical URLs still depend on a purchased domain.
+  Razorpay is not in live mode. The companion extension is a beta unpacked
+  prototype, not a store build. Printify is **not** a config blocker: it is
+  bring-your-own-key, and the send/publish path is unproven only because it has
+  not been run with a real key and a real printify.com session (see the mockup
+  selection note below) — not because a server secret is missing.
 - **Supabase sign-up is instant in production, email-confirmation in `astro
   dev`.** The deployed Worker already carries `SUPABASE_SERVICE_ROLE`
   (`npx wrangler secret list`), so production `/api/auth/status` reports
@@ -1192,8 +1195,11 @@ position pickers here:
   neither is set. **The saved `printifyShopId` is part of that record** and is
   what the Settings dropdown, creation, Send and Publish share; it is validated
   as a positive integer on load and when it arrives on the wire. The
-  server never stores a user's key. Preview deployments can also set secrets with
-  `npx wrangler secret put PRINTIFY_API_KEY` (and/or `AI_API_KEY`). With no keys
+  server never stores a user's key, and the deployed Worker deliberately has **no**
+  `PRINTIFY_API_KEY`: a visitor must paste their own, so there is nothing for a
+  missing key to fall back to. (`AI_API_KEY` and `PRINTIFY_API_KEY` remain
+  supported as optional server-side fallbacks for a self-hosted or preview
+  deployment; do not set them on the public Worker.) With no keys
   anywhere, every integration endpoint returns 503 before doing work, and a key
   Printify REJECTS is reported the same way: `/api/printify/catalog` maps an
   upstream 401/403 to **503** with `configured:false` and a message naming the
@@ -1202,14 +1208,16 @@ position pickers here:
   exactly that). Note the catalogue itself is cached per URL at the edge without
   the key, so a cache hit can still answer 200 while the key is rejected — the
   data is public and identical for everyone, so that is not a lie about the key.
-- **The live Worker's `PRINTIFY_API_KEY` is currently REJECTED by Printify**
-  (401 `Unauthenticated`, verified Oct 2026 with a cache-busting catalogue
-  request). `/api/integrations/status` still reports `configured: true` because
-  that only means a secret is present. The catalogue can still answer 200 from
-  the edge cache, so the Studio looks healthy, but every real Printify call
-  (print providers, variants, product creation) fails until the secret is
-  rotated with `npx wrangler secret put PRINTIFY_API_KEY`. A visitor can also
-  paste their own key in **Settings → API connections**.
+- **The Worker's `PRINTIFY_API_KEY` was REJECTED by Printify and has been
+  removed** (401 `Unauthenticated`, verified Oct 2026 with a cache-busting
+  catalogue request). While it was present, `/api/integrations/status` reported
+  `configured: true` because that only means a secret exists, the catalogue could
+  still answer 200 from the edge cache, and every real Printify call (print
+  providers, variants, product creation) failed. The owner's decision (Nov 2026)
+  is to keep **no Printify key on the server at all**: Printify is
+  bring-your-own-key, so a stale operator key is silently inherited by every
+  visitor who has not pasted one, and its 401 looks like their mistake. With no
+  server key, a run without a browser key answers an honest 503 asking for one.
 - **The mockup-selection write is proven by contract, not by a live session.**
   The upload endpoint, the BFF GET/PUT shape, the replacement/merge body and
   the bookmarklet are implemented and unit-tested, but CI has no Printify web

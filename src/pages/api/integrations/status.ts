@@ -26,7 +26,7 @@ export const GET: APIRoute = ({ request }) => {
         ? creds.printify.source === "browser"
           ? "Connected using the API key saved in this browser."
           : "Printify connected on the server via PRINTIFY_API_KEY."
-        : "No Printify key. Paste yours in Settings (stored in this browser) or set PRINTIFY_API_KEY on the server.",
+        : "No Printify key yet. Paste yours in Settings → API connections; it stays in this browser.",
       checkedAt: Date.now(),
     },
     etsy: {
