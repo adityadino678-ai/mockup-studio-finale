@@ -1,22 +1,12 @@
 ---
-// The root goes straight into the Studio — no landing page, no account step.
-// Everything the app stores lives in this browser's IndexedDB, so there is
-// nothing to sign in to before working. The landing lives at
-// src/views/landing/landing-page.tsx but is not the front door anymore.
+// The public ListBulkly landing page.
+//
+// This is the owner-supplied landing document, served verbatim from
+// `src/landing/exact.html` (doctype, inline style and inline script included).
+// It is intentionally not rendered through SketchLayout: the document owns its
+// own head, fonts and page chrome. Keep it in sync with the supplied file
+// rather than re-implementing it as a React view.
+import landing from "../landing/exact.html?raw";
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="refresh" content="0; url=/printify-studio" />
-    <link rel="canonical" href="/printify-studio" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <title>Mockup Studio</title>
-    <script is:inline>window.location.replace("/printify-studio");</script>
-  </head>
-  <body>
-    <p><a href="/printify-studio">Open Mockup Studio</a></p>
-  </body>
-</html>
+<Fragment set:html={landing} />

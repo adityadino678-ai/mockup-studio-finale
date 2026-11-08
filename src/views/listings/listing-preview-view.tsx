@@ -101,6 +101,7 @@ import {
 } from "@/lib/printify/listing-mockups";
 import {
   infoCardsForListing,
+  isProductMockup,
   productMockups,
 } from "@/lib/mockups/info-cards";
 import {
@@ -705,7 +706,10 @@ export function ListingPreviewView() {
     (listing: StudioListing): string[] => {
       const configured = session.listingImages?.[listing.listingId] !== undefined;
       if (configured) {
-        return listingMockupIds(session, listing.listingId).filter((id) => mockupsById.has(id));
+        return listingMockupIds(session, listing.listingId).filter((id) => {
+          const mockup = mockupsById.get(id);
+          return !!mockup && isProductMockup(mockup);
+        });
       }
       if (session.listingImageCleared?.[listing.listingId] === true) return [];
       return applyGlobalOrder(session, allMockupIds);
@@ -1942,7 +1946,7 @@ export function ListingPreviewView() {
     mockupsCurrentFor(pipelineListing, pipelineLinked.productId);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-8">
+    <div className="mx-auto max-w-6xl space-y-5 p-5 sm:p-8">
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1951,10 +1955,7 @@ export function ListingPreviewView() {
                 <Eye className="h-4 w-4 text-forest" /> Listing preview
               </h2>
               <p className="text-[12px] text-ink-muted">
-                Each tab is one listing in the batch. The left is what a shopper sees; the right is
-                what Printify receives. <strong>Send</strong> updates the product in Printify and
-                stops unpublished; <strong>Publish</strong> is a separate, explicit click. A run
-                stops at the first failure and nothing is retried behind your back.
+                Each tab is one listing. <strong>Send</strong> updates the product and stops unpublished; <strong>Publish</strong> is separate.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -2017,7 +2018,7 @@ export function ListingPreviewView() {
           <EmptyState
             icon={<Eye />}
             title="No listings to preview"
-            description="This page previews the designs ticked for the batch, so an empty tick list means there is nothing to preview — on purpose. Tick the designs you want on the Printify Studio's Designs tab, and pair the two halves of a one-product listing there."
+            description="No listings to preview. Tick designs on the Studio's Designs tab; a pair is one listing."
           />
           <div className="flex justify-center">
             <Button asChild size="sm" variant="outline">

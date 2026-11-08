@@ -1,0 +1,50 @@
+---
+import LegalLayout from "@/layouts/LegalLayout.astro";
+
+const title = "Refunds";
+const description =
+  "The current status of ListBulkly billing and the refund terms that will apply before any payment is taken.";
+---
+
+<LegalLayout title={title} description={description}>
+  <p>
+    <strong>PLACEHOLDER.</strong> This page exists so the payment terms are stated
+    before they can ever be charged. It is a draft, and no payment is taken today.
+  </p>
+
+  <h2>The honest status</h2>
+  <ul>
+    <li>ListBulkly does not take payments today.</li>
+    <li>No subscription is sold, and no card is collected.</li>
+    <li>Pricing on the public page is marked PLACEHOLDER, not an offer.</li>
+    <li>Billing (Razorpay) stays off until a custom domain, a verified business identity and a real price exist.</li>
+  </ul>
+
+  <h2>When billing launches</h2>
+  <p>The following will be published on this page <em>before</em> the first charge:</p>
+  <ul>
+    <li>the plan name, price, currency and billing period;</li>
+    <li>what happens on cancellation and at the end of a paid period;</li>
+    <li>the refund window and how to request one;</li>
+    <li>how a failed or duplicate payment is corrected;</li>
+    <li>the legal entity and the tax details printed on the receipt.</li>
+  </ul>
+  <p>
+    Until those points are filled in, treat every price on this site as a
+    <strong>PLACEHOLDER</strong> and do not send money to any account claiming to
+    sell ListBulkly.
+  </p>
+
+  <h2>Provider charges are separate</h2>
+  <p>
+    Printify, Etsy, your AI provider and Razorpay bill you directly for what you use
+    on their platforms. ListBulkly cannot refund those charges; their own policies
+    apply. Cancelling a ListBulkly plan would not cancel a Printify subscription.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Billing questions before launch: <strong>PLACEHOLDER — billing contact</strong>.
+    The full contact details are on the <a href="/contact">Contact</a> page.
+  </p>
+</LegalLayout>

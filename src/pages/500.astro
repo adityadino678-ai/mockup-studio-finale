@@ -1,0 +1,112 @@
+---
+/**
+ * 500 — the fallback error page. Astro renders it for an unhandled server error
+ * (including an API route that throws) and, on Cloudflare, fetches the
+ * prerendered /500.html for the same case.
+ *
+ * It deliberately does not say "we are fixing it" or offer a retry it cannot
+ * perform: it says what is known, that the local library is unaffected, and where
+ * to go next.
+ */
+import SketchLayout from "@/layouts/SketchLayout.astro";
+import { SketchNav } from "@/components/sketch/nav";
+import { SketchFooter } from "@/components/sketch/footer";
+import { SketchButton } from "@/components/sketch/button";
+
+Astro.response.status = 500;
+
+const title = "Something broke";
+const description =
+  "The page could not finish loading. Your library is stored in your browser, so it is still there. Here is what to do next.";
+---
+
+<SketchLayout title={`${title} — ListBulkly`} description={description}>
+  <SketchNav
+    links={[{ href: "/", label: "Home" }, { href: "/printify-studio", label: "Studio" }]}
+    loginHref={null}
+    signupHref="/printify-studio"
+    signupLabel="Open the Studio"
+  />
+
+  <main class="sk-container sk-section broke">
+    <span class="sk-cap">Error 500</span>
+    <h1 class="sk-part-title">Something broke.</h1>
+    <p class="sk-note">
+      This page could not finish loading. Your designs, mockups and drafts are stored
+      in this browser, so they are still there — this error is not a data loss.
+    </p>
+
+    <h2 class="broke__heading">What to try</h2>
+    <ul class="broke__list">
+      <li>Reload the page once. A transient network or provider error often clears.</li>
+      <li>If a Printify action failed, read the message shown on the page: it is Printify's own text, passed through unchanged.</li>
+      <li>If it keeps happening on one page, open another page and come back — nothing is lost by navigating.</li>
+    </ul>
+
+    <div class="broke__actions">
+      <SketchButton href="/printify-studio">Back to the Studio</SketchButton>
+      <SketchButton href="/" variant="outline">The landing page</SketchButton>
+      <SketchButton href="/contact" variant="outline">Contact</SketchButton>
+    </div>
+
+    <p class="sk-muted broke__note">
+      Nothing is published by itself. If you were between Send and Publish, the
+      product is still an unpublished draft until you press Publish.
+    </p>
+  </main>
+
+  <SketchFooter
+    links={[
+      { href: "/privacy", label: "Privacy" },
+      { href: "/terms", label: "Terms" },
+      { href: "/refunds", label: "Refunds" },
+      { href: "/cookies", label: "Cookies" },
+      { href: "/contact", label: "Contact" },
+    ]}
+  />
+</SketchLayout>
+
+<style>
+  .broke {
+    max-width: 54rem;
+    margin-inline: auto;
+  }
+
+  .broke__heading {
+    margin-top: var(--space-8);
+    font-size: var(--text-xl);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .broke__list {
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .broke__list li {
+    position: relative;
+    margin: var(--space-2) 0;
+    padding-left: 1.35rem;
+    line-height: var(--leading-body);
+  }
+
+  .broke__list li::before {
+    content: "—";
+    position: absolute;
+    left: 0;
+    color: var(--orange);
+  }
+
+  .broke__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+  }
+
+  .broke__note {
+    margin-top: var(--space-6);
+  }
+</style>

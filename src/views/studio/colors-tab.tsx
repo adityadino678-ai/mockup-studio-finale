@@ -489,11 +489,7 @@ export function ColorsTab({
           <div className="space-y-1">
             <h2 className="text-[14px] font-semibold text-ink">Which colours each row prints</h2>
             <p className="text-[12px] text-ink-muted">
-              The two panels are independent. A design in the <strong>No ink variants</strong> row
-              prints only the colours picked below it; a design in the <strong>Has ink
-              variants</strong> row prints only the colours picked in its own panel, split between
-              black and white ink. A colour may be in both panels — each row prints it with its own
-              artwork.
+              Panels are independent. "No ink" designs print their panel; "Has ink" designs print their panel split black/white. A colour in both panels prints with each row's own artwork.
             </p>
           </div>
           {ROWS.map((row) => {
@@ -736,9 +732,7 @@ export function ColorsTab({
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
                     {undecidedInkList.length} colour
-                    {undecidedInkList.length === 1 ? "" : "s"} still need Black ink or White ink (
-                    {joinShort(undecidedInkList)}). Until then they are not printed by either design, and
-                    Create is blocked.
+                    {undecidedInkList.length === 1 ? "" : "s"} undecided ({joinShort(undecidedInkList)}). Undecided colours print nothing and block Create.
                   </span>
                 </p>
               )}

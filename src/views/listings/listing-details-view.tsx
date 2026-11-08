@@ -730,7 +730,7 @@ export function ListingDetailsView() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-8">
+    <div className="mx-auto max-w-6xl space-y-5 p-5 sm:p-8">
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1091,8 +1091,8 @@ export function ListingDetailsView() {
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface-muted/50 px-3 py-2">
         <p className="text-[11px] text-ink-muted">
           {applyAll
-            ? "Saving updates the batch templates and every local listing draft; existing Printify products are not changed until you create or update them."
-            : "Saving writes this design's listing draft and its price rule; the other designs' drafts are not touched."}
+            ? "Saving writes the batch templates and every listing draft; Printify products change only on Send/Publish."
+            : "Saving writes this design's draft and price; other drafts are untouched."}
         </p>
         <Button size="sm" onClick={() => void save()} disabled={saving}>
           {saving ? (

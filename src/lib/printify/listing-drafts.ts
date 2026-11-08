@@ -20,7 +20,7 @@ import {
   renderTitle,
 } from "@/lib/printify/studio-session";
 import { listingImageFingerprint } from "@/lib/printify/listing-render";
-import { infoCardsForListing } from "@/lib/mockups/info-cards";
+import { infoCardsForListing, isProductMockup } from "@/lib/mockups/info-cards";
 import type { StudioListing } from "@/lib/printify/listing-plan";
 import type { ListingDraft, StudioSession } from "@/types/domain";
 
@@ -65,7 +65,7 @@ export async function freshListingRenders(
     const mockupId = selected[index];
     const mockup = mockupRows[index];
     const entry = listingRenderFor(session, listing.listingId, mockupId);
-    if (!mockup || !entry) continue;
+    if (!mockup || !entry || !isProductMockup(mockup)) continue;
     const fingerprint = listingImageFingerprint({
       listing,
       mockup,

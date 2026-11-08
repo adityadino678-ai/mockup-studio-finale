@@ -523,9 +523,7 @@ export function DesignAdjustmentPanel({
               className="mx-auto max-w-[320px]"
             />
             <p className="text-[11px] leading-relaxed text-ink-subtle">
-              The dashed frame is the print area; Printify does not publish where that frame sits on
-              the garment, so the position on the shirt itself is an approximation. Anything outside
-              the frame is cropped, exactly as Printify crops it.
+              Dashed frame = print area. Printify crops outside it. Placement on the garment is approximate.
             </p>
           </div>
         </div>

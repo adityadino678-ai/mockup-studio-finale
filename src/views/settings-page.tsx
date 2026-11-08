@@ -103,12 +103,15 @@ const [supabaseConfigured, setSupabaseConfigured] = React.useState<boolean | nul
 
 const checkSupabase = async () => {
   try {
-    const res = await fetch("/api/auth/me");
-    setSupabaseConfigured(res.ok);
-    if (res.ok) {
-      const data = await res.json();
-      setAuthUser(data.user);
+    const { authStatus, getSession } = await import("@/lib/auth/session");
+    const status = await authStatus();
+    setSupabaseConfigured(status.configured);
+    if (!status.configured) {
+      setAuthUser(null);
+      return;
     }
+    const session = await getSession();
+    setAuthUser(session?.user ?? null);
   } catch {
     setSupabaseConfigured(false);
   }
@@ -144,9 +147,13 @@ const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
   setAuthError(null);
   try {
     const { signUp } = await import("@/lib/auth/session");
-    await signUp(email, password, fullName);
+    const result = await signUp(email, password, fullName);
     setAuthLoading(false);
-    toast.success("Account created — please sign in");
+    if (result.needsEmailConfirmation) {
+      toast.success("Account created — check your email to confirm, then sign in");
+    } else {
+      toast.success("Account created — sign in with your new password");
+    }
     setAuthMode("signin");
   } catch (e) {
     setAuthLoading(false);
@@ -427,7 +434,7 @@ const counts = useLiveQuery(async () => {
   }, [models, modelQuery]);
 
   return (
-    <div className="mx-auto max-w-3xl p-8">
+    <div className="mx-auto max-w-3xl p-5 sm:p-8">
       <PageHeader title="Settings" description="Workspace storage and external integrations." />
 
       <Card className="mb-4">
@@ -436,7 +443,7 @@ const counts = useLiveQuery(async () => {
             <HardDrive className="h-4 w-4 text-forest" /> Local storage
           </CardTitle>
           <CardDescription>
-            Mockup Studio stores all designs, mockups and generated images in your browser&rsquo;s
+            ListBulkly stores all designs, mockups and generated images in your browser&rsquo;s
             IndexedDB. Nothing is uploaded anywhere.
           </CardDescription>
         </CardHeader>
@@ -488,15 +495,14 @@ const counts = useLiveQuery(async () => {
               Account
             </CardTitle>
             <CardDescription>
-              Sign in with email to sync your designs, mockups and listings to Supabase.
-              Optional — the app works fully without an account.
+              Sign in with email. Optional — the library stays in this browser.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {!supabaseConfigured && (
               <div className="rounded-md border border-border-subtle bg-surface-muted p-3 text-[13px] text-ink-muted">
-                Supabase is not configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY to server
-                secrets to enable account sync.
+                Supabase is not configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY to the
+                server environment to enable accounts.
               </div>
             )}
             {supabaseConfigured && !authUser && (
@@ -588,9 +594,7 @@ const counts = useLiveQuery(async () => {
             <KeyRound className="h-4 w-4 text-forest" /> API connections
           </CardTitle>
           <CardDescription>
-            Paste your own keys to connect Printify, Etsy research and any AI provider. Keys are
-            stored only in this browser (IndexedDB), sent to the provider through the server on each
-            request, and never written to the server. Clear them any time.
+            Keys stay in this browser (IndexedDB), are sent per-request via the server, and are never stored server-side. Clear any time.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -749,9 +753,7 @@ const counts = useLiveQuery(async () => {
                     >
                       etsy.com/developers
                     </a>
-                    . Used only for the public active-listing search: the autopilot reads tags,
-                    titles and prices. Nothing is written to Etsy, and this app never scrapes the
-                    site.
+                    . Read-only public listing search (tags, titles, prices). Nothing is written to Etsy.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-end gap-2 pt-1">

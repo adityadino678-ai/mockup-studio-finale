@@ -64,6 +64,7 @@ import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render"
 import { linkSavedRender } from "@/lib/printify/render-link";
 import { buildStudioListings, catalogProductName } from "@/lib/printify/listing-plan";
 import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
+import { isProductMockup } from "@/lib/mockups/info-cards";
 import { canRenderPrintFile, renderPrintFile } from "@/lib/mockups/print-file";
 import { renderComposition } from "@/lib/batch/runner";
 import { Badge, Card } from "@/components/ui/card";
@@ -86,6 +87,33 @@ const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
   { id: "top-half", label: "Top half", crop: { x: 0, y: 0, width: 1, height: 0.5 } },
   { id: "top-60", label: "Top 60%", crop: { x: 0, y: 0, width: 1, height: 0.6 } },
 ];
+
+class PrintAreaCanvasBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card className="grid min-h-[420px] place-items-center p-6 text-center">
+          <div>
+            <p className="text-[15px] font-bold text-ink">The print-area canvas could not load.</p>
+            <p className="mt-1 text-[13px] text-ink-muted">
+              Reload the page. If it still does not open, your mockup or design image may be missing from this browser.
+            </p>
+          </div>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // react-konva is ~360 kB. It is loaded on demand, when the print area canvas
 // actually opens, so the mockups page does not pay for it.
@@ -937,7 +965,7 @@ export function PrintAreasTab({
       // every mockup of this type, which is what makes them all renderable.
       if (!(await flushDraft("category"))) return;
       const freshMockups = await db.mockups.toArray();
-      const targets = freshMockups.filter((m) => printAreaOf(m, design.id));
+      const targets = freshMockups.filter((m) => isProductMockup(m) && printAreaOf(m, design.id));
       if (targets.length === 0) {
         toast.info("No mockup has a print area yet. Set one first.");
         return;
@@ -1361,12 +1389,18 @@ function MockupStage({
 }) {
   const [mockupUrl, setMockupUrl] = React.useState<string | null>(null);
   const [designUrl, setDesignUrl] = React.useState<string | null>(null);
+  const [missingMockupBlob, setMissingMockupBlob] = React.useState(false);
 
   React.useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
+    setMissingMockupBlob(false);
     void getAssetBlob(mockup.assetId).then((blob) => {
-      if (cancelled || !blob) return;
+      if (cancelled) return;
+      if (!blob) {
+        setMissingMockupBlob(true);
+        return;
+      }
       url = URL.createObjectURL(blob);
       setMockupUrl(url);
     });
@@ -1396,6 +1430,19 @@ function MockupStage({
     };
   }, [designMeta.assetId]);
 
+  if (missingMockupBlob) {
+    return (
+      <Card className="grid min-h-[420px] place-items-center p-6 text-center">
+        <div>
+          <p className="text-[15px] font-bold text-ink">This mockup image is missing.</p>
+          <p className="mt-1 text-[13px] text-ink-muted">
+            Re-upload it on the Mockups tab; the print area opens after the image is back.
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
   if (!mockupUrl) {
     return (
       <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
@@ -1405,28 +1452,30 @@ function MockupStage({
   }
 
   return (
-    <React.Suspense
-      fallback={
-        <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
-          Loading the canvas…
-        </Card>
-      }
-    >
-      <PrintAreaCanvas
-        mockupUrl={mockupUrl}
-        mockupW={mockup.width}
-        mockupH={mockup.height}
-        designUrl={designUrl}
-        designW={designMeta.w}
-        designH={designMeta.h}
-        area={area}
-        placement={placement}
-        measuring={measuring}
-        cropMode={cropMode}
-        onAreaChange={onAreaChange}
-        onCropChange={onCropChange}
-        onMeasure={onMeasure}
-      />
-    </React.Suspense>
+    <PrintAreaCanvasBoundary>
+      <React.Suspense
+        fallback={
+          <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
+            Loading the canvas…
+          </Card>
+        }
+      >
+        <PrintAreaCanvas
+          mockupUrl={mockupUrl}
+          mockupW={mockup.width}
+          mockupH={mockup.height}
+          designUrl={designUrl}
+          designW={designMeta.w}
+          designH={designMeta.h}
+          area={area}
+          placement={placement}
+          measuring={measuring}
+          cropMode={cropMode}
+          onAreaChange={onAreaChange}
+          onCropChange={onCropChange}
+          onMeasure={onMeasure}
+        />
+      </React.Suspense>
+    </PrintAreaCanvasBoundary>
   );
 }

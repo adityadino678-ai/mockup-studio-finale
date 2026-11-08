@@ -98,6 +98,7 @@ import {
 import { printAreaOf } from "@/lib/mockups/print-area";
 import {
   infoCardsForListing,
+  isProductMockup,
   productMockups,
 } from "@/lib/mockups/info-cards";
 import { useListingCatalog } from "@/views/listings/listing-catalog";
@@ -531,9 +532,10 @@ export function ListingImagesView() {
     (listing: StudioListing): string[] => {
       const configured = session.listingImages?.[listing.listingId] !== undefined;
       if (configured) {
-        return listingMockupIds(session, listing.listingId).filter((id) =>
-          mockupsById.has(id),
-        );
+        return listingMockupIds(session, listing.listingId).filter((id) => {
+          const mockup = mockupsById.get(id);
+          return !!mockup && isProductMockup(mockup);
+        });
       }
       if (session.listingImageCleared?.[listing.listingId] === true) return [];
       return orderedMockupIds;
@@ -2014,7 +2016,7 @@ export function ListingImagesView() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-8">
+    <div className="mx-auto max-w-6xl space-y-5 p-5 sm:p-8">
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2023,13 +2025,7 @@ export function ListingImagesView() {
                 <Images className="h-4 w-4 text-forest" /> Listing images
               </h2>
               <p className="text-[12px] text-ink-muted">
-                Every design in the batch gets its own row, and every mockup is a tile - nothing
-                to pick. Tiles show the render saved in the Mockups panel when it is still
-                current; the banner can link older saved renders that predate fingerprints.
-                Long-press a tile to start removing mockups from a listing; the numbers are the
-                image order and the first tile is the main image. Drag a tile by its handle to
-                change the order - the order is shared by every listing, so the same photograph
-                is the main image on every product in the batch.
+                One row per design; every product mockup is a tile. First tile = main image. Drag to reorder (shared across listings). Long-press to remove. Tiles use saved renders only when current.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

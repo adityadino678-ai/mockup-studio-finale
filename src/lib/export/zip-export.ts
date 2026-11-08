@@ -167,12 +167,17 @@ export async function buildExportArchive(
           `listing images belong to ${ownerName}; add that design to the export to include them`,
         );
       } else {
+        const productMockupIds = new Set(productMockups(allMockups).map((m) => m.id));
         const renders = selectedAssetIds
           ? []
           : await db.assets
               .where("sourceDesignId")
               .equals(design.id)
-              .filter((a) => a.kind === "mockup-render")
+              .filter(
+                (a) =>
+                  a.kind === "mockup-render" &&
+                  (!a.sourceMockupId || productMockupIds.has(a.sourceMockupId)),
+              )
               .sortBy("createdAt");
 
         // Attached info cards, in strip order, appended AFTER the mockup

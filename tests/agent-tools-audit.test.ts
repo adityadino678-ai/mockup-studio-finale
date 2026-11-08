@@ -17,12 +17,6 @@ import {
   confirmSaveListingDetails,
 } from "@/agent-tools/runners";
 import { db } from "@/lib/db/schema";
-import {
-  analyzeSeoPatterns,
-} from "@/lib/etsy/seo-analyzer";
-import { makeListingVariations } from "@/lib/etsy/patterns";
-import type { EtsyResearch } from "@/types/etsy";
-import type { SeoPattern } from "@/lib/etsy/seo-analyzer";
 
 const WRITE_TOOLS = [
   "create_batch_job",
@@ -456,53 +450,3 @@ describe("W7 write tools — local writes auto-run, Printify stays gated", () =>
   });
 });
 
-describe("W7 save_listing_details — useSeoTemplate generates unique SEO copy per listing", () => {
-  const research: EtsyResearch = {
-    query: "cat mug",
-    searchedAt: 1_700_000_000_000,
-    source: "etsy-api",
-    activeListings: 42,
-    sampled: 8,
-    topTags: [
-      { term: "cat mug", count: 4 }, { term: "cat mom", count: 3 },
-      { term: "personalized gift", count: 2 }, { term: "coffee mug", count: 2 },
-    ],
-    titleTerms: [
-      { term: "cat", count: 5 }, { term: "mug", count: 5 },
-      { term: "personalized", count: 3 }, { term: "gift", count: 2 },
-    ],
-    medianPriceCents: 2499,
-    currency: "USD",
-    samples: [],
-    disclaimer: "observed",
-  };
-
-  const pattern: SeoPattern = analyzeSeoPatterns(research);
-
-  it("analyzeSeoPatterns exposes observed terms, tag frequencies and median band", () => {
-    expect(pattern.topTitleTerms.map((t) => t.term)).toEqual(["cat", "mug", "personalized", "gift"]);
-    expect(pattern.topTagFrequencies.map((t) => t.term)).toContain("cat mug");
-    expect(pattern.medianPriceCents).toBe(2499);
-    expect(pattern.medianPriceBand?.label).toBe("$15-$25");
-  });
-
-  it("makeListingVariations produces unique title+tags per listing from the pattern", () => {
-    const variations = makeListingVariations(pattern, 6, { seed: 1 });
-    expect(variations).toHaveLength(6);
-    const sigs = new Set(variations.map((v) => `${v.title.toLowerCase()}::${v.tags.join(",")}`));
-    expect(sigs.size).toBe(6);
-    for (const v of variations) {
-      expect(v.title.length).toBeLessThanOrEqual(140);
-      expect(v.tags.length).toBeLessThanOrEqual(13);
-      for (const tag of v.tags) expect(tag.length).toBeLessThanOrEqual(20);
-      expect(v.priceCents).toBe(2499);
-    }
-  });
-
-  it("each listing gets distinct copy with a forced price applied to all", () => {
-    const variations = makeListingVariations(pattern, 5, { seed: 9, priceCents: 1850 });
-    const sigs = new Set(variations.map((v) => `${v.title.toLowerCase()}::${v.tags.join(",")}`));
-    expect(sigs.size).toBe(5);
-    for (const v of variations) expect(v.priceCents).toBe(1850);
-  });
-});

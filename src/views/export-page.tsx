@@ -104,7 +104,7 @@ export function ExportCenterPage() {
   const busy = phase === "collecting" || phase === "packing" || phase === "verifying";
 
   return (
-    <div className="mx-auto max-w-5xl p-8">
+    <div className="mx-auto max-w-5xl p-5 sm:p-8">
       <PageHeader
         title="Export Center"
         description="Download your work as an organized ZIP archive with a manifest."

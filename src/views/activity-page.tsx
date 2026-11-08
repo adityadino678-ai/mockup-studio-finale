@@ -34,10 +34,10 @@ export function ActivityPage() {
   );
 
   return (
-    <div className="mx-auto max-w-3xl p-8">
+    <div className="mx-auto max-w-3xl p-5 sm:p-8">
       <PageHeader
         title="Activity"
-        description="A log of everything that happened in this workspace. The most recent 2,000 events are kept."
+        description="Workspace activity log (latest 2,000 events)."
       />
       {!activity ? (
         <div className="space-y-2">

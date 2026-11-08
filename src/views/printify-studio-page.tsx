@@ -327,10 +327,10 @@ export function PrintifyStudioPage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl p-8">
+    <div className="mx-auto max-w-6xl p-5 sm:p-8">
       <PageHeader
         title="Printify Studio"
-        description="Upload designs, choose the product and its colours, place the artwork, and create one Printify product per design. Everything stays on this device until you publish."
+        description="Upload designs, choose product/colours, place artwork, and create one Printify product per design. Products are unpublished drafts; Publish is separate."
         actions={
           catalog.configured ? (
             <Button size="sm" variant="outline" onClick={() => setTab("colors")}>

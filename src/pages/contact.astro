@@ -1,0 +1,50 @@
+---
+import LegalLayout from "@/layouts/LegalLayout.astro";
+
+const title = "Contact";
+const description =
+  "How to reach ListBulkly, what is available before launch, and where to report a security issue.";
+---
+
+<LegalLayout title={title} description={description}>
+  <p>
+    <strong>PLACEHOLDER.</strong> No working support inbox exists yet, because no
+    custom domain has been purchased. The addresses below are the ones that will be
+    published with the domain; do not send mail to them until this line is removed.
+  </p>
+
+  <h2>Before launch</h2>
+  <ul>
+    <li><strong>Support:</strong> PLACEHOLDER — support email</li>
+    <li><strong>Privacy and data requests:</strong> PLACEHOLDER — privacy email</li>
+    <li><strong>Billing:</strong> PLACEHOLDER — billing email</li>
+    <li><strong>Legal:</strong> PLACEHOLDER — legal contact</li>
+  </ul>
+
+  <h2>Security reports</h2>
+  <p>
+    If you believe you have found a vulnerability, please report it privately rather
+    than opening a public issue: <strong>PLACEHOLDER — security email</strong>. Include
+    the page, the steps and what you observed. We will acknowledge a report and tell
+    you whether it is in scope; we will not ask you to test against another seller's
+    data.
+  </p>
+
+  <h2>What to include for a product bug</h2>
+  <ul>
+    <li>the page you were on and the button you pressed;</li>
+    <li>the exact message shown (Printify's own message is passed through verbatim);</li>
+    <li>whether the library was created in this browser or imported;</li>
+    <li>your browser name and version.</li>
+  </ul>
+  <p>
+    Never send an API key in a support message. Keys are stored in your browser and
+    can be cleared in Settings.
+  </p>
+
+  <h2>Legal pages</h2>
+  <p>
+    <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> ·
+    <a href="/refunds">Refunds</a> · <a href="/cookies">Cookies</a>
+  </p>
+</LegalLayout>

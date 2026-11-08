@@ -2,7 +2,7 @@
 
 A premium, local-first workspace for print-on-demand sellers: upload designs, place them on a real Printify print area, map that area onto mockup photos, render mockups, create ink variants, remove backgrounds, and export organized ZIP archives — all stored in your browser, no account required.
 
-Six pages: **Printify Studio** (the home page), **Mockups**, **Export Center**, **Agent**, **Activity**, **Settings**. `/` is a static redirect to the Studio.
+`/` is the public ListBulkly landing page; the workspace starts at **Printify Studio** and continues through **Mockups**, **Listing images**, **Listing details**, **Listing preview**, **Export Center**, **Activity**, **Onboarding**, **Settings** and the bookmarklet install page. There is no separate agent page: the agent is an in-page panel on Printify Studio and Listing details. `/styleguide` is internal (`noindex`). The public **Privacy**, **Terms**, **Refunds**, **Cookies** and **Contact** pages are honest launch drafts (legal identity/contact marked PLACEHOLDER), `/404` + `/500` are real error pages rather than redirects, and **`/login`** + **`/auth/confirm`** are the optional account screens.
 
 ## Quick start
 
@@ -27,7 +27,7 @@ Optional integrations can be connected two ways:
    OpenAI-compatible endpoint). The **Load models** button fetches that
    provider's live model list and tags free models `free`; choose one and press
    **Test connection**. You can keep a key per provider and switch the active
-   model from the Agent page without losing the others. Keys are stored only
+   model from the agent panel without losing the others. Keys are stored only
    in your browser's IndexedDB and attached to the relevant requests — never
    saved on the server.
 2. **On the server** (`.env.local` / `wrangler secret put`):
@@ -53,8 +53,8 @@ A browser-saved key takes precedence over a server key when both are present.
 | `npm run deploy` | Build and publish to Cloudflare Workers |
 | `npm run lint` | ESLint (typescript-eslint + eslint-plugin-astro) |
 | `npm run typecheck` | `astro check` — strict TS across `.ts`, `.tsx` and `.astro` |
-| `npm run test` | Unit/integration tests (321 tests) |
-| `npm run test:e2e` | End-to-end acceptance tests (23 tests, needs `npx playwright install chromium` once) |
+| `npm run test` | Unit/integration tests (666 tests in 40 files) |
+| `npm run test:e2e` | End-to-end acceptance tests (49 tests, needs `npx playwright install chromium` once) |
 | `npm run astro` | Any Astro CLI command (`astro add`, `astro info`, …) |
 
 ## Deploying to Cloudflare
@@ -69,11 +69,11 @@ npm run deploy         # build + wrangler deploy
 The app is published to `https://mockup-studio.adityadino678.workers.dev`.
 
 **How it is shaped:** `output: "static"`, because no page depends on request
-state — every view reads its data from the visitor's own IndexedDB. So all 7
+state — every view reads its data from the visitor's own IndexedDB. So all 21
 pages prerender to static HTML and are served directly from Cloudflare's CDN,
-and `dist/_routes.json` excludes them from the Worker. Only the nine `/api/**`
+and `dist/_routes.json` excludes them from the Worker. Only the twenty-two `/api/**`
 endpoints run on demand, each opting in with `export const prerender = false`.
-`/` is a static redirect to `/printify-studio`.
+`/` is the static ListBulkly landing page; `/printify-studio` is the workspace.
 
 **Secrets:** none are required and none are deployed by default. The whole core
 workflow runs without any key, and the AI/Printify panels show an honest
@@ -88,6 +88,17 @@ Secrets are read through `getSecret()` from `astro:env/server`, which is
 adapter-provided, so the same code works locally, on Workers, and would survive
 a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 
+**Accounts (optional).** Supabase Auth is server-proxied: the browser calls
+`/api/auth/signup`, `/api/auth/signin` and `/api/auth/me`, and never receives a
+Supabase key. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` to configure it;
+`/api/auth/status` then reports the live sign-up mode. With
+`SUPABASE_SERVICE_ROLE` set, sign-up creates an already-confirmed account and
+sends no mail. With only the anon key, Supabase sends its own confirmation mail
+and the account stays unusable until the link is opened at `/auth/confirm`.
+The project's built-in sender is rate-limited until a sending domain exists, so
+the API says `email rate limit exceeded` rather than claiming success. A
+signed-in client can push to `/api/sync/*`; the local tools never require it.
+
 
 
 ## The workflow
@@ -98,7 +109,7 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 4. **Export Center** — real ZIP (fflate) with `MockupStudio_Export/<Design>/original.png`, ink variants, `mockups/`, `listing/`, and a `manifest.json`. The archive is re-read and verified before success is reported; missing assets are listed, not hidden.
 5. **Activity** — a log of what actually happened (uploads, saves, renders, exports, errors).
 6. **Settings** — workspace storage and API connections (bring your own Printify / AI key).
-7. **Agent** — a Hermes-style chat surface at `/agent`: sessions rail, streaming transcript with markdown + syntax highlighting, collapsible reasoning blocks, a combined provider/model picker with favorites and a reasoning-effort pill, and an approximate token/context meter. The agent can really run twelve tools — explain a workflow, summarize or list the local library, browse the live Printify catalog, draft listing copy, propose a batch job, make a single mockup, save a placement (optionally as a template), make an ink variant, remove a background, save an image you attached in chat as a design or mockup, and create a Printify product — shown as expandable activity cards; the seven writing tools write nothing until you click Create. When a model answers in prose without calling a tool, a keyword intent router still runs the obvious tool so the agent acts instead of only talking, and a `?debug=1` flag on the URL opens a raw-SSE capture drawer for provider issues. A model's effort hint is only sent when the model is flagged as a reasoning model (e.g. o-series, gpt-5, deepseek-reasoner, `:thinking`), and threads are auto-titled by the active model. Voice in/out uses the Web Speech API when the browser offers it (dictation into the composer, optional read-aloud replies), sending while a reply streams queues the message instead of interrupting it, and a right-hand workspace rail lists real batch jobs, exports, and listing drafts read live from IndexedDB. Conversations persist in this browser's IndexedDB. Replies stream over SSE from `/api/ai/chat`; without an AI provider the composer is disabled and points at Settings.
+7. **Agent (in-page panel)** — a floating launcher on **Printify Studio** and **Listing details** opens a streaming chat over the page; it never navigates to a route of its own. Markdown + syntax highlighting, collapsible reasoning blocks, a provider/model picker with favorites and a reasoning-effort pill, and an approximate token/context meter. The agent can really run fourteen tools — explain a workflow, summarize or list the local library, browse the live Printify catalog, draft listing copy, research Etsy, propose a batch job, make a single mockup, save a placement (optionally as a template), make an ink variant, remove a background, save an image you attached in chat as a design or mockup, save listing details, and create a Printify product — shown as expandable activity cards. Every local write runs immediately because the user's own words are the approval; only `create_printify_product` waits for a click, because it uploads artwork and spends the operator's key. When a model answers in prose without calling a tool, a keyword intent router still runs the obvious tool. Conversations persist in this browser's IndexedDB; replies stream over SSE from `/api/ai/chat`; without an AI provider the composer is disabled and points at Settings.
 
 ## Architecture notes
 
@@ -124,9 +135,20 @@ a switch to another adapter. Locally, copy `.dev.vars.example` to `.dev.vars`.
 - Ink variants verified at pixel level (white = 255,255,255; black = 0,0,0; original intact).
 - Export ZIP inspected on disk: exact folder structure, correct per-design files, accurate manifest (counts, provenance, missing-asset notes), archive re-verified programmatically.
 - A print area survives a refresh; its crop cuts the design at the fold; its frame can be turned and its chrome hidden without losing the design.
-- 321 unit/integration tests + 23 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built Worker verified on every route.
+- 666 unit/integration tests in 40 files + 49 E2E acceptance tests, lint clean, `astro check` clean, production build passing and the built Worker verified on every route.
 
 ## Known limitations (honest)
+
+- **Not proven live yet.** The production Worker's `PRINTIFY_API_KEY` is
+  rejected by Printify (401), so Send/Publish have not been exercised against
+  the live Worker; Send also stops at an unpublished draft and Publish is always
+  a separate click. Pricing and legal text are PLACEHOLDER. The companion
+  extension is a beta unpacked prototype. There is no custom domain yet, so
+  production mail (Resend; Supabase verification/reset mail until then),
+  reliable account-confirmation mail and Razorpay live mode remain launch
+  blockers. Sign-up currently takes the email-confirmation path because
+  `SUPABASE_SERVICE_ROLE` is not set, and Supabase's built-in sender answers
+  `email rate limit exceeded`; the service-role key removes that dependency.
 
 - **Keep the project out of OneDrive if you can.** OneDrive turns build caches into cloud placeholders and can hold Astro's `.astro/data-store.json` open, which kills `astro dev` with an `EPERM` rename. The repo works from a synced folder, but if a dev-server crash points at `mutable-data-store.js`, delete `.astro/data-store.json.tmp` and restart (see AGENTS.md).
 

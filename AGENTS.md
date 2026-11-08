@@ -9,21 +9,31 @@ A local-first print-on-demand workspace for sellers: upload artwork, place it on
 real Printify print area, map that area onto mockup photos, generate renders,
 create ink variants, remove backgrounds, and export verified ZIP archives.
 
-There are **twelve pages** — `/` (a static redirect to the Studio), Printify
-Studio, Mockups, Listing images, Listing details, Listing preview, Autopilot,
-Export Center, Agent, Activity, Settings, and the Printify bookmarklet install
-page. The Designs, editor, Batch Studio, Templates, Product Builder, Listings
-and AI SEO screens were folded into those pages or removed; their engines
-(batch runner, compositor, Printify core, agent tools) are still here and still
-what the UI and the agent call. The two listing tabs that used to live inside
-the Studio were promoted to their own pages (below), and the Studio went back
-to three tabs: Designs, Colors, Design panel. The Autopilot is the
-review-gated bulk listing runner; a persistent task dock on every other page
-shows its live progress.
+There are **twenty-one pages**: the twelve product routes in `src/pages/*.astro`
+(`/` — the exact ListBulkly landing document — `/printify-studio`, `/mockups`,
+`/listing-images`, `/listing-details`, `/listing-preview`, `/export`,
+`/activity`, `/settings`, `/onboarding`, `/printify-bookmarklet`,
+`/styleguide` (internal, `noindex`)), five public legal pages (`/privacy`,
+`/terms`, `/refunds`, `/cookies`, `/contact`), two error pages
+(`src/pages/404.astro` and `src/pages/500.astro`, rendered as `/404.html` and
+`/500.html`), and two account pages (`/login`, `/auth/confirm`). There is no
+`/autopilot` and no `/agent` route; the agent is an in-page panel on Printify
+Studio and Listing details. The five legal pages are honest drafts whose legal
+identity and contact facts are marked PLACEHOLDER; `src/layouts/LegalLayout.astro`
+is their shared shell. `public/robots.txt` keeps `/api/` and `/styleguide` out
+of crawlers.
+
+The two listing tabs that used to live inside the Studio were promoted to their
+own pages (below), and the Studio went back to three tabs: Designs, Colors,
+Design panel. The removed screens and what absorbed them are listed under
+**Known gaps**.
 
 **The defining constraint: all user data lives in the visitor's own IndexedDB.**
-Nothing is synced, there is no account, and the server holds no user data. This
-is why every page can be prerendered — no page depends on request state.
+An account is optional and exists only for the Phase 4+ sync/connect path; the
+server stores a profile row and, when a signed-in client calls `/api/sync/*`,
+the rows that client explicitly pushes. Without an account nothing leaves the
+browser, and every page still prerenders because no page depends on request
+state (the account screens hydrate from `/api/auth/status` client-side).
 
 ## Access
 
@@ -31,7 +41,7 @@ is why every page can be prerendered — no page depends on request state.
 |---|---|
 | **Live site** | https://mockup-studio.adityadino678.workers.dev |
 | GitHub | https://github.com/adityadino678-ai/mockup-studio-finale (public, branch `main`) |
-| Local folder | `C:\Users\hp\Projects\Mockup Studio 2.0\mockup-studio` |
+| Local folder | `C:\Users\hp\OneDrive\Documents\ANTIGRAVITY PROJECTS\mockup studio finale\mockup-studio-finale` |
 | Source ZIP | `C:\Users\hp\Projects\Mockup Studio 2.0\mockup-studio-finale-source.zip` |
 | Cloudflare account | `Adityadino678@gmail.com's Account` / `d9d43da4a430000a58df02d35e8d519c` |
 | Cloudflare Worker | `mockup-studio` on subdomain `adityadino678` |
@@ -56,8 +66,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 529 unit tests
-npm run test:e2e      # 35 acceptance tests (local dev server)
+npm run test          # 666 unit tests across 40 test files
+npm run test:e2e      # 49 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -74,11 +84,14 @@ Both must pass. The production run has caught bugs the local run missed.
 
 - **Astro 5, `output: "static"`, `@astrojs/cloudflare@12.6.13`.** Pin that exact
   adapter version: v13+ requires Astro 6 and v14 requires Astro 7.
-- **12 static pages + 13 on-demand endpoints.** No page depends on request state,
-  so all pages prerender. Each endpoint opts in with `export const prerender = false`.
+- **21 static pages + 22 on-demand endpoints.** No page depends on request state,
+  so all pages prerender (including `/404` and `/500`, emitted as
+  `dist/404.html` and `dist/500.html` for the platform and the adapter). Each
+  endpoint opts in with `export const prerender = false`.
   `dist/_routes.json` excludes the pages, so static files come off the CDN and
-  only API calls reach the Worker. `/` is a static redirect (meta refresh plus
-  `location.replace`, with an `<a>` fallback) to `/printify-studio`, not a view.
+  only API calls reach the Worker. `/` is the static ListBulkly landing page;
+  `/printify-studio` is the workspace. The landing is outside the app shell and
+  is the only page that does not use the sidebar.
 - **App shell and page view share one React tree** (`src/routes/*.tsx`).
   Astro islands cannot nest, and the views need Radix context from
   `TooltipProvider`. Putting the shell in `.astro` broke hydration — `Tooltip`
@@ -92,6 +105,19 @@ Both must pass. The production run has caught bugs the local run missed.
 - **Secrets via `getSecret()` from `astro:env/server`**, not `process.env` —
   `process.env` does not exist in the Workers runtime. Declared as optional
   secrets in `astro.config.mjs`; no key is required for the core workflow.
+- **Supabase clients are created per request, never at module load.**
+  `src/lib/auth/server.ts` (`authClients(locals)`) reads the Workers binding on
+  `locals.runtime.env`, then falls back to `getSecret()` so `astro dev` works.
+  A module-level client was created before the binding existed and was always
+  null on the deployed Worker. The browser never receives a Supabase key: it
+  calls the app's own `/api/auth/*` routes, which talk to Supabase server-side.
+- **Two honest sign-up modes.** With `SUPABASE_SERVICE_ROLE` present,
+  `/api/auth/signup` creates an already-confirmed account (admin API, no mail).
+  With only the anon key it uses `auth.signUp`, and the response says
+  `needsEmailConfirmation: true`; the account is unusable until the emailed
+  link is opened at `/auth/confirm`. The landing dialog and `/login` both read
+  `/api/auth/status` first, so they never offer a path the deployment cannot
+  serve.
 - **No `Buffer`.** `atob` + `Uint8Array` in `api/printify/products.ts`.
 
 ## The Printify product contract (verified live, Oct 2026)
@@ -627,114 +653,6 @@ mockups and finally a live product.
   the sidebar: it is a utility page opened from the Send dialog, not another
   work surface.
 
-## The listing autopilot (`/autopilot`)
-
-The autopilot turns one ticked Studio batch into reviewed listings, but it is
-deliberately **not** a "publish everything" button. It runs a persisted state
-machine with three separate human gates:
-
-```
-research + draft  ->  HUMAN copy & image review
-build + upload    ->  HUMAN bookmarklet step on printify.com
-publish review    ->  HUMAN final publish approval  ->  published
-```
-
-Nothing advances past a gate until the user acts. A run is one row in
-IndexedDB (`autopilotRuns`, schema v4), so a reload resumes it and the task
-dock can show it on any page. A short tab lease (`sessionStorage` tab id +
-`lease.expiresAt`) stops two tabs from running the same job; the second tab
-skips the job rather than racing it, and a later resume picks it up once the
-lease expires.
-
-### Research and copy
-
-- **One Etsy query per run, shared by every listing.** Etsy's Open API v3 has
-  usage limits, and one market view is enough to ground the whole batch.
-  `src/lib/server/etsy.ts` calls
-  `GET https://openapi.etsy.com/v3/application/listings/active?keywords=...`
-  with `x-api-key`, normalises the active-listing results, and reports
-  **observed** title terms, tag counts, a median price, samples and an empty
-  `currency` when the data is missing. It never invents search volume, sales,
-  rankings or revenue.
-- `POST /api/etsy/research` (`src/pages/api/etsy/research.ts`) is the only
-  network path. It is same-origin, JSON-only, caps the body at 8 KB, caches
-  successful results for 10 minutes per isolate, answers `503` without a
-  keystring (or with a rejected one), and maps Etsy's own rate limit to `429`
-  with a wait instruction.
-- **The keystring is user-supplied**, stored in the browser-local integrations
-  record (`etsyKeystring`), sent as `x-etsy-key`, with `ETSY_API_KEY` as the
-  server fallback. Settings has an enabled Etsy card, a query box, a
-  **Test research** button and an honest result line. It is read-only: it does
-  not connect an Etsy shop or submit listings.
-- AI copy is optional. `src/lib/autopilot/plan.ts` shapes it into Etsy's strict
-  limits (140-character title, 13 tags of 20 characters, 5000-character
-  description). With no AI key, or when the AI call fails, a deterministic
-  fallback still produces a complete listing from the Studio templates and the
-  observed Etsy terms. The copy is grounded on the research, and
-  `groundedOnEtsy` says so.
-- **Editing copy clears that listing's approval.** The review is of the exact
-  title, description, tags, price and image selection that will be built.
-
-### Build, mockups and the two publish gates
-
-- **Every listing must be approved before a product is created.**
-  `startAutopilotBuild` refuses outside `copy-review` and checks every
-  listing's selected images against a current render. It does this **before the
-  first product exists**, so a missing render cannot leave a half-created
-  batch. The page disables **Approve all** until every listing is image-ready,
-  and each listing card links straight to Listing images.
-- **The run freezes the mockup SELECTION, not the render state.**
-  `withCurrentRenderState` in `plan.ts` merges the CURRENT session's
-  `universalPlacement`, `placements` and `listingRenders` into the run snapshot
-  while keeping the snapshot's `listingImages`. That is what lets a user start
-  a run, then go to Listing images and press **Save & render** during copy
-  review: the run sees the new render instead of repeating "0 of 4 rendered".
-  Changing the selection in Listing images does not affect an existing run; it
-  keeps the start-time selection, and the warning says so.
-- The build uses the same `buildStudioPlan` and `createStudioProduct` as the
-  Studio, so pairs and ink colours keep their one-product semantics. A retry
-  after a failed mockup upload **reuses the product already created**
-  (`listing.productId`), never creates a duplicate. If an older run has a
-  product id but no shop id, it falls back to the run's saved shop, and the
-  server still resolves the product's real owner before writing.
-- **A build with any failed listing fails the whole run at `build`.** The
-  successful products and their uploaded mockups stay on the listing rows, so
-  **Retry build** resumes from there instead of uploading everything again.
-  Uploaded mockups are persisted (`uploadedUploads`) precisely so the
-  bookmarklet payload can be rebuilt without re-uploading pixels.
-- The bookmarklet step is the same clipboard bridge as Send. The run stores
-  `bridgePayload` and `bridgeProducts`; the page shows the payload, a Copy
-  button and the Printify product links. Only the user's printify.com tab can
-  write the product's mockup selection, so the run waits here. Pressing
-  **I ran the bookmarklet** records `mockupsAppliedAt` and moves to
-  `publish-review`; it does not publish.
-- **Publishing is only allowed for listings with `status === "uploaded"`, a
-  product and a shop.** `publishAutopilotRun` refuses without
-  `mockupsAppliedAt`, and `runPublish` skips already-published rows. The first
-  upstream publish failure stops the run at `publishing` with Printify's message
-  verbatim; **Retry publish** resets only failed rows that actually have
-  `uploadedUploads`, so a row that was never prepared cannot be published by
-  accident. There is no automatic publish retry.
-- **Retry research is only offered while no product exists.** Once Printify has
-  a product for the run, re-running research would orphan it, so the button is
-  gone.
-
-### The persistent task dock
-
-`src/components/layout/task-dock.tsx` is mounted in the app shell on every page
-except `/autopilot`. It reads the newest run live, is collapsed by default
-(showing status and published count), expands to the listing chips, the last
-three log lines, Pause/Resume and an **Open** link to
-`/autopilot?run=<id>`. On mount it calls `resumeActiveRuns()`, which is what
-makes a real document navigation safe: the new page continues a run that was
-mid-research, mid-build or mid-publish. The run page owns the run itself and is
-excluded so the dock cannot duplicate the controls.
-
-E2E tests 30 and 31 cover the gates without keys: they seed a persisted run at
-`mockup-review`/`copy-review`, assert that no publish request is made before
-both confirmations, and assert that an unapproved listing cannot start a
-build.
-
 ## Background removal: two engines, both local, no key and no limit
 
 `src/lib/printify/remove-background.ts` owns the decision. There are exactly
@@ -821,11 +739,7 @@ The "No ink variants" row is never touched: its colours carry no ink and are
 kept exactly as saved. `saveSession` stamps `inkRevision: 2`, so the reset
 cannot run twice; `inkReset` drives a dismissible notice that says the old
 automatic split was cleared. The undecided state shows the swatch's existing
-`ambiguous` badge (`?`), with
-neither ink button pressed. An autopilot run snapshotted before the field
-existed gets the same one-time derivation in `withCurrentRenderState`, so a
-resumed run is not left permanently "undecided" by colours it can no longer
-edit.
+`ambiguous` badge (`?`), with neither ink button pressed.
 
 The two panels are deliberately independent, and a colour selected in BOTH is
 allowed and intentional: the plain row prints it with the plain artwork, the ink
@@ -1206,7 +1120,7 @@ position pickers here:
    `package.json` and introduced BOMs into 49 source files. Use the editor tools,
    or `[System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($false)))`.
 4. **Cloudflare redirects directory-like routes to a trailing slash.**
-   `/mockups` → `/mockups/` and `/autopilot` → `/autopilot/`. `astro dev` does
+   `/mockups` → `/mockups/` and `/printify-studio` → `/printify-studio/`. `astro dev` does
    not. Any URL assertion must tolerate an optional trailing slash.
 5. **Commit messages with `"` break PowerShell argument parsing.** Use
    `git commit -F <file>`.
@@ -1232,18 +1146,34 @@ position pickers here:
 
 ## Known gaps
 
+- **Current launch blockers (as of this branch).** The production Worker's
+  `PRINTIFY_API_KEY` is rejected by Printify (401), so Send/Publish are not
+  proven live yet. There is no custom domain, so production mail (Resend behind
+  an adapter; Supabase sends its own verification/reset mail) and canonical URLs
+  still depend on a purchased domain. Razorpay is not in live mode. The
+  companion extension is a beta unpacked prototype, not a store build.
+- **Supabase sign-up currently takes the email-confirmation path, and the
+  project's built-in sender is rate-limited.** `SUPABASE_SERVICE_ROLE` is not
+  set, so `/api/auth/status` reports `signupMode: "email-confirmation"`; a
+  sign-up reaches Supabase and then fails with `email rate limit exceeded`
+  until a sending domain (or the service-role key) is configured. Adding
+  `SUPABASE_SERVICE_ROLE` through `npx wrangler secret put` switches the same
+  endpoint to instant confirmed accounts with no mail. The endpoint says so in
+  its error message instead of pretending the account exists.
 - **Workers Builds auto-deploy is not connected** (needs the dashboard click above).
-- **Eight screens were removed on purpose**, and what they did is now either in
-  a surviving page or gone: Designs → the Studio's Designs tab; the editor's
-  free canvas → the Studio's placement panel; Batch Studio → the agent's
-  `create_batch_job` plus **Save render** in Mockups → Print areas; Templates →
-  print-area templates; Product Builder → the Studio's Design panel; Listings
-  and AI SEO → the agent's `draft_listing`. Their engines
-  (`lib/batch/runner.ts`, `lib/canvas/compose.ts`, `lib/printify/*`,
-  `lib/client/tools.ts`, all thirteen `/api/*` endpoints) are untouched, because
-  the UI and the agent still call them. Accepted losses: there is no batch-job list
-  screen (the renders land in the Export Center, and a batch row in the artifact
-  rail is inert) and no free-form canvas editor.
+- **The Autopilot, the standalone Agent page, Designs, editor, Batch Studio,
+  Templates, Product Builder, Listings and AI SEO screens were removed on
+  purpose.** What absorbed them: Designs → the Studio's Designs tab; editor →
+  the Studio's placement panel; Batch Studio → **Save render** in Mockups →
+  Print areas; Templates → print-area templates; Product Builder → the Studio's
+  Design panel; Listings and AI SEO → the Listing pages plus the agent's
+  `draft_listing` / `save_listing_details`; Autopilot → Send/Publish on Listing
+  preview; the Agent page → the in-page agent panel on Printify Studio and
+  Listing details. Their engines (`lib/batch/runner.ts`, `lib/canvas/compose.ts`,
+  `lib/printify/*`, `lib/client/tools.ts`, all twenty `/api/*` endpoints) are
+  untouched, because the UI and the agent still call them. Accepted losses:
+  there is no batch-job list screen (the renders land in the Export Center) and
+  no free-form canvas editor.
 - **API keys are optional and user-supplied.** A visitor can paste their own
   Printify / AI keys in **Settings → API connections**; they are stored in that
   browser's IndexedDB (`settings` table, key `integrations`) and sent per-request
@@ -1294,18 +1224,20 @@ position pickers here:
   it (chat models only, deduped, free-tagged) and returns it. Some providers
   (OpenRouter) publish a public list, so a key is not always required. Fetched
   lists are cached per provider in IndexedDB (`ai:models:<id>`, 10-minute TTL).
-- **Agent chat (M1) lives at `/agent`.** A Hermes-style chat surface: sessions
-  rail, streaming transcript (markdown + syntax highlighting), reasoning blocks,
-  a combined provider/model picker with favorites and a reasoning-effort pill, and
-  a status bar with an *approximate* token/context meter. Conversations and
-  messages are stored in IndexedDB (`conversations` / `messages`, schema v3) —
-  never server-side. Replies stream over SSE from **`/api/ai/chat`** (POST,
+- **Agent chat (M1–M4) is an in-page panel, not a route.** It opens from the
+  launcher on **Printify Studio** and **Listing details** only
+  (`src/components/agent/agent-launcher.tsx` → `agent-panel.tsx`) and never
+  navigates away. It has a sessions rail, streaming transcript (markdown +
+  syntax highlighting), reasoning blocks, a combined provider/model picker with
+  favorites and a reasoning-effort pill, and a status bar with an *approximate*
+  token/context meter. Conversations and messages are stored in IndexedDB
+  (`conversations` / `messages`, schema v3) — never server-side. Replies stream
+  over SSE from **`/api/ai/chat`** (POST,
   `prerender = false`): the endpoint re-emits OpenAI-compatible deltas as
   `delta` / `reasoning` / `usage` / `done` / `error` frames (`src/lib/ai/sse.ts`).
   Capabilities (`reasoning` / `tools` / `vision`) are curated heuristics in
   `src/lib/ai/providers.ts` (`modelCapabilities`); the effort hint is only sent to
-  models flagged as reasoning models. The floating `AssistantPanel` is now just a
-  launcher for `/agent`.
+  models flagged as reasoning models.
 - **Agent tools (M2) are real, and only real.** `src/lib/ai/tools.ts` is the
   isomorphic registry of fourteen tools. Six are read-only: `explain_howto`,
   `summarize_workspace`, `list_library` (designs/mockups by name),
@@ -1373,8 +1305,8 @@ position pickers here:
   answer). `parseProviderStreamLine` emits the provider's `finish_reason` as a
   `finish` frame; when a turn comes back reasoning-only the client retries once
   with double the budget and the reasoning hint off
-  (`outputTokenBudget` in `src/lib/server/ai.ts`). `?debug=1` on `/agent` opens a
-  raw-SSE capture drawer
+  (`outputTokenBudget` in `src/lib/server/ai.ts`). `?debug=1` on a page with the
+  agent panel opens a raw-SSE capture drawer
   (`src/components/agent/debug-panel.tsx`) — use it to reproduce provider issues.
 - **Tool calls must be emitted before `done`, and that is load-bearing.** The SSE
   read loop yields `{type:"done"}` the moment the provider sends `data: [DONE]`,
@@ -1502,3 +1434,52 @@ Vite SPA using `@imgly/background-removal` and `onnxruntime-web`, with branches
 `PROGRESS.md` holds the original build log (Next.js phases 1–7: foundation, batch
 studio, templates/export, Printify/Etsy/AI routes, test suites). It predates the
 Astro migration but documents why the domain layer looks the way it does.
+
+## ListBulkly rebrand — phasing and the sketchbook system
+
+The product is being rebranded to **ListBulkly** in owner-approved phases. Each
+phase stops for approval and is shown at `http://localhost:3000` before any
+deploy. Do not push to `main` or run `npm run deploy` without that approval.
+
+**Scope is the LIVE site, not the folder.** Live today: the landing page plus
+Printify Studio, Mockups, Listing images, Listing details, Listing preview,
+Settings, Activity, Export Center, Onboarding and the bookmarklet page (plus
+the internal `/styleguide`). There is no `/autopilot` and no `/agent` route; the
+agent is the in-page panel on Printify Studio and Listing details. The rebrand
+happens **in place on the existing Worker**, so visitors keep
+their IndexedDB libraries. The local tools stay login-free; an account will be
+required only for Printify connect / Send / Publish / billing (Phases 4 and 6).
+
+**Phase 1 (done): the sketchbook design system.** `src/styles/tokens.css` is the
+single source of the five brand colours, type, spacing and motion;
+`src/styles/sketch.css` holds every sketch component; `src/components/sketch/`
+has the React components; `src/lib/motion/` is the one motion library;
+`src/lib/sketch/slogan.ts` owns the three-line tee slogan. `/styleguide`
+(`noindex`) shows all of it, and `docs/DESIGN-SYSTEM.md` documents the rules,
+including the orange-on-paper contrast limitation. Two new dependencies:
+`@fontsource-variable/josefin-sans` and `@fontsource-variable/caveat`
+(self-hosted, no Google Fonts).
+
+**Phase 2 (done): the public landing page.** `/` is the owner-supplied ListBulkly
+landing document (`src/landing/exact.html`), injected verbatim by
+`src/pages/index.astro` — not a React view, so the document owns its head,
+fonts and inline script. It has the hero with the live slogan tee, six steps,
+the "things it won't do" list, Free/Pro pricing marked PLACEHOLDER, the FAQ and
+the finale. Keep it in sync with the supplied file instead of re-implementing
+it. The landing is outside the app shell, so `e2e/global-setup.ts` warms it by
+waiting for the live slogan field (`#sl`).
+
+**The tools are NOT restyled yet** — they still use the Tailwind theme in
+`src/styles/globals.css`, on purpose, so Phase 1 could not break working logic.
+Phase 5 moves them onto the sketch shell (`SketchAppShell`) without changing
+what Send, Publish, Create or the render engines do.
+
+Motion trap worth remembering: scenes render fully drawn on the server, the
+motion library adds `.sk-anim` and then `.sk-in` to the SAME element, and the
+play selectors are therefore `.sk-in .sk-f` / `.sk-in .sk-d`. A descendant
+selector between the arm and play classes leaves the scene invisible forever.
+
+Email decision (owner delegated the choice): **Resend** behind an adapter.
+Supabase Auth sends its own verification/reset mail until a domain is purchased;
+no domain exists yet, so production mail and Razorpay live mode are launch
+blockers, not Phase 1 concerns.

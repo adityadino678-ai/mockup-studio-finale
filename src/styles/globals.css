@@ -1,37 +1,65 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
+@import "./tokens.css";
+@import "@fontsource-variable/josefin-sans";
+@import "@fontsource-variable/caveat";
 
+/*
+ * The app reads the same five brand colours as the public landing page and the
+ * sketchbook styleguide. The old semantic token names (forest, sage, …) are
+ * kept so existing views do not need a risky rewrite; they now resolve to the
+ * sketch palette. Square corners and ink rules are the house style.
+ */
 @theme inline {
-  --color-background: #f7f7f2;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f2f3ec;
-  --color-surface-raised: #fdfdfb;
-  --color-sage: #a8b7a0;
-  --color-sage-soft: #edf0e8;
-  --color-sage-deep: #8a9c81;
-  --color-forest: #314d3d;
-  --color-forest-deep: #263a2e;
-  --color-forest-soft: #e3e9e0;
-  --color-ink: #252a26;
-  --color-ink-muted: #565d53;
-  --color-ink-subtle: #676e64;
-  --color-border-subtle: #e6e7e0;
-  --color-border-strong: #d3d5cb;
-  --color-danger: #b3423a;
-  --color-danger-soft: #f9ecea;
-  --color-warning: #7d5a0e;
-  --color-warning-soft: #f8f2e3;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-blue: var(--blue);
+  --color-orange: var(--orange);
+  --color-wash: var(--wash);
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
+  --color-background: var(--paper);
+  --color-surface: var(--paper);
+  --color-surface-muted: color-mix(in srgb, var(--paper) 90%, var(--ink));
+  --color-surface-raised: var(--paper);
 
-  --shadow-subtle: 0 1px 2px rgba(37, 42, 38, 0.05);
-  --shadow-card: 0 1px 3px rgba(37, 42, 38, 0.06), 0 1px 2px rgba(37, 42, 38, 0.04);
-  --shadow-pop: 0 8px 24px rgba(37, 42, 38, 0.1), 0 2px 6px rgba(37, 42, 38, 0.05);
+  /* Secondary surfaces: the blue wash, never a second green. */
+  --color-sage: var(--wash);
+  --color-sage-soft: color-mix(in srgb, var(--wash) 62%, var(--paper));
+  --color-sage-deep: color-mix(in srgb, var(--blue) 24%, var(--paper));
 
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Primary actions are ink; hover is the orange accent. */
+  --color-forest: var(--ink);
+  --color-forest-deep: color-mix(in srgb, var(--ink) 85%, var(--paper));
+  --color-forest-soft: var(--wash);
+
+  --color-ink-muted: color-mix(in srgb, var(--ink) 72%, var(--paper));
+  --color-ink-subtle: color-mix(in srgb, var(--ink) 56%, var(--paper));
+  --color-border-subtle: color-mix(in srgb, var(--ink) 22%, var(--paper));
+  --color-border-strong: var(--ink);
+  --color-danger: var(--orange);
+  --color-danger-soft: color-mix(in srgb, var(--orange) 14%, var(--paper));
+  --color-warning: var(--blue);
+  --color-warning-soft: var(--wash);
+
+  /* Square by design: the sketchbook has no rounded cards. */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+
+  --shadow-subtle: none;
+  --shadow-card: 2px 2px 0 0 var(--color-border-strong);
+  --shadow-pop: var(--shadow-dialog);
+
+  --font-sans:
+    "Josefin Sans Variable", "Josefin Sans", "Century Gothic", "Avenir Next",
+    system-ui, sans-serif;
+  --font-display:
+    "Josefin Sans Variable", "Josefin Sans", "Century Gothic", "Avenir Next",
+    system-ui, sans-serif;
+  --font-body: var(--font-display);
+  --font-hand: "Caveat Variable", Caveat, "Segoe Print", "Bradley Hand", cursive;
 }
 
 /*
@@ -47,36 +75,64 @@
   * {
     border-color: var(--color-border-subtle);
   }
-}
 
-html {
-  background: var(--color-background);
-}
+  html {
+    background: var(--color-background);
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
 
-body {
-  background: var(--color-background);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  -webkit-font-smoothing: antialiased;
-}
+  body {
+    background: var(--color-background);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
 
-::selection {
-  background: #d7e0d2;
-}
+  h1 {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.12;
+  }
 
-*:focus-visible {
-  outline: 2px solid var(--color-forest);
-  outline-offset: 2px;
-}
+  h2,
+  h3 {
+    font-weight: 700;
+    letter-spacing: 0.015em;
+  }
 
-/*
- * The focus ring must not change a control's shape: a global `border-radius`
- * turned every round swatch and pill into a rounded rectangle the moment it
- * was focused. The radius is left alone so the outline follows the control.
- */
-[role="tabpanel"]:focus-visible {
-  outline: none;
+  ::selection {
+    background: var(--color-wash);
+    color: var(--color-ink);
+  }
+
+  *:focus-visible {
+    outline: 3px solid var(--color-blue);
+    outline-offset: 3px;
+  }
+
+  /*
+   * The focus ring must not change a control's shape: a global `border-radius`
+   * turned every round swatch and pill into a rounded rectangle the moment it
+   * was focused. The radius is left alone so the outline follows the control.
+   */
+  [role="tabpanel"]:focus-visible {
+    outline: none;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+  }
+
+  input[type="range"] {
+    accent-color: var(--color-orange);
+  }
 }
 
 /* Thin scrollbars for panels */
@@ -85,25 +141,57 @@ body {
   height: 8px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  background: #d3d5cb;
-  border-radius: 8px;
+  background: var(--color-border-strong);
+  border: 2px solid var(--color-background);
 }
 .scroll-thin::-webkit-scrollbar-thumb:hover {
-  background: #b9bcb0;
+  background: var(--color-orange);
 }
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
 }
 
+/* Handwritten marginal note. One per page at most. */
+.hand-note {
+  font-family: var(--font-hand);
+  font-weight: 500;
+  font-size: 1.35rem;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  color: var(--color-blue);
+  transform: rotate(-1.2deg);
+}
+
+/* A thin orange rule used under page titles and section labels. */
+.ink-rule {
+  height: 2px;
+  background: var(--color-ink);
+}
+
+.accent-rule {
+  height: 4px;
+  background: var(--color-orange);
+}
+
 /* Checkerboard for transparency previews */
 .checkerboard {
   background-image:
-    linear-gradient(45deg, #e9e9e4 25%, transparent 25%),
-    linear-gradient(-45deg, #e9e9e4 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #e9e9e4 75%),
-    linear-gradient(-45deg, transparent 75%, #e9e9e4 75%);
+    linear-gradient(45deg, color-mix(in srgb, var(--ink) 10%, var(--paper)) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--ink) 10%, var(--paper)) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--ink) 10%, var(--paper)) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--ink) 10%, var(--paper)) 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Sonner toasts follow the sketch cards. */
+[data-sonner-toaster] [data-sonner-toast] {
+  border: 2px solid var(--ink) !important;
+  border-radius: 0 !important;
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+  box-shadow: 6px 6px 0 var(--orange) !important;
+  font-family: var(--font-sans) !important;
 }
 
 /* Reduced motion: the looping animations are decoration. */
@@ -111,5 +199,11 @@ body {
   .animate-pulse,
   .animate-spin {
     animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
   }
 }

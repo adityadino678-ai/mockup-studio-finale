@@ -79,10 +79,10 @@ export function BrandMark({
         />
       </svg>
       <span
-        style={{ fontFamily: '"Patrick Hand", cursive' }}
-        className="text-ink"
+        style={{ fontFamily: "var(--font-display)" }}
+        className="text-[15px] font-bold uppercase tracking-[0.14em] text-ink"
       >
-        Mockup Studio
+        ListBulkly
       </span>
     </>
   );

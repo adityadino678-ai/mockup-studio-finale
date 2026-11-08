@@ -19,9 +19,9 @@ import { AgentLauncher } from "@/components/agent/agent-launcher";
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden bg-paper">
         <Sidebar />
-        <main className="scroll-thin flex-1 overflow-y-auto">{children}</main>
+        <main className="scroll-thin flex-1 overflow-y-auto bg-paper">{children}</main>
       </div>
       <AgentLauncher />
       <Toaster />

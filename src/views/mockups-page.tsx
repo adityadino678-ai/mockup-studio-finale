@@ -115,7 +115,7 @@ export function MockupsPage() {
   );
 
   return (
-    <div className={cn("mx-auto p-8", tab === "areas" ? "max-w-[1600px]" : "max-w-6xl")}>
+    <div className={cn("mx-auto p-5 sm:p-8", tab === "areas" ? "max-w-[1600px]" : "max-w-6xl")}>
       <PageHeader
         title="Mockups"
         description="Photos of your products. Uploaded mockups stay on this device."
@@ -501,7 +501,7 @@ function MockupLibrary({
               ? "Try a different category, search, or clear the filter."
               : isInfo
                 ? "Upload the information images that follow your product photos — a size chart, a “what you get” panel."
-                : "Upload photos of blank products — t-shirts, hoodies, mugs — and place your designs on them in the Printify Studio."
+                : "Upload product photos; place designs on them in Printify Studio."
           }
         />
       ) : (

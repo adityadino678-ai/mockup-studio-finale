@@ -16,6 +16,12 @@ import path from "node:path";
  */
 const optionalSecret = { context: "server", access: "secret", optional: true };
 
+// The public origin, e.g. `https://listbulkly.com`. Optional and build-time:
+// when it is set, app pages emit a canonical + og:url; when it is unset (today,
+// because no custom domain is bought yet) they emit none. It must never be a
+// `*.workers.dev` address — see `src/lib/site.ts`.
+const optionalPublic = { context: "client", access: "public", optional: true };
+
 // `output: "static"` is deliberate. Every view reads its data from the
 // visitor's own IndexedDB, so no page depends on request state - all 8 pages
 // prerender to static HTML and are served straight from Cloudflare's CDN.
@@ -51,6 +57,11 @@ export default defineConfig({
       SUPABASE_URL: envField.string(optionalSecret),
       SUPABASE_ANON_KEY: envField.string(optionalSecret),
       SUPABASE_SERVICE_ROLE: envField.string(optionalSecret),
+      RESEND_API_KEY: envField.string(optionalSecret),
+      RESEND_FROM: envField.string(optionalSecret),
+      RAZORPAY_KEY_ID: envField.string(optionalSecret),
+      RAZORPAY_KEY_SECRET: envField.string(optionalSecret),
+      PUBLIC_SITE_URL: envField.string(optionalPublic),
     },
   },
   vite: {

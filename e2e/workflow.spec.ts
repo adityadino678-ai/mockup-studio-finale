@@ -524,7 +524,7 @@ test.describe("core workflow", () => {
     expect(bundle).not.toMatch(/ETSY_API_KEY\s*=\s*['"][A-Za-z0-9]/);
   });
 
-  test("10. every page renders without console errors, and / redirects to the Studio", async ({
+  test("10. every page renders without console errors, including the landing page", async ({
     page,
   }) => {
     const errors: string[] = [];
@@ -545,11 +545,14 @@ test.describe("core workflow", () => {
       "/printify-bookmarklet",
     ];
     for (const route of routes) {
-      // "/" is a static redirect to the Studio (the landing page is gone).
-      // Console errors are still collected for the redirecting page.
+      // "/" is the supplied public landing document. Console errors are still
+      // collected for it, and the hero proves the page rendered.
       if (route === "/") {
         await page.goto(route);
-        await expect(page).toHaveURL(/\/printify-studio\/?$/, { timeout: 15_000 });
+        await expect(page.getByRole("heading", { level: 1 })).toContainText(
+          "designs on Printify, in one sitting.",
+          { timeout: 30_000 },
+        );
         continue;
       }
       // The fresh profile sees the standalone onboarding walkthrough, which is
@@ -600,11 +603,11 @@ test.describe("core workflow", () => {
     // assertion checks that the target page's own copy is rendered.
     const sections: Array<{ link: RegExp; path: string; copy: RegExp }> = [
       { link: /^Mockups$/, path: "/mockups", copy: /Photos of your products/ },
-      { link: /^Printify Studio$/, path: "/printify-studio", copy: /Upload designs, choose the product/ },
+      { link: /^Printify Studio$/, path: "/printify-studio", copy: /Upload designs, choose product\/colours/ },
       {
         link: /^Listing images$/,
         path: "/listing-images",
-        copy: /Every design in the batch gets its own row/,
+        copy: /One row per design/,
       },
       {
         link: /^Listing details$/,
@@ -614,7 +617,7 @@ test.describe("core workflow", () => {
       {
         link: /^Listing preview$/,
         path: "/listing-preview",
-        copy: /Each tab is one listing in the batch/,
+        copy: /Each tab is one listing/,
       },
       { link: /^Export Center$/, path: "/export", copy: /organized ZIP archive with a manifest/ },
       { link: /^Activity$/, path: "/activity", copy: /No activity yet/ },
@@ -1163,12 +1166,11 @@ test.describe("core workflow", () => {
         return reds;
       });
 
-    // Wait for the canvas to be ready
-    await page.waitForFunction(() => {
-      return document.querySelectorAll("canvas")[1] !== undefined;
-    });
+    // Wait for the stage to PAINT, not just for a canvas element to exist.
+    // A cold dev server can expose the second canvas before Konva has drawn
+    // the frame, which made this read 0 on a first run and pass on a rerun.
+    await expect.poll(designInk, { timeout: 30_000 }).toBeGreaterThan(1000);
     const whole = await designInk();
-    expect(whole).toBeGreaterThan(1000);
 
     // A folded shirt: the area is the same, but only its top half is on the
     // garment - so the design is cut at the fold instead of floating over it.
@@ -1397,7 +1399,7 @@ test.describe("core workflow", () => {
 
     await gotoApp(page, "/listing-preview");
     await expect(page.getByRole("heading", { name: "Listing preview" })).toBeVisible();
-    await expect(page.getByText("No listings to preview")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No listings to preview" })).toBeVisible();
     // Publishing is the whole point of the page, and it must never be offered
     // for an empty batch (there would be no product this app created).
     await expect(page.getByRole("button", { name: /Publish to Printify/ })).toHaveCount(0);

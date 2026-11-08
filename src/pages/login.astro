@@ -1,0 +1,290 @@
+---
+/**
+ * /login — email + password sign-in and sign-up.
+ *
+ * Deliberately a plain Astro page with a small script: it needs no React island
+ * and it must work before any of the app's IndexedDB code loads. The form calls
+ * the app's own /api/auth/* endpoints, which talk to Supabase server-side.
+ */
+import SketchLayout from "@/layouts/SketchLayout.astro";
+import { SketchNav } from "@/components/sketch/nav";
+import { SketchFooter } from "@/components/sketch/footer";
+
+const title = "Log in";
+const description =
+  "Sign in to ListBulkly with email and password. Optional — the local tools work without an account.";
+---
+
+<SketchLayout title={`${title} — ListBulkly`} description={description} noindex>
+  <SketchNav
+    links={[
+      { href: "/", label: "Home" },
+      { href: "/printify-studio", label: "Studio" },
+      { href: "/mockups", label: "Mockups" },
+    ]}
+    loginHref={null}
+    signupHref="#auth-form"
+    signupLabel="Create account"
+  />
+
+  <main class="sk-container sk-section auth-page">
+    <span class="sk-cap">ListBulkly · Account</span>
+    <h1 class="sk-part-title">Log in</h1>
+    <p class="sk-note">
+      An account is optional. Your designs, mockups and drafts stay in this browser
+      either way — signing in does not upload your library.
+    </p>
+
+    <div class="auth-page__card">
+      <div id="auth-unavailable" class="auth-page__notice" hidden>
+        Accounts are not configured on this deployment.
+      </div>
+
+      <div id="auth-signed-in" hidden>
+        <p class="auth-page__who">
+          Signed in as <strong id="auth-email"></strong>
+        </p>
+        <button type="button" class="sk-btn sk-btn--outline" id="auth-signout">
+          Sign out
+        </button>
+      </div>
+
+      <form id="auth-form" class="auth-page__form" hidden>
+        <div class="auth-page__seg" role="group" aria-label="Sign in or create an account">
+          <button type="button" class="auth-page__segbtn is-on" data-mode="in">Log in</button>
+          <button type="button" class="auth-page__segbtn" data-mode="up">Create account</button>
+        </div>
+
+        <label class="auth-page__label" for="auth-email-input">Email</label>
+        <input
+          class="sk-input"
+          id="auth-email-input"
+          name="email"
+          type="email"
+          autocomplete="email"
+          required
+        />
+
+        <label class="auth-page__label" for="auth-password-input">Password</label>
+        <input
+          class="sk-input"
+          id="auth-password-input"
+          name="password"
+          type="password"
+          minlength="8"
+          autocomplete="current-password"
+          required
+        />
+
+        <div id="auth-name-row" hidden>
+          <label class="auth-page__label" for="auth-name-input">Full name (optional)</label>
+          <input class="sk-input" id="auth-name-input" name="fullName" type="text" autocomplete="name" />
+        </div>
+
+        <button class="sk-btn auth-page__submit" type="submit" id="auth-submit">
+          Log in
+        </button>
+        <p class="auth-page__msg" id="auth-msg" role="status"></p>
+      </form>
+    </div>
+  </main>
+
+  <SketchFooter />
+</SketchLayout>
+
+<script>
+  (function () {
+    const TOKEN_KEY = "mockup-studio:auth-token";
+    const form = document.getElementById("auth-form") as HTMLFormElement;
+    const unavailable = document.getElementById("auth-unavailable") as HTMLElement;
+    const signedIn = document.getElementById("auth-signed-in") as HTMLElement;
+    const emailOut = document.getElementById("auth-email") as HTMLElement;
+    const signOut = document.getElementById("auth-signout") as HTMLButtonElement;
+    const msg = document.getElementById("auth-msg") as HTMLElement;
+    const submit = document.getElementById("auth-submit") as HTMLButtonElement;
+    const nameRow = document.getElementById("auth-name-row") as HTMLElement;
+    const password = document.getElementById("auth-password-input") as HTMLInputElement;
+    const segButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-mode]"));
+    let mode = "in";
+
+    function say(text: string, kind = "info") {
+      msg.textContent = text;
+      msg.dataset.kind = kind;
+    }
+
+    function setMode(next: string) {
+      mode = next;
+      segButtons.forEach((b) => b.classList.toggle("is-on", b.dataset.mode === next));
+      submit.textContent = next === "up" ? "Create account" : "Log in";
+      nameRow.hidden = next !== "up";
+      password.autocomplete = next === "up" ? "new-password" : "current-password";
+      say("");
+    }
+
+    segButtons.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode || "in")));
+
+    function showSignedIn(email: string) {
+      form.hidden = true;
+      signedIn.hidden = false;
+      emailOut.textContent = email;
+    }
+
+    async function checkStatus() {
+      try {
+        const res = await fetch("/api/auth/status");
+        const status = res.ok ? await res.json() : { configured: false };
+        if (!status.configured) {
+          unavailable.hidden = false;
+          form.hidden = true;
+          return;
+        }
+        form.hidden = false;
+
+        const token = localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        const me = await fetch("/api/auth/me", {
+          headers: { Authorization: "Bearer " + token },
+        });
+        if (me.ok) {
+          const data = await me.json();
+          showSignedIn(data.user.email);
+        } else {
+          localStorage.removeItem(TOKEN_KEY);
+        }
+      } catch {
+        unavailable.hidden = false;
+        form.hidden = true;
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = new FormData(form);
+      const email = String(data.get("email") || "").trim();
+      const pw = String(data.get("password") || "");
+      const fullName = String(data.get("fullName") || "").trim();
+      submit.disabled = true;
+      say(mode === "up" ? "Creating the account…" : "Signing in…");
+
+      try {
+        const res = await fetch(mode === "up" ? "/api/auth/signup" : "/api/auth/signin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: pw, fullName }),
+        });
+        const body = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          say(body.message || "That did not work. Try again.", "error");
+          return;
+        }
+
+        if (body.accessToken) {
+          localStorage.setItem(TOKEN_KEY, body.accessToken);
+          showSignedIn(body.user.email);
+          say("Signed in.");
+          return;
+        }
+
+        if (body.needsEmailConfirmation) {
+          say("Check your email to confirm the account, then log in here.", "info");
+        } else {
+          say("Account created. Log in with your new password.", "info");
+          setMode("in");
+        }
+      } catch {
+        say("Could not reach the server. Check your connection and try again.", "error");
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    signOut.addEventListener("click", () => {
+      localStorage.removeItem(TOKEN_KEY);
+      signedIn.hidden = true;
+      form.hidden = false;
+      say("Signed out.");
+    });
+
+    setMode("in");
+    checkStatus();
+  })();
+</script>
+
+<style>
+  .auth-page {
+    max-width: 34rem;
+    margin-inline: auto;
+  }
+
+  .auth-page__card {
+    margin-top: var(--space-6);
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    padding: var(--space-6);
+  }
+
+  .auth-page__notice {
+    border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+    padding: var(--space-3);
+    font-size: var(--text-sm);
+  }
+
+  .auth-page__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .auth-page__label {
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--tracking-caption);
+    text-transform: uppercase;
+  }
+
+  .auth-page__seg {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+
+  .auth-page__segbtn {
+    flex: 1;
+    border: 1px solid var(--ink);
+    background: transparent;
+    padding: 0.5rem;
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--tracking-caption);
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .auth-page__segbtn.is-on {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .auth-page__submit {
+    margin-top: var(--space-4);
+  }
+
+  .auth-page__msg {
+    min-height: 1.4em;
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-sm);
+    line-height: var(--leading-body);
+  }
+
+  .auth-page__msg[data-kind="error"] {
+    color: var(--orange);
+  }
+
+  .auth-page__who {
+    margin: 0 0 var(--space-4);
+    font-size: var(--text-md);
+  }
+</style>

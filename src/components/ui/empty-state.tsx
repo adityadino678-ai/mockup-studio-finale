@@ -21,17 +21,17 @@ export function EmptyState({ icon, title, description, actions, className }: Emp
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/60 px-6 py-14 text-center",
+        "flex flex-col items-center justify-center gap-3 border-2 border-dashed border-ink bg-paper px-6 py-14 text-center",
         className,
       )}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sage-soft text-forest [&_svg]:h-5 [&_svg]:w-5">
+      <div className="flex h-12 w-12 -rotate-2 items-center justify-center border-2 border-ink bg-wash text-ink [&_svg]:h-5 [&_svg]:w-5">
         {icon}
       </div>
       <div className="space-y-1">
         {/* h2, not h3: the empty state sits directly under the page's h1 and
             skipping a level breaks heading navigation. */}
-        <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+        <h2 className="text-[15px] font-bold uppercase tracking-[0.06em] text-ink">{title}</h2>
         <p className="mx-auto max-w-sm text-[13px] leading-relaxed text-ink-muted">{description}</p>
       </div>
       {actions && actions.length > 0 && (
