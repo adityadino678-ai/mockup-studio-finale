@@ -146,9 +146,15 @@ signed-in client can push to `/api/sync/*`; the local tools never require it.
   extension is a beta unpacked prototype. There is no custom domain yet, so
   production mail (Resend; Supabase verification/reset mail until then),
   reliable account-confirmation mail and Razorpay live mode remain launch
-  blockers. Sign-up currently takes the email-confirmation path because
-  `SUPABASE_SERVICE_ROLE` is not set, and Supabase's built-in sender answers
-  `email rate limit exceeded`; the service-role key removes that dependency.
+  blockers. Sign-up is instant on the deployed Worker (it carries
+  `SUPABASE_SERVICE_ROLE`, so `/api/auth/status` reports
+  `signupMode: "instant"`); a local dev run with only the anon key falls back to
+  Supabase's confirmation mail, whose built-in sender answers
+  `email rate limit exceeded` until a sending domain exists.
+- **Account deletion cascades to the profile.** `public.profiles.id` references
+  `auth.users` `ON DELETE CASCADE` (`supabase/migrations/004_profile_cascade.sql`);
+  without it a user delete failed with a foreign-key error, including Supabase's
+  own dashboard action.
 
 - **Keep the project out of OneDrive if you can.** OneDrive turns build caches into cloud placeholders and can hold Astro's `.astro/data-store.json` open, which kills `astro dev` with an `EPERM` rename. The repo works from a synced folder, but if a dev-server crash points at `mutable-data-store.js`, delete `.astro/data-store.json.tmp` and restart (see AGENTS.md).
 

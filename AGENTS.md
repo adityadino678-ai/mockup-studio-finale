@@ -1152,14 +1152,23 @@ position pickers here:
   an adapter; Supabase sends its own verification/reset mail) and canonical URLs
   still depend on a purchased domain. Razorpay is not in live mode. The
   companion extension is a beta unpacked prototype, not a store build.
-- **Supabase sign-up currently takes the email-confirmation path, and the
-  project's built-in sender is rate-limited.** `SUPABASE_SERVICE_ROLE` is not
-  set, so `/api/auth/status` reports `signupMode: "email-confirmation"`; a
-  sign-up reaches Supabase and then fails with `email rate limit exceeded`
-  until a sending domain (or the service-role key) is configured. Adding
-  `SUPABASE_SERVICE_ROLE` through `npx wrangler secret put` switches the same
-  endpoint to instant confirmed accounts with no mail. The endpoint says so in
-  its error message instead of pretending the account exists.
+- **Supabase sign-up is instant in production, email-confirmation in `astro
+  dev`.** The deployed Worker already carries `SUPABASE_SERVICE_ROLE`
+  (`npx wrangler secret list`), so production `/api/auth/status` reports
+  `{"configured":true,"serviceRole":true,"signupMode":"instant"}` and a
+  sign-up creates an already-confirmed account with a real session and no
+  mail — verified live (the probe user was deleted afterwards, leaving
+  `auth.users` and `public.profiles` at 0). A local `.env` with only the anon
+  key reports `signupMode: "email-confirmation"`, and there the project's
+  built-in sender is rate-limited until a sending domain exists; the endpoint
+  says so in its error message instead of pretending the account exists. Do
+  not put the service-role key in `.env` for dev unless you want dev to create
+  confirmed accounts too.
+- **Deleting an account needs the cascade on `public.profiles`.** `001_core_auth.sql`
+  created `profiles.id` with a plain `REFERENCES auth.users`, so deleting a
+  user failed with `23503 … violates foreign key constraint "profiles_id_fkey"`
+  — including Supabase's own dashboard "Delete user". `004_profile_cascade.sql`
+  re-creates the constraint with `ON DELETE CASCADE` (applied to the project).
 - **Workers Builds auto-deploy is not connected** (needs the dashboard click above).
 - **The Autopilot, the standalone Agent page, Designs, editor, Batch Studio,
   Templates, Product Builder, Listings and AI SEO screens were removed on

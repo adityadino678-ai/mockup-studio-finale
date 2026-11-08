@@ -180,6 +180,18 @@ a sending domain before treating account creation as launch-ready. The anon
 key is a publishable key and is safe to store in `.env` locally, but it is
 still passed only to the server.
 
+The current Worker already carries all four secrets; verify without revealing a
+value:
+
+```powershell
+npx wrangler secret list                       # names only
+curl.exe -s https://mockup-studio.adityadino678.workers.dev/api/auth/status
+# {"configured":true,"serviceRole":true,"signupMode":"instant"}
+```
+
+Deleting a user cascades to `public.profiles` (`supabase/migrations/004_profile_cascade.sql`);
+without that constraint the delete fails with `23503 … profiles_id_fkey`.
+
 Locally, copy `.dev.vars.example` to `.dev.vars`.
 
 **Before enabling Printify:** the product-creation endpoint accepts an 8 MB

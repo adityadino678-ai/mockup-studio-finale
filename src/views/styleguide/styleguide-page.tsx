@@ -453,9 +453,10 @@ function StyleguideContent() {
             still.
           </p>
           <p className="sk-muted">
-            Grain is active over this whole page. Auth, pricing and legal routes linked
-            from the nav and footer arrive in Phases 3, 4 and 7 — those links are
-            PLACEHOLDER destinations for now.
+            Grain is active over this whole page. The footer legal links now point at
+            real drafts (/privacy, /terms, /refunds, /cookies, /contact) and the
+            sign-up dialog calls the app&apos;s /api/auth endpoints. Pricing is still
+            PLACEHOLDER, and the auth dialog is the only account surface here.
           </p>
         </div>
       </Section>
