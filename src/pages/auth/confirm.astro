@@ -21,8 +21,8 @@ const description = "Finish creating a ListBulkly account by confirming your ema
       { href: "/", label: "Home" },
       { href: "/printify-studio", label: "Studio" },
     ]}
-    loginHref="/login"
-    signupHref="/login"
+    loginHref="/?auth=in"
+    signupHref="/?auth=up"
     signupLabel="Create account"
   />
 
@@ -31,7 +31,7 @@ const description = "Finish creating a ListBulkly account by confirming your ema
     <h1 class="sk-part-title">Confirm your email</h1>
     <p class="sk-note" id="confirm-text">Checking the link…</p>
     <div class="confirm-page__actions">
-      <a class="sk-btn" href="/login">Go to log in</a>
+      <a class="sk-btn" href="/?auth=in">Go to log in</a>
       <a class="sk-btn sk-btn--outline" href="/printify-studio">Open the Studio</a>
     </div>
   </main>

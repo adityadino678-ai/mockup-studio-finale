@@ -273,7 +273,7 @@ dialog .btn{width:100%;margin-top:20px}.msg{margin-top:12px;font-size:.85rem;min
  <h3 id="at">Sign up</h3>
  <p class="msg" id="sg"></p>
  <div class="seg"><button type="button" data-m="up" class="on">Sign up</button><button type="button" data-m="in">Log in</button></div>
- <form id="af"><label for="em">Email</label><input id="em" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required minlength="8" autocomplete="current-password"><button class="btn" type="submit" id="ab">Create account</button><p class="msg" id="am" role="status"></p></form>
+ <form id="af"><div id="nmrow" hidden><label for="nm">Name</label><input id="nm" type="text" maxlength="120" autocomplete="name" placeholder="Your name"></div><label for="em">Email</label><input id="em" type="email" required autocomplete="email"><label for="pw">Password</label><input id="pw" type="password" required minlength="8" autocomplete="current-password"><button class="btn" type="submit" id="ab">Create account</button><p class="msg" id="am" role="status"></p></form>
 </dialog>
 
 <script>
@@ -296,17 +296,23 @@ function slg(){const w=sl.value.trim().toUpperCase().split(/\s+/).filter(Boolean
  if(w.length===1)L[1]=w[0];else if(w.length===2){L[0]=w[0];L[1]=w[1]}else if(w.length>2){L[0]=w[0];L[1]=w[1];L[2]=w.slice(2).join(' ')}
  T.forEach((t,k)=>{t.textContent=L[k];t.style.fontSize=Math.min(25,Math.max(11,92/(Math.max(1,L[k].length)*.78)))+'px'})}
 sl.oninput=slg;
-// auth popup (email + password via the app's /api/auth endpoints)
+// auth popup (name, email + password via the app's /api/auth endpoints)
 const A=$('#auth');
 function setM(m){$('#at').textContent=m==='up'?'Sign up':'Log in';$('#ab').textContent=m==='up'?'Create account':'Log in';
- $$('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));$('#pw').autocomplete=m==='up'?'new-password':'current-password';$('#am').textContent=''}
+ $$('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));$('#pw').autocomplete=m==='up'?'new-password':'current-password';
+ $('#nmrow').hidden=m!=='up';$('#nm').required=m==='up';$('#am').textContent=''}
 $$('[data-auth]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();setM(a.dataset.auth);const v=sl.value.trim().toUpperCase();$('#sg').textContent=v?'Next: put “'+v+'” on every product you make.':'';A.showModal()}));
 $$('.seg button').forEach(b=>b.onclick=()=>setM(b.dataset.m));
+// Any page can open this dialog with /?auth=in or /?auth=up, which is what
+// the app's nav links and the deleted /login page now point at.
+const want=new URLSearchParams(location.search).get('auth');
+if(want==='in'||want==='up'){setM(want);A.showModal()}
 $('#af').addEventListener('submit',async e=>{e.preventDefault();
-  const m=$('.seg button.on').dataset.m,em=$('#em').value.trim(),pw=$('#pw').value,am=$('#am'),ab=$('#ab');
+  const m=$('.seg button.on').dataset.m,em=$('#em').value.trim(),pw=$('#pw').value,nm=$('#nm').value.trim(),am=$('#am'),ab=$('#ab');
   am.textContent=m==='up'?'Creating the account…':'Signing in…';ab.disabled=true;
   try{
-   const res=await fetch('/api/auth/'+(m==='up'?'signup':'signin'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em,password:pw})});
+   const body=m==='up'?{email:em,password:pw,fullName:nm}:{email:em,password:pw};
+   const res=await fetch('/api/auth/'+(m==='up'?'signup':'signin'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
    const d=await res.json().catch(()=>({}));
    if(!res.ok){am.textContent=d.message||'That did not work. Try again.'}
    else if(d.accessToken){localStorage.setItem('mockup-studio:auth-token',d.accessToken);am.textContent='Signed in. Opening the Studio…';setTimeout(()=>location.assign('/printify-studio'),700)}

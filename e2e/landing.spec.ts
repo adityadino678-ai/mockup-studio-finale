@@ -47,6 +47,7 @@ test.describe("the root landing page", () => {
     await page.locator("nav a[data-auth='up']").click();
     await expect(dialog).toBeVisible();
     await expect(dialog.locator("#at")).toHaveText("Sign up");
+    await expect(dialog.locator("#nmrow")).toBeVisible();
     await expect(page.getByRole("button", { name: "Log in", exact: true }).last()).toBeVisible();
 
     // Stub the endpoint so the assertion checks the dialog's wiring, not a
@@ -64,6 +65,7 @@ test.describe("the root landing page", () => {
       }),
     );
 
+    await page.locator("#nm").fill("Asha Seller");
     await page.locator("#em").fill("seller@example.com");
     await page.locator("#pw").fill("password123");
     await dialog.getByRole("button", { name: "Create account" }).click();

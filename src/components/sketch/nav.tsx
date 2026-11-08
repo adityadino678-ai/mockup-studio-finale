@@ -17,16 +17,17 @@ const DEFAULT_LINKS: SketchNavLink[] = [
  * Sticky sketchbook nav with the thin orange scroll-progress line.
  *
  * `loginHref={null}` hides the log-in link instead of shipping a dead one.
- * Accounts do not exist yet, so the public landing page hides it until Phase 3
- * makes the route real. The label and destination of the primary button are
- * props for the same reason: today it opens the login-free Studio.
+ * Both account entry points open the landing page's auth dialog through its
+ * query parameters (`/?auth=in` / `/?auth=up`); there is deliberately no
+ * standalone /login page. The label and destination of the primary button are
+ * props for the same reason: some pages open the login-free Studio instead.
  */
 export function SketchNav({
   links = DEFAULT_LINKS,
   logoHref = "/",
-  loginHref = "/login",
+  loginHref = "/?auth=in",
   loginLabel = "Log in",
-  signupHref = "/signup",
+  signupHref = "/?auth=up",
   signupLabel = "Start free",
 }: {
   links?: SketchNavLink[];

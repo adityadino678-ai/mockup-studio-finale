@@ -9,14 +9,17 @@ A local-first print-on-demand workspace for sellers: upload artwork, place it on
 real Printify print area, map that area onto mockup photos, generate renders,
 create ink variants, remove backgrounds, and export verified ZIP archives.
 
-There are **twenty-one pages**: the twelve product routes in `src/pages/*.astro`
+There are **twenty pages**: the twelve product routes in `src/pages/*.astro`
 (`/` — the exact ListBulkly landing document — `/printify-studio`, `/mockups`,
 `/listing-images`, `/listing-details`, `/listing-preview`, `/export`,
 `/activity`, `/settings`, `/onboarding`, `/printify-bookmarklet`,
 `/styleguide` (internal, `noindex`)), five public legal pages (`/privacy`,
 `/terms`, `/refunds`, `/cookies`, `/contact`), two error pages
 (`src/pages/404.astro` and `src/pages/500.astro`, rendered as `/404.html` and
-`/500.html`), and two account pages (`/login`, `/auth/confirm`). There is no
+`/500.html`), and one account page (`/auth/confirm`, the landing site for an
+email-confirmation link). **There is no `/login` page**: the landing document's
+small window is the only sign-up/log-in surface, opened by every `data-auth`
+button on `/` and by `/?auth=in` / `/?auth=up` from anywhere else. There is no
 `/autopilot` and no `/agent` route; the agent is an in-page panel on Printify
 Studio and Listing details. The five legal pages are honest drafts: the legal
 identity, jurisdiction, transfer mechanism and price are still PLACEHOLDER, while
@@ -67,8 +70,8 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 ```powershell
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
-npm run test          # 666 unit tests across 40 test files
-npm run test:e2e      # 59 acceptance tests (local dev server)
+npm run test          # 667 unit tests across 40 test files
+npm run test:e2e      # 61 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 
@@ -116,16 +119,20 @@ Both must pass. The production run has caught bugs the local run missed.
   `/api/auth/signup` creates an already-confirmed account (admin API, no mail).
   With only the anon key it uses `auth.signUp`, and the response says
   `needsEmailConfirmation: true`; the account is unusable until the emailed
-  link is opened at `/auth/confirm`. The landing dialog and `/login` both read
-  `/api/auth/status` first, so they never offer a path the deployment cannot
-  serve.
-- **`/login` is an entry point, not a destination.** A successful sign-up,
-  sign-in or email confirmation sends the visitor straight to
-  `/printify-studio`; a visitor who already has a valid token is redirected
-  there on load too. Only `?stay=1` keeps the signed-in card (and its Sign out
-  button) on the page. Sign-out lives in Settings, so the redirect cannot trap
-  a session. The landing dialog used to call `location.assign('/login')`, which
-  is what produced the "Signed in as …" dead end.
+  link is opened at `/auth/confirm`. The landing dialog reads the response and
+  says "check your email" only in that mode, so it never claims a session it
+  does not have.
+- **The landing dialog is the only sign-up/log-in surface.** There is no
+  `/login` page (it was deleted on the owner's instruction). Every `data-auth`
+  button on `/` opens the dialog, and any other page links to `/?auth=in` or
+  `/?auth=up`, which the landing script reads on load and opens in that mode.
+  The dialog collects **Name, Email, Password** on sign-up (the name goes to
+  `fullName` → Supabase `user_metadata.full_name` → `profiles.full_name`) and
+  only Email + Password on log-in; switching modes hides and un-requires the
+  name field. A successful sign-up/sign-in stores the token and opens
+  `/printify-studio`; email confirmation does the same. Sign-out lives in
+  Settings. The dialog used to call `location.assign('/login')`, which produced
+  the "Signed in as …" dead end.
 - **No `Buffer`.** `atob` + `Uint8Array` in `api/printify/products.ts`.
 
 ## The Printify product contract (verified live, Oct 2026)

@@ -185,7 +185,7 @@ export function Sidebar() {
               <span aria-hidden>↗</span>
             </Link>
             <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 px-1 text-[9px] font-bold uppercase tracking-[0.12em] text-ink-subtle">
-              <Link href="/login" className="hover:text-blue">
+              <Link href="/?auth=in" className="hover:text-blue">
                 Log in
               </Link>
               <Link href="/privacy" className="hover:text-blue">

@@ -37,7 +37,7 @@ const ROUTES = [
 ];
 
 /** Utility pages that render outside the sidebar shell. */
-const UTILITY_ROUTES = ["/printify-bookmarklet", "/login", "/auth/confirm"];
+const UTILITY_ROUTES = ["/printify-bookmarklet", "/auth/confirm"];
 
 export default async function globalSetup() {
   const baseURL = process.env.BASE_URL ?? "http://localhost:3100";

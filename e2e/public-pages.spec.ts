@@ -40,16 +40,10 @@ test.describe("public legal pages", () => {
 });
 
 test.describe("account screens", () => {
-  test("/login offers the email form or says accounts are unavailable", async ({ page }) => {
+  test("/login is gone — the landing dialog is the only account surface", async ({ page }) => {
     const res = await page.goto("/login");
-    expect(res?.status()).toBe(200);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Log in");
-
-    // Exactly one is shown after /api/auth/status resolves; the other stays
-    // hidden in the DOM, so assert on the visible union, not both elements.
-    await expect(
-      page.locator("#auth-form:visible").or(page.locator("#auth-unavailable:visible")),
-    ).toBeVisible();
+    expect(res?.status()).toBe(404);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("404");
   });
 
   test("/auth/confirm explains a link that carries no token", async ({ page }) => {
@@ -59,9 +53,6 @@ test.describe("account screens", () => {
     await expect(page.locator("#confirm-text")).toContainText("no confirmation token");
   });
 
-  // /login is an entry point, not a destination: a related bug sent a
-  // successfully signed-in visitor to /login, where the page showed "Signed in
-  // as …" and left them there. The Studio must load instead.
   const STUDIO = /\/printify-studio\/?$/;
 
   async function stubStudio(page: import("@playwright/test").Page) {
@@ -70,32 +61,69 @@ test.describe("account screens", () => {
     );
   }
 
-  test("a visitor who already has a session is sent to the Studio", async ({ page }) => {
-    await page.route("**/api/auth/status", (route) =>
-      route.fulfill({ json: { configured: true, serviceRole: true, signupMode: "instant" } }),
-    );
-    await page.route("**/api/auth/me", (route) =>
-      route.fulfill({ json: { user: { id: "u1", email: "seller@example.test" } } }),
-    );
-    await stubStudio(page);
-    await page.addInitScript(() =>
-      localStorage.setItem("mockup-studio:auth-token", "test-token"),
-    );
+  test("Start free opens the small window with a name field", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("#auth")).toBeHidden();
 
-    await page.goto("/login");
-    await page.waitForURL(STUDIO, { timeout: 15000 });
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Studio");
+    await page.getByRole("link", { name: "Start free" }).first().click();
+
+    await expect(page.locator("#auth")).toBeVisible();
+    await expect(page.locator("#at")).toHaveText("Sign up");
+    await expect(page.locator("#nmrow")).toBeVisible();
+    await expect(page.locator("#nm")).toBeVisible();
+
+    // The name belongs to account creation only: switching to log-in hides it.
+    await page.click('.seg button[data-m="in"]');
+    await expect(page.locator("#at")).toHaveText("Log in");
+    await expect(page.locator("#nmrow")).toBeHidden();
   });
 
-  test("logging in goes straight to the Studio and keeps the token", async ({ page }) => {
-    await page.route("**/api/auth/status", (route) =>
-      route.fulfill({ json: { configured: true, serviceRole: true, signupMode: "instant" } }),
-    );
-    await page.route("**/api/auth/me", (route) =>
-      route.fulfill({ status: 401, json: { error: "unauthorized" } }),
-    );
-    await page.route("**/api/auth/signin", (route) =>
-      route.fulfill({
+  test("/?auth=in opens the same window in log-in mode", async ({ page }) => {
+    await page.goto("/?auth=in");
+    await expect(page.locator("#auth")).toBeVisible();
+    await expect(page.locator("#at")).toHaveText("Log in");
+    await expect(page.locator("#nmrow")).toBeHidden();
+  });
+
+  test("signing up sends the name and lands on the Studio", async ({ page }) => {
+    let posted: Record<string, unknown> | null = null;
+    await page.route("**/api/auth/signup", async (route) => {
+      posted = route.request().postDataJSON();
+      await route.fulfill({
+        json: {
+          ok: true,
+          mode: "instant",
+          needsEmailConfirmation: false,
+          user: { id: "u1", email: "seller@example.test" },
+          accessToken: "token-from-signup",
+          refreshToken: "refresh",
+          expiresAt: 1,
+        },
+      });
+    });
+    await stubStudio(page);
+
+    await page.goto("/?auth=up");
+    await page.fill("#nm", "Asha Seller");
+    await page.fill("#em", "seller@example.test");
+    await page.fill("#pw", "password123");
+    await page.click("#ab");
+
+    await page.waitForURL(STUDIO, { timeout: 15000 });
+    expect(posted).toMatchObject({
+      email: "seller@example.test",
+      fullName: "Asha Seller",
+    });
+    expect(
+      await page.evaluate(() => localStorage.getItem("mockup-studio:auth-token")),
+    ).toBe("token-from-signup");
+  });
+
+  test("logging in from the window lands on the Studio", async ({ page }) => {
+    let posted: Record<string, unknown> | null = null;
+    await page.route("**/api/auth/signin", async (route) => {
+      posted = route.request().postDataJSON();
+      await route.fulfill({
         json: {
           ok: true,
           mode: "instant",
@@ -105,16 +133,18 @@ test.describe("account screens", () => {
           refreshToken: "refresh",
           expiresAt: 1,
         },
-      }),
-    );
+      });
+    });
     await stubStudio(page);
 
-    await page.goto("/login");
-    await page.fill("#auth-email-input", "seller@example.test");
-    await page.fill("#auth-password-input", "password123");
-    await page.click("#auth-submit");
+    await page.goto("/?auth=in");
+    await page.fill("#em", "seller@example.test");
+    await page.fill("#pw", "password123");
+    await page.click("#ab");
 
     await page.waitForURL(STUDIO, { timeout: 15000 });
+    expect(posted).toMatchObject({ email: "seller@example.test" });
+    expect(posted).not.toHaveProperty("fullName");
     expect(
       await page.evaluate(() => localStorage.getItem("mockup-studio:auth-token")),
     ).toBe("token-from-signin");

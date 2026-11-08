@@ -85,4 +85,10 @@ describe("landing page content rules", () => {
     expect(landing).not.toContain("Demo only: connect your auth provider");
     expect(landing).not.toContain("supabase.auth.signUp / signInWithPassword");
   });
+
+  it("collects a name at sign-up and sends it as fullName", () => {
+    expect(landing).toContain('id="nm"');
+    expect(landing).toContain("fullName:nm");
+    expect(landing).toContain("URLSearchParams(location.search)");
+  });
 });
