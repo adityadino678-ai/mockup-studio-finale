@@ -71,7 +71,7 @@ Workers & Pages → `mockup-studio` → Settings → Builds → connect the repo
 npm run lint          # 0 errors
 npm run typecheck     # 0 errors
 npm run test          # 667 unit tests across 40 test files
-npm run test:e2e      # 61 acceptance tests (local dev server)
+npm run test:e2e      # 63 acceptance tests (local dev server)
 npm run build         # astro build + postbuild (asserts _worker.js + .assetsignore)
 ```
 

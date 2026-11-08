@@ -171,7 +171,19 @@ export const GET: APIRoute = async ({ url, request }) => {
       return response;
     }
     if (wantsProviders) {
-      return json({ configured: true, ...(await client.listProviders(Number(id))) });
+      // Providers are public catalogue data, identical for every visitor, so
+      // the edge can hold them. `colors=1` is deliberately NOT cached: it
+      // reads the seller's own shop products to find a template product.
+      const cached = await cachedCatalogue(url);
+      if (cached) {
+        const hit = new Response(cached.body, cached);
+        hit.headers.set("x-catalog-cache", "edge");
+        return hit;
+      }
+      const response = json({ configured: true, ...(await client.listProviders(Number(id))) });
+      response.headers.set("x-catalog-cache", "miss");
+      await putInCatalogueCache(url, response);
+      return response;
     }
     if (wantsColors) {
       // Real colour hexes only exist on a PRODUCT, never in the catalogue.
@@ -212,8 +224,20 @@ export const GET: APIRoute = async ({ url, request }) => {
       });
     }
     if (provider) {
+      // Variants are the colour/size list the palette renders from, and the
+      // payload is large (placeholders per variant). Public catalogue data, so
+      // the edge holds it for an hour; the browser holds its own copy for a day.
+      const cached = await cachedCatalogue(url);
+      if (cached) {
+        const hit = new Response(cached.body, cached);
+        hit.headers.set("x-catalog-cache", "edge");
+        return hit;
+      }
       const variants = await client.listVariants(Number(id), Number(provider));
-      return json({ configured: true, variants });
+      const response = json({ configured: true, variants });
+      response.headers.set("x-catalog-cache", "miss");
+      await putInCatalogueCache(url, response);
+      return response;
     }
     const detail: PrintifyBlueprintDetail = await client.getBlueprint(Number(id));
     return json({ configured: true, blueprint: detail });

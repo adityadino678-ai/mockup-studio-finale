@@ -1316,6 +1316,11 @@ export function ListingImagesView() {
               );
               payloadImages.push(converted);
             }
+            // No `expectedTitle`: this page never edits the product title
+            // (Listing preview does), so the stored creation title goes stale
+            // after any title change elsewhere and the upload would 409.
+            // The product id is the identity; the server resolves it with
+            // the caller's own key.
             const response = await authedFetch("/api/printify/mockups", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1323,15 +1328,14 @@ export function ListingImagesView() {
                 confirm: true,
                 shopId,
                 productId: result.remoteProductId,
-                expectedTitle: result.title,
                 images: payloadImages,
               }),
             });
-            const data = (await response.json()) as UploadResponse;
+            const data = (await response.json().catch(() => null)) as UploadResponse | null;
             if (!response.ok) {
-              throw new Error(data.error ?? `HTTP ${response.status}`);
+              throw new Error(data?.error ?? `HTTP ${response.status}`);
             }
-            if (!Array.isArray(data.uploads) || data.uploads.length !== chunk.length) {
+            if (!data || !Array.isArray(data.uploads) || data.uploads.length !== chunk.length) {
               throw new Error("Printify did not return one custom mockup per image");
             }
             uploads.push(...data.uploads);
@@ -1355,15 +1359,14 @@ export function ListingImagesView() {
                 confirm: true,
                 shopId,
                 productId: result.remoteProductId,
-                expectedTitle: result.title,
                 images: chunk,
               }),
             });
-            const data = (await response.json()) as UploadResponse;
+            const data = (await response.json().catch(() => null)) as UploadResponse | null;
             if (!response.ok) {
-              throw new Error(data.error ?? `HTTP ${response.status}`);
+              throw new Error(data?.error ?? `HTTP ${response.status}`);
             }
-            if (!Array.isArray(data.uploads) || data.uploads.length !== chunk.length) {
+            if (!data || !Array.isArray(data.uploads) || data.uploads.length !== chunk.length) {
               throw new Error("Printify did not return one custom mockup per info card");
             }
             uploads.push(...data.uploads);
@@ -1398,11 +1401,10 @@ export function ListingImagesView() {
             uploads,
           });
         } catch (error) {
-          failures.push(
-            `${listing.designName}: ${
-              error instanceof Error ? error.message : "upload failed"
-            }`,
-          );
+          const message =
+            error instanceof Error ? error.message : "upload failed";
+          failures.push(`${listing.designName}: ${message}`);
+          console.warn("Listing image upload failed", listing.designName, error);
         }
         setSendProgress({
           done: index + 1,
@@ -1412,13 +1414,15 @@ export function ListingImagesView() {
       }
 
       if (prepared.length === 0) {
-        toast.error(
-          [
-            "Nothing was prepared for Printify.",
-            ...failures.slice(0, 2),
-            ...skipped.slice(0, 2),
-          ].join(" "),
-        );
+        // Keep the dialog open with the full failures/skipped list - a
+        // truncated toast hides why every listing was rejected.
+        setBridgePayload("");
+        setBridgePayloadData(null);
+        setBridgeApplied(null);
+        setBridgeCopied(false);
+        setBridgeSummary({ products: 0, images: 0, failures, skipped });
+        setBridgeOpen(true);
+        toast.error("Nothing was prepared for Printify. See the dialog for why.");
         return;
       }
 
@@ -1462,6 +1466,25 @@ export function ListingImagesView() {
           `${failures.length + skipped.length} listing${
             failures.length + skipped.length === 1 ? "" : "s"
           } skipped. See the dialog.`,
+        );
+      }
+      // One-click: when the bridge extension is loaded, hand the payload
+      // straight to it - otherwise Send only prepares and leaves a second
+      // manual click. The dialog shows the extension's answer.
+      if (companionExtensionReady()) {
+        setExtensionReady(true);
+        setExtensionOld(false);
+        const requestId =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `req-${Date.now()}`;
+        applyRequestId.current = requestId;
+        setExtensionApplying(true);
+        setBridgeApplied(null);
+        window.dispatchEvent(
+          new CustomEvent("mockup-studio:apply-request", {
+            detail: { payload, requestId },
+          }),
         );
       }
     } catch (error) {

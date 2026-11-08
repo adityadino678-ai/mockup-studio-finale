@@ -26,6 +26,11 @@ type StudioTab = "designs" | "colors" | "panel";
 export interface StudioCatalogState {
   configured: boolean;
   loading: boolean;
+  /** True while the provider list for the chosen product is loading. */
+  providersLoading: boolean;
+  /** True while the colour/size list for the chosen provider is loading. The
+   * previous list stays on screen (dimmed) until the new one arrives. */
+  variantsLoading: boolean;
   error?: string;
   blueprints: CatalogBlueprint[];
   providers: CatalogProvider[];
@@ -65,6 +70,8 @@ export function PrintifyStudioPage() {
   const [catalog, setCatalog] = React.useState<StudioCatalogState>({
     configured: true,
     loading: false,
+    providersLoading: false,
+    variantsLoading: false,
     blueprints: [],
     providers: [],
     variants: [],
@@ -186,17 +193,32 @@ export function PrintifyStudioPage() {
   React.useEffect(() => {
     const blueprintId = session.blueprintId;
     if (!blueprintId) {
-      setCatalog((c) => ({ ...c, providers: [], variants: [], colourSource: null }));
+      setCatalog((c) => ({
+        ...c,
+        providers: [],
+        providersLoading: false,
+        variants: [],
+        variantsLoading: false,
+        colourSource: null,
+      }));
       return;
     }
     let cancelled = false;
     (async () => {
+      // Clear the previous product's providers at once: the old list belongs
+      // to another blueprint, and offering it lets the user pick a provider
+      // that does not serve this product.
+      setCatalog((c) => ({ ...c, providers: [], providersLoading: true }));
       try {
         const providers = await fetchProviders(blueprintId);
-        if (!cancelled) setCatalog((c) => ({ ...c, providers }));
+        if (!cancelled) setCatalog((c) => ({ ...c, providers, providersLoading: false }));
       } catch (e) {
         if (!cancelled) {
-          setCatalog((c) => ({ ...c, error: e instanceof Error ? e.message : "Could not load providers" }));
+          setCatalog((c) => ({
+            ...c,
+            providersLoading: false,
+            error: e instanceof Error ? e.message : "Could not load providers",
+          }));
         }
       }
     })();
@@ -209,19 +231,43 @@ export function PrintifyStudioPage() {
     const blueprintId = session.blueprintId;
     const printProviderId = session.printProviderId;
     if (!blueprintId || !printProviderId) {
-      setCatalog((c) => ({ ...c, variants: [], colourSource: null }));
+      setCatalog((c) => ({ ...c, variants: [], variantsLoading: false, colourSource: null }));
       return;
     }
     let cancelled = false;
     (async () => {
-      setCatalog((c) => ({ ...c, loading: true, variants: [], colourSource: null }));
+      // Keep the previous provider's palette on screen (dimmed) until the new
+      // one arrives instead of blanking it, and do NOT wait for the colour
+      // hexes: those come from a different, much slower lookup (shops + product
+      // list + product detail) and only affect the swatch shades, not which
+      // colours exist. The palette renders from the variants as soon as they
+      // land; the real hexes swap in in the background.
+      setCatalog((c) => ({ ...c, variantsLoading: true, colourSource: null }));
+      let variants;
       try {
-        const [variants, colourSource] = await Promise.all([
-          fetchVariants(blueprintId, printProviderId),
-          fetchColourSource(blueprintId, printProviderId).catch(() => null),
-        ]);
-        if (cancelled) return;
-        setCatalog((c) => ({ ...c, variants, colourSource, loading: false }));
+        variants = await fetchVariants(blueprintId, printProviderId);
+      } catch (e) {
+        if (!cancelled) {
+          setCatalog((c) => ({
+            ...c,
+            variantsLoading: false,
+            error: e instanceof Error ? e.message : "Could not load the product colours",
+          }));
+        }
+        return;
+      }
+      if (cancelled) return;
+      setCatalog((c) => ({ ...c, variants, variantsLoading: false }));
+
+      // Real hexes in the background. They never block the palette, and a
+      // failure here is silent because the curated hex table is the fallback.
+      void fetchColourSource(blueprintId, printProviderId)
+        .catch(() => null)
+        .then((colourSource) => {
+          if (!cancelled && colourSource) {
+            setCatalog((c) => ({ ...c, colourSource }));
+          }
+        });
 
         // A different print provider offers a different colour and size list.
         // A selection that names colours or sizes the new provider does not
@@ -277,15 +323,6 @@ export function PrintifyStudioPage() {
             updatedAt: Date.now(),
           };
         });
-      } catch (e) {
-        if (!cancelled) {
-          setCatalog((c) => ({
-            ...c,
-            loading: false,
-            error: e instanceof Error ? e.message : "Could not load the product colours",
-          }));
-        }
-      }
     })();
     return () => {
       cancelled = true;

@@ -332,7 +332,11 @@ export function ColorsTab({
                 disabled={!session.blueprintId || catalog.providers.length === 0}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Choose a provider…" />
+                  <SelectValue
+                    placeholder={
+                      catalog.providersLoading ? "Loading providers…" : "Choose a provider…"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
@@ -466,7 +470,12 @@ export function ColorsTab({
                     : `${session.sizes.length} selected`}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div
+                className={cn(
+                  "flex flex-wrap gap-1.5",
+                  catalog.variantsLoading && "pointer-events-none opacity-50",
+                )}
+              >
                 {sortedSizes.map((size) => {
                   const active = session.sizes.includes(size);
                   return (
@@ -524,11 +533,43 @@ export function ColorsTab({
                   )}
 
                   {colourNames.length === 0 ? (
-                    <p className="text-[12px] text-ink-muted">
-                      Choose a print provider to load its colours.
-                    </p>
+                    catalog.variantsLoading ? (
+                      <div
+                        role="status"
+                        data-variants-loading=""
+                        className="flex flex-wrap gap-1.5"
+                        aria-label="Loading colours"
+                      >
+                        {Array.from({ length: 24 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="h-7 w-7 animate-pulse rounded-full bg-surface-muted"
+                          />
+                        ))}
+                        <span className="w-full text-[12px] text-ink-muted">
+                          Loading colours…
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-[12px] text-ink-muted">
+                        Choose a print provider to load its colours.
+                      </p>
+                    )
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div
+                      className={cn(
+                        "flex flex-wrap gap-1.5",
+                        catalog.variantsLoading && "pointer-events-none opacity-50",
+                      )}
+                    >
+                      {catalog.variantsLoading && (
+                        <span
+                          role="status"
+                          className="w-full text-[12px] text-ink-muted"
+                        >
+                          Loading colours for this provider…
+                        </span>
+                      )}
                       {colourNames.map((name) => {
                         const selected = state?.colors.includes(name) ?? false;
                         const hex = hexFor(name);
