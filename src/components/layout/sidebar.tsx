@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { getSetting, setSetting } from "@/lib/db/schema";
 import {
   ClipboardList,
+  Eraser,
   Eye,
   FileArchive,
   History,
@@ -48,6 +49,7 @@ const NAV: NavGroup[] = [
       { href: "/listing-images", label: "Listing images", icon: <Images className="h-4 w-4" /> },
       { href: "/listing-details", label: "Listing details", icon: <ClipboardList className="h-4 w-4" /> },
       { href: "/listing-preview", label: "Listing preview", icon: <Eye className="h-4 w-4" /> },
+      { href: "/background-remover", label: "Background Remover", icon: <Eraser className="h-4 w-4" /> },
     ],
   },
   {

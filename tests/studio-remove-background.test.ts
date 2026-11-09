@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as engine from "@/lib/bg-removal/engine";
-import { removeBgBorderModel, removeBgFloodKey } from "@/lib/bg-removal/engine";
+import { removeBgBorderModel, removeBgFloodKey, removeBgMlSegmentation } from "@/lib/bg-removal/engine";
 import type { BgRemovalResult } from "@/lib/bg-removal/engine";
 import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
 import {
@@ -12,38 +12,29 @@ import {
 } from "@/lib/printify/remove-background";
 
 // ---------------------------------------------------------------------------
-// The decision logic of the background remover.
+// The decision logic of the background remover (hybrid pipeline).
 //
-// There are exactly TWO engines, both local, both free, both instant:
+//   flood-key    - exact, needs one flat colour touching the border.
+//   border-model - FOLLOWS a backdrop that fades/vignettes. Offline fallback.
+//   ml           - in-browser segmentation (onnxruntime-web, MIT; U2Netp /
+//                  ISNet general-use) in a Worker. No AGPL, no non-commercial
+//                  weights, no hosted service (see docs/bg-removal-model.md).
 //
-//   flood-key    - exact, but it needs one flat colour that touches the
-//                  border.
-//   border-model - it FOLLOWS a backdrop that fades or vignettes towards the
-//                  edges, where the flood key leaves a halo.
-//
-// The chain is flood-key -> border-model and it stops there. There is no AI
-// model to download and no hosted service to call: the remover works offline,
-// needs no key and has no usage limit. That is a product decision, not an
-// implementation detail, so the tests pin that the chain cannot escalate past
-// the two engines.
-//
-// The numbers that decide:
-//
-//   removed      - the fraction of pixels whose ALPHA CHANGED. Never the
-//                  output's total transparency: an already-transparent
-//                  artwork scores 1.0 without a pixel being touched, and a
-//                  solid-colour artwork scores 1.0 because the ARTWORK
-//                  ITSELF was erased.
-//   transparency - the fraction of fully transparent pixels in the output.
+// Auto chain: flood-key -> border-model -> ml (ML is the last resort for busy
+// photos both local engines provably cannot touch). Artwork mode skips ML so
+// white-on-white text survives; Photo mode prefers ML. If the model cannot
+// load the app falls back to the local engines and says so honestly.
 // ---------------------------------------------------------------------------
 
 vi.mock("@/lib/bg-removal/engine", () => ({
   removeBgFloodKey: vi.fn(),
   removeBgBorderModel: vi.fn(),
+  removeBgMlSegmentation: vi.fn(),
 }));
 
 const floodKey = vi.mocked(removeBgFloodKey);
 const borderModel = vi.mocked(removeBgBorderModel);
+const mlSegmentation = vi.mocked(removeBgMlSegmentation);
 
 const INPUT_BLOB = new Blob(["input"], { type: "image/png" });
 const RESULT_BLOB = new Blob(["result"], { type: "image/png" });
@@ -111,18 +102,19 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
 beforeEach(() => {
   floodKey.mockReset();
   borderModel.mockReset();
+  mlSegmentation.mockReset();
   // Defaults so a test that forgets to stub an engine fails with a real
   // removal failure instead of a TypeError.
   floodKey.mockResolvedValue(engineResult(0, 0));
   borderModel.mockResolvedValue(engineResult(0, 0));
+  mlSegmentation.mockResolvedValue(engineResult(0, 0));
 });
 
 describe("the engine module", () => {
-  it("exposes the two local engines and nothing else", () => {
-    // The AI segmenter and the hosted-service path are gone. If either comes
-    // back by accident, this is the test that says so.
+  it("exposes the hybrid engines and no hosted/AGPL path", () => {
     expect(typeof engine.removeBgFloodKey).toBe("function");
     expect(typeof engine.removeBgBorderModel).toBe("function");
+    expect(typeof engine.removeBgMlSegmentation).toBe("function");
     expect("removeBgAI" in engine).toBe(false);
     expect("removeBackground" in engine).toBe(false);
     expect("setBgRemovalProgressCallback" in engine).toBe(false);

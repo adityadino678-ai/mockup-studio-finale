@@ -66,6 +66,8 @@ export default defineConfig({
   },
   vite: {
     plugins: [tailwindcss()],
+    // ML segmentation worker is an ES worker (dynamic onnxruntime-web import).
+    worker: { format: "es" },
     resolve: {
       alias: {
         "@": path.resolve(import.meta.dirname, "./src"),
