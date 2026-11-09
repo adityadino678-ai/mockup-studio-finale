@@ -29,11 +29,11 @@ are NEVER removed.
 - Before: `Photos of your products. Uploaded mockups stay on this device.` → After: `Your product photos.`
 - Added: How-it-works (Upload → Map print area → Save renders).
 
-## Background Remover (`src/views/background-remover-view.tsx`)
+## Background remover (same UI, no new page)
 
-- Header: `Drop cut-outs here. Edges stay sharp at full size.` (8 words, kept).
-- Added: How-it-works (Drop → Choose mode → Download).
-- Upload hint already: `PNG, JPG, WebP · 40 MB max`.
+- No dedicated page (removed per owner request): the engine upgrade runs
+  entirely behind the existing Designs-tab “Remove background” action.
+- Upload hint: `PNG, JPG, WebP · 40 MB max`.
 
 ## Activity (`src/views/activity-page.tsx`)
 

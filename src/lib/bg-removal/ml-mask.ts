@@ -207,9 +207,9 @@ export function applyMaskToPixels(
 }
 
 /**
- * Removes one extra colour globally (the Background Remover page colour-pick
- * tool). Border-connected restriction is NOT applied here: the user explicitly
- * asked to remove this colour everywhere.
+ * Removes one extra colour globally (the colour-pick tool). Border-connected
+ * restriction is NOT applied here: the user explicitly asked to remove this
+ * colour everywhere.
  */
 export function removeExtraColourFromPixels(
   pixels: Uint8ClampedArray,
