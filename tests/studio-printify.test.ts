@@ -100,8 +100,11 @@ describe("colour lightness and ink", () => {
     expect(hexForColourName("Solid White")).toBe("#f9f9f9");
     expect(hexForColourName("Heather Grey")).toBe("#a4a4a3");
     expect(knowsColourName("Solid Navy")).toBe(true);
-    // Unknown names still produce a usable, stable swatch.
-    expect(hexForColourName("Totally Unknown Colour")).toBe("#9ca3af");
+    // Unknown names produce a stable, non-grey smart guess (never plain grey).
+    const smart = hexForColourName("Totally Unknown Colour");
+    expect(smart).not.toBe("#9ca3af");
+    expect(/^#[0-9a-f]{6}$/.test(smart)).toBe(true);
+    expect(hexForColourName("Totally Unknown Colour")).toBe(smart);
   });
 
   it("strips a stacked qualifier so real colours are not left grey", () => {

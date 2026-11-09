@@ -13,10 +13,14 @@ import {
   fetchColourSource,
   fetchProviders,
   fetchVariants,
+  loadCachedColourSource,
+  loadColourOverrides,
+  loadLearnedColours,
+  saveColourOverride,
   type ColourSource,
 } from "@/lib/printify/catalog-client";
 import { emptySession, loadSession, saveSession, ROWS } from "@/lib/printify/studio-session";
-import { hexForColourName, primaryHex } from "@/lib/printify/colors";
+import { primaryHex, resolveColour } from "@/lib/printify/colors";
 import type { CatalogBlueprint, CatalogProvider, CatalogVariant } from "@/lib/printify/types";
 import type { StudioRowId, StudioSession } from "@/types/domain";
 import { Cloud, Layers, Palette, Wand2 } from "lucide-react";
@@ -36,6 +40,8 @@ export interface StudioCatalogState {
   providers: CatalogProvider[];
   variants: CatalogVariant[];
   colourSource: ColourSource | null;
+  colourError?: string;
+  colourLoading?: boolean;
 }
 
 /**
@@ -77,6 +83,29 @@ export function PrintifyStudioPage() {
     variants: [],
     colourSource: null,
   });
+  const [learned, setLearned] = React.useState<Record<string, string>>({});
+  const [overrides, setOverrides] = React.useState<Record<string, string>>({});
+  const [colourRetryTick, setColourRetryTick] = React.useState(0);
+
+  // Learned dictionary + user overrides paint in the same frame as variants.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [l, o] = await Promise.all([loadLearnedColours(), loadColourOverrides()]);
+      if (!cancelled) {
+        setLearned(l);
+        setOverrides(o);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setColourHex = React.useCallback(async (name: string, hex: string) => {
+    await saveColourOverride(name, hex);
+    setOverrides((prev) => ({ ...prev, [name.trim().toLowerCase()]: hex }));
+  }, []);
 
   // --- session ---------------------------------------------------------------
   React.useEffect(() => {
@@ -242,7 +271,12 @@ export function PrintifyStudioPage() {
       // list + product detail) and only affect the swatch shades, not which
       // colours exist. The palette renders from the variants as soon as they
       // land; the real hexes swap in in the background.
-      setCatalog((c) => ({ ...c, variantsLoading: true, colourSource: null }));
+      setCatalog((c) => ({ ...c, variantsLoading: true, colourSource: null, colourError: undefined }));
+      // Instant paint: stale cached hexes + learned/fallback swatches in one frame.
+      const stale = await loadCachedColourSource(blueprintId, printProviderId);
+      if (!cancelled && stale && stale.colors.length > 0) {
+        setCatalog((c) => ({ ...c, colourSource: stale, colourLoading: true }));
+      }
       let variants;
       try {
         variants = await fetchVariants(blueprintId, printProviderId);
@@ -259,15 +293,27 @@ export function PrintifyStudioPage() {
       if (cancelled) return;
       setCatalog((c) => ({ ...c, variants, variantsLoading: false }));
 
-      // Real hexes in the background. They never block the palette, and a
-      // failure here is silent because the curated hex table is the fallback.
-      void fetchColourSource(blueprintId, printProviderId)
-        .catch(() => null)
-        .then((colourSource) => {
-          if (!cancelled && colourSource) {
-            setCatalog((c) => ({ ...c, colourSource }));
+      // Real hexes in the background (stale-while-revalidate). Never silent:
+      // a failure surfaces an inline status with Retry and the swatches stay usable.
+      setCatalog((c) => ({ ...c, colourLoading: true }));
+      try {
+        const source = await fetchColourSource(blueprintId, printProviderId);
+        if (!cancelled) {
+          setCatalog((c) => ({ ...c, colourSource: source, colourLoading: false, colourError: undefined }));
+          if (source.colors.length > 0) {
+            const nextLearned = await loadLearnedColours();
+            setLearned(nextLearned);
           }
-        });
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setCatalog((c) => ({
+            ...c,
+            colourLoading: false,
+            colourError: e instanceof Error ? e.message : "Could not load exact colours",
+          }));
+        }
+      }
 
         // A different print provider offers a different colour and size list.
         // A selection that names colours or sizes the new provider does not
@@ -327,7 +373,7 @@ export function PrintifyStudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [session.blueprintId, session.printProviderId]);
+  }, [session.blueprintId, session.printProviderId, colourRetryTick]);
 
   // --- the colours a row resolves to -----------------------------------------
   const realHexes = React.useMemo(() => {
@@ -338,10 +384,22 @@ export function PrintifyStudioPage() {
     return map;
   }, [catalog.colourSource]);
 
-  const hexFor = React.useCallback(
-    (name: string) => primaryHex(realHexes.get(name), hexForColourName(name)),
-    [realHexes],
+  const resolvedFor = React.useCallback(
+    (name: string) => {
+      const exactArr = realHexes.get(name);
+      const exact = exactArr?.[0];
+      if (exact) {
+        const r = resolveColour(name, { overrides: overrides as Record<string, string>, learned, exactHexes: new Map([[name, exactArr as string[]]]) });
+        if (r.source === "override" || r.source === "learned") return r;
+        return { hex: primaryHex(exactArr), approximate: catalog.colourSource?.approximate === true, source: "exact" as const };
+      }
+      return resolveColour(name, { overrides, learned });
+    },
+    [realHexes, learned, overrides, catalog.colourSource?.approximate],
   );
+
+  const hexFor = React.useCallback((name: string) => resolvedFor(name).hex, [resolvedFor]);
+  const isApprox = React.useCallback((name: string) => resolvedFor(name).approximate, [resolvedFor]);
 
   const swatchesForRow = React.useCallback(
     (row: StudioRowId) =>
@@ -405,6 +463,9 @@ export function PrintifyStudioPage() {
             catalog={catalog}
             hexFor={hexFor}
             realHexes={realHexes}
+            isApprox={isApprox}
+            onSetHex={setColourHex}
+            onRetry={() => setColourRetryTick((n) => n + 1)}
             onGoToPanel={() => setTab("panel")}
           />
         </TabsContent>

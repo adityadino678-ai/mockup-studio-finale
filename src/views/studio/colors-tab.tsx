@@ -39,6 +39,9 @@ interface ColorsTabProps {
   catalog: StudioCatalogState;
   hexFor: (name: string) => string;
   realHexes: Map<string, string[]>;
+  isApprox?: (name: string) => boolean;
+  onSetHex?: (name: string, hex: string) => void | Promise<void>;
+  onRetry?: () => void;
   onGoToPanel: () => void;
 }
 
@@ -60,13 +63,17 @@ export function ColorsTab({
   updateRow,
   catalog,
   hexFor,
-  realHexes,
+  realHexes: _realHexes,
+  isApprox,
+  onSetHex,
+  onRetry,
   onGoToPanel,
 }: ColorsTabProps) {
   const [query, setQuery] = React.useState("");
   const [category, setCategory] = React.useState<string>("All");
   const [picking, setPicking] = React.useState(false);
   const [visibleCount, setVisibleCount] = React.useState(120);
+  const [editingHex, setEditingHex] = React.useState<{ name: string; value: string } | null>(null);
 
   // --- the catalogue ---------------------------------------------------------
   const colourNames = React.useMemo(() => {
@@ -496,11 +503,78 @@ export function ColorsTab({
 
           {/* --- colours, one panel per row --------------------------------- */}
           <div className="space-y-1">
-            <h2 className="text-[14px] font-semibold text-ink">Which colours each row prints</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-[14px] font-semibold text-ink">Which colours each row prints</h2>
+              <span
+                data-colour-status=""
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[12px]",
+                  catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
+                    ? "border-forest/30 bg-surface"
+                    : "border-dashed border-ink-muted/40 bg-surface-muted/50",
+                )}
+              >
+                {catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
+                  ? "Exact colours"
+                  : "Approximate colours"}
+              </span>
+            </div>
             <p className="text-[12px] text-ink-muted">
               Panels are independent. "No ink" designs print their panel; "Has ink" designs print their panel split black/white. A colour in both panels prints with each row's own artwork.
             </p>
+            {catalog.colourError && (
+              <div
+                role="status"
+                data-colour-error=""
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2"
+              >
+                <span className="text-[12px] text-ink-muted">Using approximate colours</span>
+                {onRetry && (
+                  <Button size="sm" variant="outline" onClick={onRetry} disabled={catalog.colourLoading}>
+                    Retry
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
+          {editingHex && (
+            <div
+              role="dialog"
+              aria-label={`Set hex for ${editingHex.name}`}
+              data-hex-editor=""
+              className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2"
+            >
+              <span className="text-[12px] text-ink">
+                {editingHex.name}
+              </span>
+              <input
+                type="color"
+                aria-label={`Colour picker for ${editingHex.name}`}
+                value={editingHex.value.startsWith("#") && editingHex.value.length === 7 ? editingHex.value : "#000000"}
+                onChange={(e) => setEditingHex((h) => (h ? { ...h, value: e.target.value } : h))}
+                className="h-8 w-10 cursor-pointer"
+              />
+              <Input
+                value={editingHex.value}
+                onChange={(e) => setEditingHex((h) => (h ? { ...h, value: e.target.value } : h))}
+                aria-label={`Hex value for ${editingHex.name}`}
+                className="h-8 w-28 text-[12px]"
+                placeholder="#000000"
+              />
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (onSetHex && editingHex.value.trim()) void onSetHex(editingHex.name, editingHex.value.trim());
+                  setEditingHex(null);
+                }}
+              >
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditingHex(null)}>
+                Cancel
+              </Button>
+            </div>
+          )}
           {ROWS.map((row) => {
             const state = session.rows[row];
             const swatchCount = rowVariantCount(row);
@@ -573,6 +647,7 @@ export function ColorsTab({
                       {colourNames.map((name) => {
                         const selected = state?.colors.includes(name) ?? false;
                         const hex = hexFor(name);
+                        const approx = isApprox ? isApprox(name) : false;
                         const isBlack = state?.blackInkColors.includes(name) ?? false;
                         const isWhite = state?.whiteInkColors.includes(name) ?? false;
                         return (
@@ -580,11 +655,12 @@ export function ColorsTab({
                             {/* The same handler for every swatch: the colour is
                                 read from `data-colour`, so the props stay
                                 stable and only the swatch that changed
-                                re-renders. */}
+                                re-renders. Right-click sets a custom hex. */}
                             <ColorSwatch
                               name={name}
                               hex={hex}
                               selected={selected}
+                              approximate={approx}
                               showInk={row === "ink" && selected}
                               ink={
                                 row === "ink"
@@ -596,6 +672,10 @@ export function ColorsTab({
                                   : undefined
                               }
                               onClick={handleSwatchClick}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setEditingHex({ name, value: hex });
+                              }}
                               className="h-7 w-7"
                             />
                           </div>
@@ -692,8 +772,17 @@ export function ColorsTab({
                         )}
                       >
                         <span className="flex min-w-[130px] flex-1 items-center gap-2">
-                          <ColorSwatch name={name} hex={hexFor(name)} className="h-5 w-5" />
+                          <ColorSwatch name={name} hex={hexFor(name)} approximate={isApprox ? isApprox(name) : false} className="h-5 w-5" />
                           <span className="truncate text-[13px] text-ink">{name}</span>
+                          {onSetHex && (
+                            <input
+                              type="color"
+                              aria-label={`Set hex for ${name}`}
+                              value={hexFor(name).startsWith("#") && hexFor(name).length === 7 ? hexFor(name) : "#000000"}
+                              onChange={(e) => void onSetHex(name, e.target.value)}
+                              className="h-6 w-8 shrink-0 cursor-pointer"
+                            />
+                          )}
                         </span>
                         <span className="flex items-center">
                           <Button
@@ -810,9 +899,9 @@ export function ColorsTab({
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
             <p className="text-[12px] text-ink-muted">
-              {realHexes.size > 0
+              {catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
                 ? "Colours use the real hexes from your Printify product."
-                : "No existing product found for this colourway — showing the built-in colour table."}
+                : "Approximate colours — right-click a swatch to set the exact hex."}
             </p>
             <Button size="sm" onClick={onGoToPanel}>
               <Palette className="h-3.5 w-3.5" /> Place the artwork

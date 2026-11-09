@@ -21,9 +21,12 @@ const BLUEPRINTS_TTL = 24 * 60 * 60 * 1000;
 const PROVIDERS_TTL = 24 * 60 * 60 * 1000;
 const VARIANTS_TTL = 24 * 60 * 60 * 1000;
 /** Colour hexes come from one of the seller's own products, so they can
- * change when a template product changes. An hour keeps them current without
- * paying three Printify round trips on every provider switch. */
-const COLOURS_TTL = 60 * 60 * 1000;
+ * change when a template product changes. Seven days with stale-while-revalidate:
+ * the cached value paints instantly and the network only refreshes in the
+ * background, so a second visit makes no network call until the TTL expires. */
+const COLOURS_TTL = 7 * 24 * 60 * 60 * 1000;
+const LEARNED_KEY = "printifyStudio:colourLearned";
+const OVERRIDES_KEY = "printifyStudio:colourOverrides";
 
 interface Cached<T> {
   at: number;
@@ -46,6 +49,68 @@ async function writeCache<T>(key: string, data: T): Promise<void> {
     await setSetting(key, { at: Date.now(), data } satisfies Cached<T>);
   } catch {
     // A catalogue cache is an optimisation; it must never fail the request.
+  }
+}
+
+/** Reads a cached value of any age (stale-while-revalidate paint). */
+async function readAnyAge<T>(key: string): Promise<T | null> {
+  try {
+    const cached = await getSetting<Cached<T> | null>(key, null);
+    if (!cached || !("data" in cached)) return null;
+    return cached.data;
+  } catch {
+    return null;
+  }
+}
+
+/** Learned name->hex dictionary: every real hex ever read persists here. */
+export async function loadLearnedColours(): Promise<Record<string, string>> {
+  try {
+    const stored = await getSetting<Record<string, string> | null>(LEARNED_KEY, null);
+    return stored && typeof stored === "object" ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function mergeLearnedColours(entries: Record<string, string>): Promise<void> {
+  if (Object.keys(entries).length === 0) return;
+  try {
+    const current = await loadLearnedColours();
+    const next = { ...current, ...entries };
+    await setSetting(LEARNED_KEY, next);
+  } catch {
+    // Optimisation only; never fail the palette.
+  }
+}
+
+/** One background indexing pass over a product's hexes for many blueprints. */
+export async function harvestLearnedFromSource(source: {
+  colors?: Array<{ title?: string; colors?: string[] }>;
+}): Promise<void> {
+  const { harvestLearnedColours } = await import("./colors");
+  await mergeLearnedColours(harvestLearnedColours(source.colors ?? []));
+}
+
+export async function loadColourOverrides(): Promise<Record<string, string>> {
+  try {
+    const stored = await getSetting<Record<string, string> | null>(OVERRIDES_KEY, null);
+    return stored && typeof stored === "object" ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function saveColourOverride(name: string, hex: string): Promise<void> {
+  const key = name.trim().toLowerCase();
+  if (!key) return;
+  const { normaliseHex } = await import("./colors");
+  const current = await loadColourOverrides();
+  current[key] = normaliseHex(hex);
+  try {
+    await setSetting(OVERRIDES_KEY, current);
+  } catch {
+    void 0;
   }
 }
 
@@ -176,10 +241,20 @@ export interface ProductVariantRow {
 export interface ColourSource {
   /** "product" when real hexes were found, "none" when they were not. */
   source: "product" | "none";
+  /** True when the hexes came from the same blueprint but another provider. */
+  approximate?: boolean;
   templateProductId?: string;
   colors: ColourValue[];
   sizes: SizeValue[];
   variants: ProductVariantRow[];
+}
+
+/** Any-age cached colour source for instant stale-while-revalidate paint. */
+export async function loadCachedColourSource(
+  blueprintId: number,
+  providerId: number,
+): Promise<ColourSource | null> {
+  return readAnyAge<ColourSource>(coloursKey(blueprintId, providerId));
 }
 
 /**
@@ -190,9 +265,10 @@ export interface ColourSource {
  * provider. When there is none, the caller falls back to the curated table.
  *
  * This is three Printify round trips (shops, product list, product detail), so
- * it is cached per blueprint + provider and must never block the colour names:
- * the palette renders from the variants first and swaps in the real hexes when
- * this resolves.
+ * it is cached per blueprint + provider for 7 days and must never block the
+ * colour names: the palette renders from the variants first and swaps in the
+ * real hexes when this resolves. Every real hex is also harvested into the
+ * learned dictionary so one indexing pass serves many blueprints.
  */
 export async function fetchColourSource(
   blueprintId: number,
@@ -211,12 +287,17 @@ export async function fetchColourSource(
     if (!res.ok) throw new Error(data.error ?? "Could not read the product colours");
     const source: ColourSource = {
       source: data.source ?? "none",
+      approximate: data.approximate === true,
       templateProductId: data.templateProductId,
       colors: Array.isArray(data.colors) ? data.colors : [],
       sizes: Array.isArray(data.sizes) ? data.sizes : [],
       variants: Array.isArray(data.variants) ? data.variants : [],
     };
     await writeCache(coloursKey(blueprintId, providerId), source);
+    if (source.source === "product" && source.colors.length > 0) {
+      // Background harvest: one product teaches many blueprints.
+      void harvestLearnedFromSource(source).catch(() => undefined);
+    }
     return source;
   });
 }
