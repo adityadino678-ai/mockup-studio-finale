@@ -706,11 +706,21 @@ removes isolated opaque specks and fills pinholes; fully transparent pixels are
 never recoloured and opaque interior detail is never treated as edge. It adds
 no model, key, upload or network call.
 
-**There is deliberately no AI engine and no hosted service.** This was the
-user's decision: one remover that works, unlimited, with no key, no account
-and no upload. Do not re-add an AI model or a `BG_REMOVE_API_KEY` path. A busy
-photographic background is out of scope, and the error message says so
-instead of quietly escalating to something that costs money.
+**There is no hosted service and no per-image cost.** The remover stays
+unlimited, with no key, no account and no upload. An in-browser ML
+segmentation engine (`onnxruntime-web` + U2Netp/U-2-Net, both MIT) was added
+on explicit owner direction (2026-11-09, ListBulkly fixes, Problem 2) — see
+`docs/bg-removal-model.md` for the licence check and `src/lib/printify/
+remove-background.ts` for the hybrid decision. It lazy-downloads its model
+and falls back honestly to the two local engines when it cannot load. The
+local-only engines were the earlier user decision and remain untouched;
+never re-add a hosted `BG_REMOVE_API_KEY` path, and never add
+non-commercially-licensed weights (e.g. BRIA RMBG) or AGPL packages (e.g.
+`@imgly/background-removal`). A busy photographic background is handled by
+the ML engine when it can load; when it cannot, the error message says so
+instead of quietly escalating to something that costs money. There is no
+standalone remover page: the engine runs behind the existing Designs-tab
+"Remove background" actions only.
 
 **Every entry point must use `removeBackgroundAuto`.** The Designs page's dialog
 (removed with the page) used to call the old `removeBackground()` directly, which
@@ -1444,10 +1454,13 @@ position pickers here:
   registration. Settings shows the keystring card **enabled** with a Test
   research button; the card says read-only and never implies that research is a
   search-volume or sales report.
-- **Background removal is local and deliberately limited.** It handles a
-  solid or faded backdrop; a busy photographic background has to be cut out
-  before upload. There is no AI model and no hosted service, so there is
-  nothing to configure and no usage limit.
+- **Background removal is local-first and honest about its limits.** Two
+  local engines (flood-key, border-model) handle a solid or faded backdrop.
+  An optional ML segmentation engine (onnxruntime-web + U2Netp/U-2-Net, MIT,
+  owner-approved 2026-11-09, `docs/bg-removal-model.md`) covers busy
+  photographic backgrounds; its model is lazy-downloaded to Cache Storage
+  and every fallback states why. No hosted service, no per-image cost, no
+  key, no usage limit.
 
 ## Git
 
