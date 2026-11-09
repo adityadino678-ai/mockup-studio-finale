@@ -15,12 +15,15 @@ interface ColorSwatchProps {
   ink?: SwatchInk;
   /** Show the ink letter on the swatch. */
   showInk?: boolean;
+  /** True when the hex was guessed/curated rather than read from a product. */
+  approximate?: boolean;
   /**
    * The click handler. It is the SAME function for every swatch in a grid -
    * each swatch carries its colour in `data-colour` - so the memo below can
    * skip the ones that did not change.
    */
   onClick?: React.MouseEventHandler<HTMLElement>;
+  onContextMenu?: React.MouseEventHandler<HTMLElement>;
   className?: string;
 }
 
@@ -50,24 +53,28 @@ export const ColorSwatch = React.memo(function ColorSwatch({
   selected = false,
   ink,
   showInk = false,
+  approximate = false,
   onClick,
+  onContextMenu,
   className,
 }: ColorSwatchProps) {
   const isWhite = hex.toLowerCase() === "#ffffff" || hex.toLowerCase() === "#f9f9f9";
   const inkLabel = ink ? INK_LABEL[ink] : "";
   // "needs an ink choice" is a state, not a printed ink, so it must not read
   // as "printed with the needs an ink choice".
-  const accessibleName =
+  const baseName =
     showInk && ink
       ? ink === "ambiguous"
         ? `${name}, ${hex}, ${inkLabel}`
         : `${name}, ${hex}, printed with the ${inkLabel}`
       : `${name}, ${hex}`;
+  const accessibleName = approximate ? `${baseName}, approximate colour` : baseName;
 
   const content = (
     <>
       <span
         aria-hidden
+        data-approximate={approximate || undefined}
         className="block h-full w-full rounded-full"
         style={{
           backgroundColor: hex,
@@ -80,7 +87,7 @@ export const ColorSwatch = React.memo(function ColorSwatch({
           <span
             aria-hidden
             className={cn(
-              "absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ring-2 ring-surface",
+              "absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ring-2 ring-surface",
               ink === "ambiguous" ? "bg-warning text-white" : "bg-forest text-white",
             )}
           >
@@ -95,13 +102,20 @@ export const ColorSwatch = React.memo(function ColorSwatch({
 
   const base =
     "relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full ring-offset-2 transition-shadow";
+  // Approximate hexes (curated/smart) get a dashed ring so they never look exact.
+  const approxRing = approximate ? "outline-dashed outline-1 outline-offset-1 outline-ink-muted" : "";
   const ring = selected
     ? "ring-2 ring-forest"
     : "ring-1 ring-ink-muted hover:ring-forest";
 
   if (!onClick) {
     return (
-      <span className={cn(base, ring, className)} title={accessibleName} data-colour={name}>
+      <span
+        className={cn(base, ring, approxRing, className)}
+        title={accessibleName}
+        data-colour={name}
+        data-approximate={approximate || undefined}
+      >
         {content}
       </span>
     );
@@ -111,11 +125,13 @@ export const ColorSwatch = React.memo(function ColorSwatch({
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       aria-pressed={selected}
       aria-label={accessibleName}
       title={accessibleName}
       data-colour={name}
-      className={cn(base, ring, "cursor-pointer", className)}
+      data-approximate={approximate || undefined}
+      className={cn(base, ring, approxRing, "cursor-pointer", className)}
     >
       {content}
     </button>

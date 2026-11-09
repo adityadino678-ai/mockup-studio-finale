@@ -289,7 +289,30 @@ export interface UploadMockupResult {
   error?: string;
 }
 
-export async function createMockupFromFile(file: File, category: MockupCategory = "other"): Promise<UploadMockupResult> {
+export interface UploadMockupOptions {
+  /** The main category the mockup belongs to. */
+  category?: MockupCategory;
+  /**
+   * What the row IS. Absent means a product photo, so every existing caller
+   * keeps its meaning. An info card is a fixed information image that never
+   * becomes a Printify mockup.
+   */
+  kind?: Mockup["kind"];
+  /** The user-created named template inside the main category. */
+  subCategory?: string;
+  /** The info card's place among the other info cards of its category. */
+  infoCardOrder?: number;
+}
+
+export async function createMockupFromFile(
+  file: File,
+  options: MockupCategory | UploadMockupOptions = "other",
+): Promise<UploadMockupResult> {
+  // The old signature took a bare category; both are accepted so no caller
+  // has to change at once.
+  const opts: UploadMockupOptions =
+    typeof options === "string" ? { category: options } : options;
+  const category = opts.category ?? "other";
   const validation = validateImageFile(file);
   if (!validation.ok) {
     return { error: validation.error };
@@ -312,6 +335,9 @@ export async function createMockupFromFile(file: File, category: MockupCategory 
     source: "user",
     createdAt: Date.now(),
   };
+  if (opts.kind) mockup.kind = opts.kind;
+  if (opts.subCategory) mockup.subCategory = opts.subCategory;
+  if (opts.infoCardOrder !== undefined) mockup.infoCardOrder = opts.infoCardOrder;
   await db.mockups.put(mockup);
   await logActivity("mockup.upload", `Uploaded mockup "${mockup.name}" (${meta.width}×${meta.height})`);
   return { mockup };
@@ -319,7 +345,19 @@ export async function createMockupFromFile(file: File, category: MockupCategory 
 
 export async function updateMockup(
   mockupId: string,
-  patch: Partial<Pick<Mockup, "name" | "category" | "tags" | "favorite" | "printArea">>,
+  patch: Partial<
+    Pick<
+      Mockup,
+      | "name"
+      | "category"
+      | "tags"
+      | "favorite"
+      | "printArea"
+      | "kind"
+      | "subCategory"
+      | "infoCardOrder"
+    >
+  >,
 ): Promise<void> {
   const mockup = await db.mockups.get(mockupId);
   if (!mockup) return;

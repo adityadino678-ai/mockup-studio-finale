@@ -104,22 +104,19 @@ export function ExportCenterPage() {
   const busy = phase === "collecting" || phase === "packing" || phase === "verifying";
 
   return (
-    <div className="mx-auto max-w-5xl p-8">
-      <PageHeader
-        title="Export Center"
-        description="Download your work as an organized ZIP archive with a manifest."
-      />
+    <div className="mx-auto max-w-5xl p-5 sm:p-8">
+      <PageHeader title="Export Center" description="Download organized ZIP archives." />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
         <Card>
           <CardHeader>
-            <CardTitle className="text-[14px]">Designs to export</CardTitle>
+            <CardTitle className="text-sm">Designs to export</CardTitle>
           </CardHeader>
           <CardContent>
             {!designs ? (
               <div className="h-20 animate-pulse rounded-md bg-surface-muted" />
             ) : designs.length === 0 ? (
-              <p className="py-4 text-center text-[13px] text-ink-muted">
+              <p className="py-4 text-center text-sm text-ink-muted">
                 Upload designs first — exports are organized per design.
               </p>
             ) : (
@@ -130,8 +127,8 @@ export function ExportCenterPage() {
                       <Checkbox checked={selectedIds.includes(d.id)} onCheckedChange={() => toggle(d.id)} />
                       <AssetThumb assetId={designMainAssetId(d)} className="h-11 w-11 shrink-0 rounded-md" checkerboard />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[13px] font-medium text-ink">{d.name}</div>
-                        <div className="text-[11px] text-ink-subtle">
+                        <div className="truncate text-sm font-medium text-ink">{d.name}</div>
+                        <div className="text-xs text-ink-muted">
                           {d.whiteInkAssetId ? "white ink " : ""}
                           {d.blackInkAssetId ? "black ink " : ""}
                           {!d.whiteInkAssetId && !d.blackInkAssetId ? "no ink variants" : ""}
@@ -140,7 +137,7 @@ export function ExportCenterPage() {
                     </label>
                   ))}
                 </div>
-                <div className="mt-2 flex gap-2 text-[12px]">
+                <div className="mt-2 flex gap-2 text-xs">
                   <Button variant="ghost" size="sm" onClick={() => setSelectedIds(designs.map((d) => d.id))}>
                     Select all
                   </Button>
@@ -155,7 +152,7 @@ export function ExportCenterPage() {
 
         <Card className="h-fit">
           <CardHeader>
-            <CardTitle className="text-[14px]">Include</CardTitle>
+            <CardTitle className="text-sm">Include</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2.5">
             {(
@@ -167,7 +164,7 @@ export function ExportCenterPage() {
                 ["includeListings", "Listing text + JSON"],
               ] as const
             ).map(([key, label]) => (
-              <label key={key} className="flex cursor-pointer items-center justify-between gap-2 text-[13px]">
+              <label key={key} className="flex cursor-pointer items-center justify-between gap-2 text-sm">
                 <span>{label}</span>
                 <Checkbox checked={opts[key]} onCheckedChange={(v) => setOpts((o) => ({ ...o, [key]: !!v }))} />
               </label>
@@ -186,19 +183,19 @@ export function ExportCenterPage() {
             {busy && (
               <div className="space-y-1">
                 <Progress value={progressInfo.total ? (progressInfo.done / progressInfo.total) * 100 : 0} />
-                <div className="truncate text-[11px] text-ink-subtle">
+                <div className="truncate text-xs text-ink-muted">
                   {progressInfo.current || `${progressInfo.done} of ${progressInfo.total}`}
                 </div>
               </div>
             )}
             {lastResult && (
               <div className="space-y-2 rounded-md border border-border-subtle p-2.5">
-                <div className="text-[13px] font-medium text-ink">{lastResult.files} files verified</div>
+                <div className="text-sm font-medium text-ink">{lastResult.files} files verified</div>
                 {lastResult.errors.length > 0 && (
-                  <div className="text-[12px] text-danger">{lastResult.errors.join(" ")}</div>
+                  <div className="text-xs text-danger">{lastResult.errors.join(" ")}</div>
                 )}
                 {lastResult.missing.length > 0 && (
-                  <div className="text-[12px] text-warning">
+                  <div className="text-xs text-warning">
                     {lastResult.missing.length} missing: {lastResult.missing.slice(0, 2).join(", ")}
                     {lastResult.missing.length > 2 ? "…" : ""}
                   </div>
@@ -215,7 +212,7 @@ export function ExportCenterPage() {
       <h2 className="mb-3 mt-8 text-[15px] font-semibold text-ink">Structure</h2>
       <Card>
         <CardContent className="pt-4">
-          <pre className="overflow-x-auto text-[12px] leading-relaxed text-ink-muted">{`MockupStudio_Export/
+          <pre className="overflow-x-auto text-xs leading-relaxed text-ink-muted">{`MockupStudio_Export/
 ├── manifest.json
 ├── Design_A/
 │   ├── original.png
@@ -247,13 +244,13 @@ export function ExportCenterPage() {
                     {job.status}
                   </Badge>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-ink">{job.name}</div>
-                    <div className="text-[11px] text-ink-subtle">
+                    <div className="truncate text-sm text-ink">{job.name}</div>
+                    <div className="text-xs text-ink-muted">
                       {formatDateTime(job.createdAt)} · {job.selection.designIds.length} designs
                       {job.missingAssets.length > 0 && ` · ${job.missingAssets.length} missing`}
                     </div>
                     {job.error && (
-                      <div className="flex items-center gap-1 text-[11px] text-danger">
+                      <div className="flex items-center gap-1 text-xs text-danger">
                         <TriangleAlert className="h-3 w-3" /> {job.error}
                       </div>
                     )}

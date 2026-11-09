@@ -47,6 +47,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import { Link, navigate } from "@/lib/client/nav";
+import { publishActiveListing } from "@/lib/client/agent-context";
 import { AssetThumb } from "@/components/asset-thumb";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent } from "@/components/ui/card";
@@ -336,6 +337,17 @@ export function ListingDetailsView() {
     [listings, activeId],
   );
   const openKey = applyAll ? BATCH_KEY : (openListing?.listingId ?? BATCH_KEY);
+
+  // Tell the agent panel which listing is open. The panel is mounted in the
+  // app shell, so it cannot read this page's state directly.
+  React.useEffect(() => {
+    publishActiveListing(
+      openListing
+        ? { listingId: openListing.listingId, designName: openListing.designName }
+        : undefined,
+    );
+    return () => publishActiveListing(undefined);
+  }, [openListing]);
 
   // --- the forms -------------------------------------------------------------
   /**
@@ -697,7 +709,7 @@ export function ListingDetailsView() {
   if (!loaded || designs === undefined || drafts === undefined) {
     return (
       <div className="mx-auto max-w-6xl p-8">
-        <p className="text-[13px] text-ink-muted">Loading the studio session…</p>
+        <p className="text-sm text-ink-muted">Loading the studio session…</p>
       </div>
     );
   }
@@ -708,7 +720,7 @@ export function ListingDetailsView() {
         <EmptyState
           icon={<Tags />}
           title="No listings to fill in"
-          description="Tick the designs this batch should create on the Designs tab of the Printify Studio. Each design becomes one listing; a pair becomes one listing shared by both designs."
+          description="Tick designs in Studio."
           actions={[
             { label: "Go to Designs", onClick: () => navigate("/printify-studio") },
           ]}
@@ -718,7 +730,7 @@ export function ListingDetailsView() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-8">
+    <div className="mx-auto max-w-6xl space-y-5 p-5 sm:p-8">
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -726,7 +738,7 @@ export function ListingDetailsView() {
               <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
                 <Tags className="h-4 w-4 text-forest" /> Listing details
               </h2>
-              <p className="text-[12px] text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 One listing per design — a pair is one listing. Fill each design's details on its
                 numbered tab, or flip “Apply to every design” to write them all at once.
               </p>
@@ -771,7 +783,7 @@ export function ListingDetailsView() {
                 onClick={() => selectListing(listing.listingId)}
                 title={listing.designName}
                 aria-label={listing.designName}
-                className={`border-b-2 px-2.5 py-1 text-[12px] font-semibold transition-colors ${
+                className={`border-b-2 px-2.5 py-1 text-xs font-semibold transition-colors ${
                   active
                     ? "border-forest text-forest"
                     : "border-transparent text-ink-muted hover:text-ink"
@@ -788,7 +800,7 @@ export function ListingDetailsView() {
       </div>
 
       {unscopedCount > 0 && (
-        <p className="text-[11px] text-ink-subtle">
+        <p className="text-xs text-ink-muted">
           {unscopedCount} design{unscopedCount === 1 ? "" : "s"} in the library{" "}
           {unscopedCount === 1 ? "is" : "are"} not in this batch.{" "}
           <Link href="/printify-studio" className="text-forest underline">
@@ -810,7 +822,7 @@ export function ListingDetailsView() {
                 alt={openListing.designName}
               />
             </div>
-            <p className="truncate text-[12px] font-medium text-ink" title={openListing.designName}>
+            <p className="truncate text-xs font-medium text-ink" title={openListing.designName}>
               {openListing.designName}
             </p>
             <div className="flex flex-wrap gap-1">
@@ -828,14 +840,14 @@ export function ListingDetailsView() {
           {/* The tabs show numbers, so this line is the only place the open
               design's name is spelled out - the same convention as the
               Mockups panel's context line above its canvas. */}
-          <p className="text-[12px] text-ink-subtle">
+          <p className="text-xs text-ink-muted">
             {openListing.designName}
             {openListing.partnerName ? ` · one listing with ${openListing.partnerName}` : ""}
           </p>
 
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-2 text-[12px] font-medium text-ink">
+              <label className="flex items-center gap-2 text-xs font-medium text-ink">
                 Apply to every design
                 <Switch
                   checked={applyAll}
@@ -844,19 +856,19 @@ export function ListingDetailsView() {
                 />
               </label>
               {applyAll && (
-                <span className="text-[11px] text-forest">
+                <span className="text-xs text-forest">
                   applies to all {listings.length} design{listings.length === 1 ? "" : "s"}
                 </span>
               )}
             </div>
             {applyAll ? (
-              <p className="rounded-md bg-surface-muted px-3 py-2 text-[11px] text-ink-muted">
+              <p className="rounded-md bg-surface-muted px-3 py-2 text-xs text-ink-muted">
                 These fields edit the batch templates. Saving writes them to every listing draft and
                 updates the session, so designs ticked later inherit them. Prices follow the
                 fixed/custom rule below — per-design price overrides are replaced.
               </p>
             ) : (
-              <p className="text-[11px] text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 Editing <strong>{openListing.designName}</strong> only — the other designs keep
                 their own details.
               </p>
@@ -873,7 +885,7 @@ export function ListingDetailsView() {
               maxLength={140}
             />
             {applyAll ? (
-              <p className="text-[11px] text-ink-subtle">
+              <p className="text-xs text-ink-muted">
                 Up to 140 characters.{" "}
                 <code className="rounded bg-surface-muted px-1">{"{design}"}</code> and{" "}
                 <code className="rounded bg-surface-muted px-1">{"{product}"}</code> are replaced per
@@ -883,7 +895,7 @@ export function ListingDetailsView() {
                 </span>
               </p>
             ) : (
-              <p className="text-[11px] text-ink-subtle">
+              <p className="text-xs text-ink-muted">
                 Up to 140 characters. Saved with this design's listing draft.
               </p>
             )}
@@ -908,7 +920,7 @@ export function ListingDetailsView() {
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <FieldLabel htmlFor="listing-tags">Tags</FieldLabel>
-              <span className="text-[11px] text-ink-subtle">
+              <span className="text-xs text-ink-muted">
                 {tags.length}/{MAX_TAGS}
               </span>
             </div>
@@ -925,7 +937,7 @@ export function ListingDetailsView() {
                 </Badge>
               ))}
             </div>
-            <p className="text-[11px] text-ink-subtle">
+            <p className="text-xs text-ink-muted">
               Comma separated. Duplicates are removed and each tag is capped at 20 characters.
             </p>
           </div>
@@ -936,7 +948,7 @@ export function ListingDetailsView() {
                 <>
                   <div className="flex items-center justify-between gap-2">
                     <FieldLabel htmlFor="listing-price">Price</FieldLabel>
-                    <label className="flex items-center gap-2 text-[11px] text-ink-muted">
+                    <label className="flex items-center gap-2 text-xs text-ink-muted">
                       Custom per listing
                       <Switch
                         checked={shown.priceMode === "custom"}
@@ -957,7 +969,7 @@ export function ListingDetailsView() {
                         placeholder="24.99"
                         aria-label="Fixed price in dollars"
                       />
-                      <p className="text-[11px] text-ink-subtle">
+                      <p className="text-xs text-ink-muted">
                         Applied to every variant of every listing. Printify takes cents.
                       </p>
                     </div>
@@ -965,7 +977,7 @@ export function ListingDetailsView() {
                     <div className="space-y-2 rounded-md border border-border-subtle p-2">
                       {listings.map((listing) => (
                         <div key={listing.listingId} className="flex items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
+                          <span className="min-w-0 flex-1 truncate text-xs text-ink">
                             {listing.designName}
                           </span>
                           <div className="w-24">
@@ -1002,7 +1014,7 @@ export function ListingDetailsView() {
                     placeholder="24.99"
                     aria-label="Price for this listing in dollars"
                   />
-                  <p className="text-[11px] text-ink-subtle">
+                  <p className="text-xs text-ink-muted">
                     Applied to every variant of this listing's product. Printify takes cents.
                   </p>
                 </div>
@@ -1012,12 +1024,12 @@ export function ListingDetailsView() {
             <div className="space-y-3">
               <button
                 type="button"
-                className="flex w-full items-center justify-between rounded-md border border-border-subtle px-3 py-2 text-left text-[12px] font-medium text-ink hover:bg-surface-muted"
+                className="flex w-full items-center justify-between rounded-md border border-border-subtle px-3 py-2 text-left text-xs font-medium text-ink hover:bg-surface-muted"
                 onClick={() => setAdvanced((value) => !value)}
                 aria-expanded={advanced}
               >
                 Advanced: category and quantity
-                <span className="text-[11px] text-ink-subtle">{advanced ? "Hide" : "Show"}</span>
+                <span className="text-xs text-ink-muted">{advanced ? "Hide" : "Show"}</span>
               </button>
               {advanced && (
                 <div className="space-y-3 rounded-md border border-border-subtle p-3">
@@ -1043,7 +1055,7 @@ export function ListingDetailsView() {
                 </div>
               )}
               {noImages.length > 0 && (
-                <div className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
+                <div className="rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
                   {noImages.length} listing{noImages.length === 1 ? "" : "s"} ha
                   {noImages.length === 1 ? "s" : "ve"} no images selected.{" "}
                   <Link href="/listing-images" className="underline">
@@ -1053,7 +1065,7 @@ export function ListingDetailsView() {
                 </div>
               )}
               {pendingRenders.length > 0 && (
-                <div className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
+                <div className="rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
                   {pendingRenders.length} listing{pendingRenders.length === 1 ? "" : "s"} ha
                   {pendingRenders.length === 1 ? "s" : "ve"} selected images without a stored
                   render.{" "}
@@ -1067,7 +1079,7 @@ export function ListingDetailsView() {
           </div>
 
           {!applyAll && (
-            <p className="text-[11px] text-ink-subtle">
+            <p className="text-xs text-ink-muted">
               Saved to this design's listing draft — the Export Center reads it. New Printify
               products are created from the batch copy, so flip on “Apply to every design” to change
               what they get.
@@ -1077,10 +1089,10 @@ export function ListingDetailsView() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface-muted/50 px-3 py-2">
-        <p className="text-[11px] text-ink-muted">
+        <p className="text-xs text-ink-muted">
           {applyAll
-            ? "Saving updates the batch templates and every local listing draft; existing Printify products are not changed until you create or update them."
-            : "Saving writes this design's listing draft and its price rule; the other designs' drafts are not touched."}
+            ? "Saving writes the batch templates and every listing draft; Printify products change only on Send/Publish."
+            : "Saving writes this design's draft and price; other drafts are untouched."}
         </p>
         <Button size="sm" onClick={() => void save()} disabled={saving}>
           {saving ? (

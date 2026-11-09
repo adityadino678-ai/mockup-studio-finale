@@ -333,6 +333,9 @@ export async function loadSession(): Promise<StudioSession> {
         : 1,
     listingImages: imageSelectionRecord(stored.listingImages),
     listingImageCleared: clearedRecord(stored.listingImageCleared),
+    // The GLOBAL image order. It is a plain list of mockup ids; duplicates are
+    // dropped, because a repeated id would make the sort ambiguous.
+    listingImageOrder: [...new Set(stringArray(stored.listingImageOrder))],
     listingRenders: renderRecord(stored.listingRenders),
     listingMockupsApplied: appliedMockupRecord(stored.listingMockupsApplied),
     // UI memory for the Mockups panel's per-design tabs. A non-empty string
@@ -488,9 +491,62 @@ export function priceForListing(session: StudioSession, listingId: string): numb
   return fixed;
 }
 
-/** The selected mockup ids for a listing, in click order. */
+/**
+ * Applies the GLOBAL image order to a list of mockup ids.
+ *
+ * One order is shared by every listing, so the main photograph is the same on
+ * every product in the batch. The rule is deliberately simple:
+ *
+ *  - a mockup that IS in the order comes first, in that order;
+ *  - a mockup that is NOT in the order (a newly uploaded one, or one added
+ *    while the order was already set) comes last, keeping its own order.
+ *
+ * Ids the caller did not pass are ignored, so an excluded mockup is skipped
+ * rather than reserving a slot.
+ */
+export function applyGlobalOrder(session: StudioSession, ids: string[]): string[] {
+  const order = session.listingImageOrder;
+  if (!order || order.length === 0) return ids;
+  const rank = new Map<string, number>();
+  order.forEach((id, index) => {
+    if (!rank.has(id)) rank.set(id, index);
+  });
+  const known: string[] = [];
+  const unknown: string[] = [];
+  for (const id of ids) {
+    if (rank.has(id)) known.push(id);
+    else unknown.push(id);
+  }
+  known.sort((a, b) => (rank.get(a) as number) - (rank.get(b) as number));
+  return [...known, ...unknown];
+}
+
+/**
+ * Writes a new global order.
+ *
+ * The dragged list only holds the mockups the user can see, so the ids that
+ * were not in it keep their previous relative positions at the end - a mockup
+ * that is hidden in one row (for example an info card, or a row that filters
+ * the library) must not lose its slot.
+ */
+export function mergeGlobalOrder(
+  session: StudioSession,
+  dragged: string[],
+): string[] {
+  const previous = session.listingImageOrder ?? [];
+  const draggedSet = new Set(dragged);
+  const rest = previous.filter((id) => !draggedSet.has(id));
+  return [...dragged, ...rest];
+}
+
+/**
+ * The selected mockup ids for a listing, in the GLOBAL order.
+ *
+ * `session.listingImages` says WHICH mockups a listing uses; the global order
+ * says in what order they go. The first id is the main image.
+ */
 export function listingMockupIds(session: StudioSession, listingId: string): string[] {
-  return session.listingImages?.[listingId] ?? [];
+  return applyGlobalOrder(session, session.listingImages?.[listingId] ?? []);
 }
 
 /**

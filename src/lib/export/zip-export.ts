@@ -2,7 +2,8 @@ import { unzip, zip, type Zippable } from "fflate";
 import { db } from "@/lib/db/schema";
 import { designMainAssetId, getAssetBlob } from "@/lib/db/repo";
 import { sanitizeFilename } from "@/lib/image/image";
-import { loadSession } from "@/lib/printify/studio-session";
+import { applyGlobalOrder, loadSession, listingMockupIds } from "@/lib/printify/studio-session";
+import { infoCardsForListing, productMockups } from "@/lib/mockups/info-cards";
 import type { Design, ExportJob, ExportSelection, ListingDraft, Mockup } from "@/types/domain";
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,8 @@ export async function buildExportArchive(
     ownerByDesign.set(pair.blackInkDesignId, pair.blackInkDesignId);
     ownerByDesign.set(pair.whiteInkDesignId, pair.blackInkDesignId);
   }
+  // Cards live in the same table; one read is enough for the whole archive.
+  const allMockups = await db.mockups.toArray();
   const files: Zippable = {};
   const missingAssets: string[] = [];
   const errors: string[] = [];
@@ -164,13 +167,42 @@ export async function buildExportArchive(
           `listing images belong to ${ownerName}; add that design to the export to include them`,
         );
       } else {
+        const productMockupIds = new Set(productMockups(allMockups).map((m) => m.id));
         const renders = selectedAssetIds
           ? []
           : await db.assets
               .where("sourceDesignId")
               .equals(design.id)
-              .filter((a) => a.kind === "mockup-render")
+              .filter(
+                (a) =>
+                  a.kind === "mockup-render" &&
+                  (!a.sourceMockupId || productMockupIds.has(a.sourceMockupId)),
+              )
               .sortBy("createdAt");
+
+        // Attached info cards, in strip order, appended AFTER the mockup
+        // renders. Locked drafts already carry the card assets inside
+        // imageAssetIds; the unlocked fallback computes them here.
+        const explicit = listingMockupIds(session, ownerId);
+        const fallback = applyGlobalOrder(
+          session,
+          productMockups(allMockups).map((m) => m.id),
+        );
+        const includedIds =
+          session.listingImageCleared?.[ownerId] === true
+            ? []
+            : session.listingImages?.[ownerId] !== undefined
+              ? explicit
+              : fallback;
+        const attachedCards = selectedAssetIds
+          ? []
+          : applyGlobalOrder(
+              session,
+              infoCardsForListing(allMockups, includedIds).map((card) => card.id),
+            )
+              .map((id) => allMockups.find((mockup) => mockup.id === id))
+              .filter((card): card is (typeof allMockups)[number] => Boolean(card));
+        const mockupByAssetId = new Map(allMockups.map((m) => [m.assetId, m]));
 
         const entries = selectedAssetIds
           ? await Promise.all(
@@ -180,13 +212,18 @@ export async function buildExportArchive(
                 fallbackName: "listing image",
               })),
             )
-          : await Promise.all(
-              renders.map(async (render) => ({
+          : await Promise.all([
+              ...renders.map(async (render) => ({
                 blob: await getAssetBlob(render.id),
-                meta: render,
+                meta: render as typeof render | undefined,
                 fallbackName: "mockup",
               })),
-            );
+              ...attachedCards.map(async (card) => ({
+                blob: await getAssetBlob(card.assetId),
+                meta: undefined as typeof renders[number] | undefined,
+                fallbackName: `info card ${card.name}`,
+              })),
+            ]);
 
         let n = 0;
         for (const [index, entry] of entries.entries()) {
@@ -199,7 +236,9 @@ export async function buildExportArchive(
           }
           const mockup = entry.meta?.sourceMockupId
             ? await db.mockups.get(entry.meta.sourceMockupId)
-            : undefined;
+            : entry.meta
+              ? mockupByAssetId.get(entry.meta.id)
+              : undefined;
           const mockupName = mockup?.name ?? entry.fallbackName;
           n += 1;
           const ext = await extensionFor(entry.blob);

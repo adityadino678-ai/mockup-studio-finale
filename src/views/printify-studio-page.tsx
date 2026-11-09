@@ -3,6 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
+import { HowItWorks } from "@/components/ui/how-it-works";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { DesignsTab } from "@/views/studio/designs-tab";
@@ -13,10 +14,14 @@ import {
   fetchColourSource,
   fetchProviders,
   fetchVariants,
+  loadCachedColourSource,
+  loadColourOverrides,
+  loadLearnedColours,
+  saveColourOverride,
   type ColourSource,
 } from "@/lib/printify/catalog-client";
 import { emptySession, loadSession, saveSession, ROWS } from "@/lib/printify/studio-session";
-import { hexForColourName, primaryHex } from "@/lib/printify/colors";
+import { primaryHex, resolveColour } from "@/lib/printify/colors";
 import type { CatalogBlueprint, CatalogProvider, CatalogVariant } from "@/lib/printify/types";
 import type { StudioRowId, StudioSession } from "@/types/domain";
 import { Cloud, Layers, Palette, Wand2 } from "lucide-react";
@@ -26,11 +31,18 @@ type StudioTab = "designs" | "colors" | "panel";
 export interface StudioCatalogState {
   configured: boolean;
   loading: boolean;
+  /** True while the provider list for the chosen product is loading. */
+  providersLoading: boolean;
+  /** True while the colour/size list for the chosen provider is loading. The
+   * previous list stays on screen (dimmed) until the new one arrives. */
+  variantsLoading: boolean;
   error?: string;
   blueprints: CatalogBlueprint[];
   providers: CatalogProvider[];
   variants: CatalogVariant[];
   colourSource: ColourSource | null;
+  colourError?: string;
+  colourLoading?: boolean;
 }
 
 /**
@@ -65,11 +77,36 @@ export function PrintifyStudioPage() {
   const [catalog, setCatalog] = React.useState<StudioCatalogState>({
     configured: true,
     loading: false,
+    providersLoading: false,
+    variantsLoading: false,
     blueprints: [],
     providers: [],
     variants: [],
     colourSource: null,
   });
+  const [learned, setLearned] = React.useState<Record<string, string>>({});
+  const [overrides, setOverrides] = React.useState<Record<string, string>>({});
+  const [colourRetryTick, setColourRetryTick] = React.useState(0);
+
+  // Learned dictionary + user overrides paint in the same frame as variants.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [l, o] = await Promise.all([loadLearnedColours(), loadColourOverrides()]);
+      if (!cancelled) {
+        setLearned(l);
+        setOverrides(o);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setColourHex = React.useCallback(async (name: string, hex: string) => {
+    await saveColourOverride(name, hex);
+    setOverrides((prev) => ({ ...prev, [name.trim().toLowerCase()]: hex }));
+  }, []);
 
   // --- session ---------------------------------------------------------------
   React.useEffect(() => {
@@ -186,17 +223,32 @@ export function PrintifyStudioPage() {
   React.useEffect(() => {
     const blueprintId = session.blueprintId;
     if (!blueprintId) {
-      setCatalog((c) => ({ ...c, providers: [], variants: [], colourSource: null }));
+      setCatalog((c) => ({
+        ...c,
+        providers: [],
+        providersLoading: false,
+        variants: [],
+        variantsLoading: false,
+        colourSource: null,
+      }));
       return;
     }
     let cancelled = false;
     (async () => {
+      // Clear the previous product's providers at once: the old list belongs
+      // to another blueprint, and offering it lets the user pick a provider
+      // that does not serve this product.
+      setCatalog((c) => ({ ...c, providers: [], providersLoading: true }));
       try {
         const providers = await fetchProviders(blueprintId);
-        if (!cancelled) setCatalog((c) => ({ ...c, providers }));
+        if (!cancelled) setCatalog((c) => ({ ...c, providers, providersLoading: false }));
       } catch (e) {
         if (!cancelled) {
-          setCatalog((c) => ({ ...c, error: e instanceof Error ? e.message : "Could not load providers" }));
+          setCatalog((c) => ({
+            ...c,
+            providersLoading: false,
+            error: e instanceof Error ? e.message : "Could not load providers",
+          }));
         }
       }
     })();
@@ -209,19 +261,60 @@ export function PrintifyStudioPage() {
     const blueprintId = session.blueprintId;
     const printProviderId = session.printProviderId;
     if (!blueprintId || !printProviderId) {
-      setCatalog((c) => ({ ...c, variants: [], colourSource: null }));
+      setCatalog((c) => ({ ...c, variants: [], variantsLoading: false, colourSource: null }));
       return;
     }
     let cancelled = false;
     (async () => {
-      setCatalog((c) => ({ ...c, loading: true, variants: [], colourSource: null }));
+      // Keep the previous provider's palette on screen (dimmed) until the new
+      // one arrives instead of blanking it, and do NOT wait for the colour
+      // hexes: those come from a different, much slower lookup (shops + product
+      // list + product detail) and only affect the swatch shades, not which
+      // colours exist. The palette renders from the variants as soon as they
+      // land; the real hexes swap in in the background.
+      setCatalog((c) => ({ ...c, variantsLoading: true, colourSource: null, colourError: undefined }));
+      // Instant paint: stale cached hexes + learned/fallback swatches in one frame.
+      const stale = await loadCachedColourSource(blueprintId, printProviderId);
+      if (!cancelled && stale && stale.colors.length > 0) {
+        setCatalog((c) => ({ ...c, colourSource: stale, colourLoading: true }));
+      }
+      let variants;
       try {
-        const [variants, colourSource] = await Promise.all([
-          fetchVariants(blueprintId, printProviderId),
-          fetchColourSource(blueprintId, printProviderId).catch(() => null),
-        ]);
-        if (cancelled) return;
-        setCatalog((c) => ({ ...c, variants, colourSource, loading: false }));
+        variants = await fetchVariants(blueprintId, printProviderId);
+      } catch (e) {
+        if (!cancelled) {
+          setCatalog((c) => ({
+            ...c,
+            variantsLoading: false,
+            error: e instanceof Error ? e.message : "Could not load the product colours",
+          }));
+        }
+        return;
+      }
+      if (cancelled) return;
+      setCatalog((c) => ({ ...c, variants, variantsLoading: false }));
+
+      // Real hexes in the background (stale-while-revalidate). Never silent:
+      // a failure surfaces an inline status with Retry and the swatches stay usable.
+      setCatalog((c) => ({ ...c, colourLoading: true }));
+      try {
+        const source = await fetchColourSource(blueprintId, printProviderId);
+        if (!cancelled) {
+          setCatalog((c) => ({ ...c, colourSource: source, colourLoading: false, colourError: undefined }));
+          if (source.colors.length > 0) {
+            const nextLearned = await loadLearnedColours();
+            setLearned(nextLearned);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setCatalog((c) => ({
+            ...c,
+            colourLoading: false,
+            colourError: e instanceof Error ? e.message : "Could not load exact colours",
+          }));
+        }
+      }
 
         // A different print provider offers a different colour and size list.
         // A selection that names colours or sizes the new provider does not
@@ -277,20 +370,11 @@ export function PrintifyStudioPage() {
             updatedAt: Date.now(),
           };
         });
-      } catch (e) {
-        if (!cancelled) {
-          setCatalog((c) => ({
-            ...c,
-            loading: false,
-            error: e instanceof Error ? e.message : "Could not load the product colours",
-          }));
-        }
-      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [session.blueprintId, session.printProviderId]);
+  }, [session.blueprintId, session.printProviderId, colourRetryTick]);
 
   // --- the colours a row resolves to -----------------------------------------
   const realHexes = React.useMemo(() => {
@@ -301,10 +385,22 @@ export function PrintifyStudioPage() {
     return map;
   }, [catalog.colourSource]);
 
-  const hexFor = React.useCallback(
-    (name: string) => primaryHex(realHexes.get(name), hexForColourName(name)),
-    [realHexes],
+  const resolvedFor = React.useCallback(
+    (name: string) => {
+      const exactArr = realHexes.get(name);
+      const exact = exactArr?.[0];
+      if (exact) {
+        const r = resolveColour(name, { overrides: overrides as Record<string, string>, learned, exactHexes: new Map([[name, exactArr as string[]]]) });
+        if (r.source === "override" || r.source === "learned") return r;
+        return { hex: primaryHex(exactArr), approximate: catalog.colourSource?.approximate === true, source: "exact" as const };
+      }
+      return resolveColour(name, { overrides, learned });
+    },
+    [realHexes, learned, overrides, catalog.colourSource?.approximate],
   );
+
+  const hexFor = React.useCallback((name: string) => resolvedFor(name).hex, [resolvedFor]);
+  const isApprox = React.useCallback((name: string) => resolvedFor(name).approximate, [resolvedFor]);
 
   const swatchesForRow = React.useCallback(
     (row: StudioRowId) =>
@@ -327,18 +423,29 @@ export function PrintifyStudioPage() {
   );
 
   return (
-    <div className="mx-auto max-w-6xl p-8">
+    <div className="mx-auto max-w-6xl p-5 sm:p-8">
       <PageHeader
         title="Printify Studio"
-        description="Upload designs, choose the product and its colours, place the artwork, and create one Printify product per design. Everything stays on this device until you publish."
+        description="Upload designs, pick a product, create listings."
         actions={
           catalog.configured ? (
-            <Button size="sm" variant="outline" onClick={() => setTab("colors")}>
-              <Cloud className="h-3.5 w-3.5" />
-              {selectedBlueprint ? selectedBlueprint.title : "Choose a product"}
-            </Button>
+            <>
+              <HowItWorks
+                title="Printify Studio"
+                steps={[
+                  "Upload designs in the Designs tab.",
+                  "Pick a product and colours in the Colors tab.",
+                  "Place the artwork in the Design panel.",
+                  "Create one Printify product per design. Send creates an unpublished draft.",
+                ]}
+              />
+              <Button size="sm" variant="outline" onClick={() => setTab("colors")}>
+                <Cloud className="h-3.5 w-3.5" />
+                {selectedBlueprint ? selectedBlueprint.title : "Choose a product"}
+              </Button>
+            </>
           ) : (
-            <span className="text-[12px] text-ink-muted">Printify is not connected</span>
+            <span className="text-xs text-ink-muted">Printify is not connected</span>
           )
         }
       />
@@ -368,6 +475,9 @@ export function PrintifyStudioPage() {
             catalog={catalog}
             hexFor={hexFor}
             realHexes={realHexes}
+            isApprox={isApprox}
+            onSetHex={setColourHex}
+            onRetry={() => setColourRetryTick((n) => n + 1)}
             onGoToPanel={() => setTab("panel")}
           />
         </TabsContent>

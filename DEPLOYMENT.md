@@ -7,8 +7,9 @@ How this app is built, deployed, and verified. For architecture reasoning see
 
 **https://mockup-studio.adityadino678.workers.dev**
 
-Public. No login, no account. Every visitor gets their own empty workspace,
-stored in their own browser.
+Public. No login required, and every visitor gets their own empty workspace,
+stored in their own browser. An account is optional and only used for the
+Phase 4+ sync/connect path.
 
 ## Cloudflare accounts
 
@@ -44,14 +45,16 @@ installs dependencies on first run, opens the browser and starts the server.
 
 ```
 npm run build
-  └─ astro build          7 pages -> static HTML in dist/
+  └─ astro build          12 pages -> static HTML in dist/
   └─ postbuild.mjs        writes dist/.assetsignore containing "_worker.js"
 ```
 
 Because no page depends on request state (all data is in the visitor's
 IndexedDB), every page is prerendered and served from Cloudflare's CDN. There are
-7 of them: `/` (a static redirect to `/printify-studio`), `/printify-studio`,
-`/mockups`, `/export`, `/agent`, `/activity`, `/settings`. Only the nine
+12 of them: `/` (the ListBulkly landing document), `/printify-studio`,
+`/mockups`, `/listing-images`, `/listing-details`, `/listing-preview`, `/export`,
+`/activity`, `/settings`, `/onboarding`, `/printify-bookmarklet` and `/styleguide`
+(internal, `noindex`). Only the twenty
 `/api/**` endpoints render on demand; each sets
 `export const prerender = false`. The generated `dist/_routes.json` excludes the
 pages and `/_astro/*` from the Worker.
@@ -103,8 +106,8 @@ to `main` will then rebuild and redeploy.
 ```powershell
 npm run lint
 npm run typecheck
-npm run test          # 321 unit
-npm run test:e2e      # 23 acceptance, local dev server
+npm run test          # 666 unit tests across 40 files
+npm run test:e2e      # 49 acceptance tests, local dev server
 ```
 
 Against production:
@@ -121,32 +124,83 @@ Invoke-WebRequest https://mockup-studio.adityadino678.workers.dev -UseBasicParsi
 (Invoke-WebRequest https://mockup-studio.adityadino678.workers.dev/api/integrations/status -UseBasicParsing).Content
 ```
 
-Every route should return 200. On a fresh deployment with no secrets the
-status endpoint reports `configured: false` for `printify`, `etsy` and `ai`; a
-deployment that has a `PRINTIFY_API_KEY` set reports `configured: true` for
-`printify` (this is about the secret being *present*, not accepted - see below).
+Every route should return 200. On the public Worker the status endpoint reports
+`configured: false` for `printify`, `etsy` and `ai`, because this is a
+bring-your-own-key deployment. `configured` means the secret is *present*, not
+that it is accepted (see below).
 
 ## Integrations and secrets
 
-No API keys are required. That is deliberate: the core workflow — upload, place,
-print areas, render, background removal, ink variants, ZIP export — needs no keys,
-and with none present every integration endpoint returns 503 before doing any
-work, so the public attack surface is effectively nil.
+No API keys are required, and the public Worker deliberately has **no** Printify
+or AI key. That is the product decision, not an omission: every visitor pastes
+their own Printify token (and any AI key) in **Settings → API connections**, it
+is stored in that browser's IndexedDB, and it travels on the request as
+`x-printify-key` / `x-ai-key`. The server never stores or inherits it, so one
+seller's key can never be spent by another visitor's batch.
+
+The core workflow — upload, place, print areas, render, background removal, ink
+variants, ZIP export — needs no keys at all, and with none present every
+integration endpoint returns 503 before doing any work.
 
 A key that is present but rejected by the provider is reported the same way by
 `/api/printify/catalog`: upstream 401/403 becomes **503** with
-`configured: false` and a message naming the rejected key, never a bare 502. A
-stale secret therefore reads as "fix the key", not "Printify is down".
+`configured: false` and a message naming the rejected key, never a bare 502.
 
-To enable in production:
+Only a self-hosted or preview deployment would add server-side fallbacks — a
+browser-saved key always wins over these:
 
 ```powershell
-npx wrangler secret put PRINTIFY_API_KEY
-npx wrangler secret put AI_API_KEY
+npx wrangler secret put PRINTIFY_API_KEY   # optional, do NOT set on the public Worker
+npx wrangler secret put AI_API_KEY         # optional
 ```
 
+`npm run spike:printify` is a local contract check, not a deployment step: it
+reads `PRINTIFY_API_KEY` from the environment or `.dev.vars` and deletes what it
+creates. Keep that key on your machine; it does not belong in Wrangler.
+
 Supported names: `PRINTIFY_API_KEY`, `ETSY_API_KEY`, `ETSY_ACCESS_TOKEN`,
-`ETSY_SHOP_ID`, `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`, `OPENAI_API_KEY`.
+`ETSY_SHOP_ID`, `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`, `OPENAI_API_KEY`,
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE`, `RESEND_API_KEY`,
+`RESEND_FROM`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `PUBLIC_SITE_URL`.
+
+`PUBLIC_SITE_URL` is not a secret: it is the real public origin, and it is the
+only switch that emits canonical / `og:url` tags. Leave it unset until a custom
+domain exists; a `*.workers.dev` value is rejected. `RESEND_*`,
+`RAZORPAY_*` and the Supabase values are optional and are reported, never
+guessed, by `GET /api/integrations/readiness` (read-only: it never sends mail,
+never charges and never returns a secret value).
+
+### Supabase Auth (optional)
+
+```powershell
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_ANON_KEY
+# Optional; enables instant confirmed sign-up with no email.
+npx wrangler secret put SUPABASE_SERVICE_ROLE
+```
+
+The browser never sees a Supabase key: `/api/auth/signup`, `/signin` and `/me`
+proxy to Supabase server-side, and `/api/auth/status` reports which mode is
+live without returning a secret. With `SUPABASE_SERVICE_ROLE` present, sign-up
+creates an already-confirmed account. With only the anon key, Supabase sends
+its own confirmation mail and the account is unusable until the link is opened
+at `/auth/confirm`. **A fresh project's built-in sender is rate-limited**, so a
+sign-up can fail with `email rate limit exceeded`; add the service-role key or
+a sending domain before treating account creation as launch-ready. The anon
+key is a publishable key and is safe to store in `.env` locally, but it is
+still passed only to the server.
+
+The current Worker already carries all four secrets; verify without revealing a
+value:
+
+```powershell
+npx wrangler secret list                       # names only
+curl.exe -s https://mockup-studio.adityadino678.workers.dev/api/auth/status
+# {"configured":true,"serviceRole":true,"signupMode":"instant"}
+```
+
+Deleting a user cascades to `public.profiles` (`supabase/migrations/004_profile_cascade.sql`);
+without that constraint the delete fails with `23503 … profiles_id_fkey`.
 
 Locally, copy `.dev.vars.example` to `.dev.vars`.
 

@@ -19,12 +19,11 @@ import { chromium } from "@playwright/test";
 /**
  * Every route the suite visits.
  *
- * "/" is included: it is a static redirect to the Printify Studio, and the
- * warm-up follows it, which is exactly what a visitor's browser does.
+ * "/" is the supplied standalone landing document; the warm-up waits for its
+ * live slogan field instead of the app shell's sidebar link.
  */
 const ROUTES = [
   "/",
-  "/agent",
   "/mockups",
   "/export",
   "/activity",
@@ -35,11 +34,10 @@ const ROUTES = [
   "/listing-images",
   "/listing-details",
   "/listing-preview",
-  "/autopilot",
 ];
 
 /** Utility pages that render outside the sidebar shell. */
-const UTILITY_ROUTES = ["/printify-bookmarklet"];
+const UTILITY_ROUTES = ["/printify-bookmarklet", "/auth/confirm"];
 
 export default async function globalSetup() {
   const baseURL = process.env.BASE_URL ?? "http://localhost:3100";
@@ -55,7 +53,12 @@ export default async function globalSetup() {
         // The app shell is a React island: it only proves the route works
         // once the shell has hydrated. "Printify Studio" is in the sidebar on
         // every page except the standalone bookmarklet utility page.
-        if (!UTILITY_ROUTES.includes(route)) {
+        if (route === "/") {
+          // The landing page is the supplied static document. The live slogan
+          // field is present on first paint and becomes interactive once its
+          // inline script runs, so it is the warm-up marker.
+          await page.locator("#sl").waitFor({ state: "visible", timeout: 60_000 });
+        } else if (!UTILITY_ROUTES.includes(route)) {
           await page
             .getByRole("link", { name: "Printify Studio" })
             .waitFor({ state: "attached", timeout: 60_000 });

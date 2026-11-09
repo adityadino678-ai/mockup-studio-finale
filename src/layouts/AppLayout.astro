@@ -1,32 +1,31 @@
 ---
 import "../styles/globals.css";
+import { BRAND } from "@/config/brand";
+import { absoluteUrl } from "@/lib/site";
+
+const description =
+  "ListBulkly is the local-first bulk workspace for print-on-demand sellers: prepare artwork, place it on real mockups, write listings once, and send Printify drafts. Nothing publishes by itself.";
+
+// Only set when PUBLIC_SITE_URL is configured; otherwise both the canonical and
+// og:url tags are omitted entirely. Never derived from the request URL.
+const canonical = absoluteUrl(Astro.url.pathname);
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link
-      rel="preconnect"
-      href="https://fonts.googleapis.com"
-      crossorigin
-    />
-    <link
-      rel="preconnect"
-      href="https://fonts.gstatic.com"
-      crossorigin
-    />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Caveat:wght@400;600&family=Architects+Daughter&display=swap"
-    />
-    <title>Mockup Studio</title>
-    <meta
-      name="description"
-      content="A premium local workspace for print-on-demand sellers: prepare artwork, place it on mockups, batch-generate, organize, and export."
-    />
+    <meta name="theme-color" content="#F7F3EC" />
+    <title>ListBulkly</title>
+    <meta name="description" content={description} />
+    <meta property="og:site_name" content={BRAND.name} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={BRAND.name} />
+    <meta property="og:description" content={description} />
+    {canonical ? <link rel="canonical" href={canonical} /> : null}
+    {canonical ? <meta property="og:url" content={canonical} /> : null}
   </head>
   <body class="antialiased">
     <slot />

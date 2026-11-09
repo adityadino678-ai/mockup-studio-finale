@@ -18,6 +18,18 @@ export const serverEnv = {
   aiBaseUrl: () => getSecret("AI_BASE_URL"),
   aiModel: () => getSecret("AI_MODEL"),
   openaiApiKey: () => getSecret("OPENAI_API_KEY"),
+  // Email (Resend) and billing (Razorpay). Both are optional, like every other
+  // key: the launch-readiness report only says whether they are PRESENT, never
+  // what they contain.
+  resendApiKey: () => getSecret("RESEND_API_KEY"),
+  resendFrom: () => getSecret("RESEND_FROM"),
+  razorpayKeyId: () => getSecret("RAZORPAY_KEY_ID"),
+  razorpayKeySecret: () => getSecret("RAZORPAY_KEY_SECRET"),
+  // Supabase Auth/sync. The service-role key is optional; auth needs only the
+  // project URL plus the anon key.
+  supabaseUrl: () => getSecret("SUPABASE_URL"),
+  supabaseAnonKey: () => getSecret("SUPABASE_ANON_KEY"),
+  supabaseServiceRole: () => getSecret("SUPABASE_SERVICE_ROLE"),
 };
 
 /** JSON response helper shared by every endpoint (Astro endpoints return a `Response`). */

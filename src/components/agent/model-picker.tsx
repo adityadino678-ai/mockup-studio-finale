@@ -84,32 +84,32 @@ export function ModelPicker({
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         aria-label={`Choose model — ${label} · ${current || "none"}`}
-        className="flex h-7 max-w-[220px] items-center gap-1.5 rounded-md border border-border-subtle bg-surface px-2 text-[11px] text-ink-muted transition-colors hover:bg-surface-muted disabled:opacity-50"
+        className="flex h-7 max-w-[220px] items-center gap-1.5 rounded-md border border-border-subtle bg-surface px-2 text-xs text-ink-muted transition-colors hover:bg-surface-muted disabled:opacity-50"
         title="Choose model"
       >
         <span className="truncate">{label}</span>
-        <span className="text-ink-subtle">·</span>
+        <span className="text-ink-muted">·</span>
         <span className="truncate font-medium text-ink">{current || "Select model"}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-ink-subtle" />
+        <ChevronDown className="h-3 w-3 shrink-0 text-ink-muted" />
       </button>
 
       {open && (
         <div className="absolute bottom-full left-0 z-50 mb-1.5 flex max-h-[420px] w-[300px] flex-col overflow-hidden rounded-lg border border-border-subtle bg-surface shadow-pop">
           <div className="flex items-center gap-2 border-b border-border-subtle px-2.5 py-2">
-            <Search className="h-3.5 w-3.5 text-ink-subtle" />
+            <Search className="h-3.5 w-3.5 text-ink-muted" />
             <input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search models…"
-              className="h-6 min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-subtle"
+              className="h-6 min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted"
             />
           </div>
 
           <div className="scroll-thin flex-1 overflow-y-auto py-1">
             {favoriteGroups.length > 0 && !q && (
               <>
-                <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+                <div className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-ink-muted">
                   Favorites
                 </div>
                 {favoriteGroups.flatMap((g) =>
@@ -133,7 +133,7 @@ export function ModelPicker({
             )}
 
             {visibleGroups.length === 0 && (
-              <div className="px-3 py-6 text-center text-[12px] text-ink-subtle">
+              <div className="px-3 py-6 text-center text-xs text-ink-muted">
                 {groups.some((g) => g.hasKey)
                   ? "No models match your search."
                   : "Add a provider key in Settings to pick a model."}
@@ -143,14 +143,14 @@ export function ModelPicker({
             {visibleGroups.map((g) => (
               <div key={g.provider.id}>
                 <div className="flex items-center justify-between px-3 pb-1 pt-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-ink-subtle">
+                  <span className="text-xs font-medium uppercase tracking-wider text-ink-muted">
                     {g.provider.label}
                   </span>
                   {onRefresh && (
                     <button
                       type="button"
                       onClick={() => onRefresh(g.provider.id)}
-                      className="text-ink-subtle hover:text-ink"
+                      className="text-ink-muted hover:text-ink"
                       title="Refresh model list"
                     >
                       <RefreshCw className="h-3 w-3" />
@@ -178,7 +178,7 @@ export function ModelPicker({
 
           <a
             href="/settings"
-            className="border-t border-border-subtle px-3 py-2 text-[11px] text-forest hover:bg-surface-muted"
+            className="border-t border-border-subtle px-3 py-2 text-xs text-forest hover:bg-surface-muted"
           >
             Manage providers &amp; keys →
           </a>
@@ -210,23 +210,23 @@ function ModelRow({
   return (
     <div
       className={cn(
-        "group flex items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-surface-muted",
+        "group flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-surface-muted",
         selected ? "text-forest" : "text-ink",
       )}
     >
       <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <Check className={cn("h-3 w-3 shrink-0", selected ? "opacity-100" : "opacity-0")} />
         <span className="min-w-0 flex-1 truncate">{name}</span>
-        {provider && <span className="shrink-0 text-[10px] text-ink-subtle">{provider}</span>}
+        {provider && <span className="shrink-0 text-xs text-ink-muted">{provider}</span>}
         {free && (
-          <span className="shrink-0 rounded bg-sage-soft px-1 text-[10px] font-medium text-forest">free</span>
+          <span className="shrink-0 rounded bg-sage-soft px-1 text-xs font-medium text-forest">free</span>
         )}
-        {context ? <span className="shrink-0 text-[10px] text-ink-subtle">{(context / 1000).toFixed(0)}k</span> : null}
+        {context ? <span className="shrink-0 text-xs text-ink-muted">{(context / 1000).toFixed(0)}k</span> : null}
       </button>
       <button
         type="button"
         onClick={onToggleFavorite}
-        className={cn("shrink-0 p-0.5 text-ink-subtle hover:text-warning", favorite && "text-warning")}
+        className={cn("shrink-0 p-0.5 text-ink-muted hover:text-warning", favorite && "text-warning")}
         title={favorite ? "Remove favorite" : "Add favorite"}
       >
         <Star className={cn("h-3 w-3", favorite && "fill-current")} />

@@ -8,11 +8,13 @@ export function Toaster() {
       position="bottom-right"
       toastOptions={{
         style: {
-          background: "#ffffff",
-          border: "1px solid #e6e7e0",
-          color: "#252a26",
+          background: "#F7F3EC",
+          border: "2px solid #15110E",
+          borderRadius: "0",
+          color: "#15110E",
           fontSize: "13px",
-          boxShadow: "0 8px 24px rgba(37,42,38,0.1)",
+          fontWeight: 600,
+          boxShadow: "6px 6px 0 #E8702A",
         },
       }}
     />

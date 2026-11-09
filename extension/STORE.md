@@ -20,6 +20,14 @@ only things that must be *replaced* first are the placeholder icons.
 - [ ] **Run the offline checks** (`node extension/tools/offline-check.mjs`,
       `offline-check-sw.mjs`, `offline-check-content.mjs`) and at least one real
       run against a throwaway Printify product in a signed-in browser.
+- [ ] **Verify protocol 2 end to end** on that throwaway product: the content
+      script must announce `data-mockup-studio-ext-protocol="2"`, one click must
+      apply the selection (replacement, not a merge), and Printify's own
+      generated mockups must be gone afterwards. An older marker must be
+      reported as "reload the extension", never applied.
+- [ ] **Write the fee/terms sentence for the listing.** The extension is free;
+      the app's paid plan is billed separately through Razorpay (not live yet).
+      Say that no Printify fee is collected and mark any pricing as PLACEHOLDER.
 - [ ] **Bump `version`** in `manifest.json` for every submission (both stores
       require a strictly newer version).
 - [ ] Decide about `minimum_chrome_version` (currently `102`): the APIs used
@@ -139,7 +147,8 @@ and reference it in the store listing.
   There is no scraping of user data and no bulk export.
 - **No credentials, ever.** The extension cannot read the app's API key: it is
   held in Mockup Studio's browser-local storage and sent only to Mockup Studio's
-  server, never to the extension.
+  server, never to the extension. No API key is bundled in the extension
+  package either — grep `extension/` for `PRINTIFY` before packaging.
 - **Single purpose:** help Mockup Studio finish a listing — apply mockups to a
   Printify product, and (only when the app has no Etsy API key) read the public
   Etsy search page for research. Both actions are user-initiated and run in the

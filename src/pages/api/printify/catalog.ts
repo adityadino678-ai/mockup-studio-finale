@@ -72,6 +72,18 @@ const CATALOGUE_TTL_SECONDS = 3600;
 let catalogueMemo: { at: number; blueprints: unknown[] } | null = null;
 const CATALOGUE_MEMO_TTL_MS = CATALOGUE_TTL_SECONDS * 1000;
 
+/**
+ * Shop product index memo for `colors=1` (private, per shop, ~10 min).
+ * Deliberately isolate-memory only — the shared edge cache must never hold
+ * a seller's private product list. Keyed by shop id.
+ */
+const SHOP_PRODUCT_MEMO_TTL_MS = 10 * 60 * 1000;
+const SHOP_PRODUCT_MAX_PAGES = 10;
+const shopProductMemo = new Map<
+  number,
+  { at: number; products: import("@/lib/server/printify").PrintifyShopProduct[] }
+>();
+
 /** Cloudflare's `caches.default` is not in the DOM lib's CacheStorage type. */
 function edgeCache(): Cache | null {
   if (typeof caches === "undefined") return null;
@@ -121,7 +133,7 @@ export const GET: APIRoute = async ({ url, request }) => {
       {
         configured: false,
         error:
-          "Printify is not configured. Paste your Printify API key in Settings, or set PRINTIFY_API_KEY on the server.",
+          "Printify is not configured. Paste your Printify API key in Settings → API connections.",
       },
       503,
     );
@@ -171,7 +183,19 @@ export const GET: APIRoute = async ({ url, request }) => {
       return response;
     }
     if (wantsProviders) {
-      return json({ configured: true, ...(await client.listProviders(Number(id))) });
+      // Providers are public catalogue data, identical for every visitor, so
+      // the edge can hold them. `colors=1` is deliberately NOT cached: it
+      // reads the seller's own shop products to find a template product.
+      const cached = await cachedCatalogue(url);
+      if (cached) {
+        const hit = new Response(cached.body, cached);
+        hit.headers.set("x-catalog-cache", "edge");
+        return hit;
+      }
+      const response = json({ configured: true, ...(await client.listProviders(Number(id))) });
+      response.headers.set("x-catalog-cache", "miss");
+      await putInCatalogueCache(url, response);
+      return response;
     }
     if (wantsColors) {
       // Real colour hexes only exist on a PRODUCT, never in the catalogue.
@@ -179,25 +203,72 @@ export const GET: APIRoute = async ({ url, request }) => {
       // and read its option values. See AGENTS.md.
       const blueprintId = Number(id);
       const printProviderId = Number(url.searchParams.get("provider"));
-      const shopId = await client.resolveShopId();
-      const products = await client.listShopProducts(shopId);
-      const match = products.find(
-        (p) =>
-          p.blueprint_id === blueprintId &&
-          (Number.isNaN(printProviderId) || p.print_provider_id === printProviderId),
-      );
-      if (!match) {
+      const preferredShopId = creds.printify?.shopId;
+      // Parallel: resolve shops while already reading the first product page
+      // for the selected shop (immediate when the user picked one in Settings).
+      const firstPagePromise =
+        preferredShopId !== undefined
+          ? client.listShopProducts(preferredShopId, 50, 1).catch(() => null)
+          : null;
+      const shopId = await client.resolveShopId(preferredShopId);
+      const firstPage = firstPagePromise ? await firstPagePromise : null;
+
+      let match: import("@/lib/server/printify").PrintifyShopProduct | undefined;
+      let approximateMatch: import("@/lib/server/printify").PrintifyShopProduct | undefined;
+
+      const memo = shopProductMemo.get(shopId);
+      if (memo && Date.now() - memo.at < SHOP_PRODUCT_MEMO_TTL_MS) {
+        for (const p of memo.products) {
+          if (p.blueprint_id !== blueprintId) continue;
+          if (!Number.isNaN(printProviderId) && p.print_provider_id === printProviderId) {
+            match = p;
+            break;
+          }
+          approximateMatch ??= p;
+        }
+      } else {
+        // Page through all products (limit 50, up to 10 pages) and stop as
+        // soon as an exact match is found. Keep the first same-blueprint
+        // product as an approximate fallback.
+        const all: import("@/lib/server/printify").PrintifyShopProduct[] = [];
+        for (let page = 1; page <= SHOP_PRODUCT_MAX_PAGES; page++) {
+          const products =
+            page === 1 && firstPage !== null
+              ? firstPage
+              : await client.listShopProducts(shopId, 50, page);
+          if (!Array.isArray(products) || products.length === 0) break;
+          all.push(...products);
+          for (const p of products) {
+            if (p.blueprint_id !== blueprintId) continue;
+            if (!Number.isNaN(printProviderId) && p.print_provider_id === printProviderId) {
+              match = p;
+              break;
+            }
+            approximateMatch ??= p;
+          }
+          if (match) break;
+          if (products.length < 50) break;
+        }
+        // Cache the index for the next request (private, per shop, 10 min).
+        shopProductMemo.set(shopId, { at: Date.now(), products: all });
+      }
+
+      const chosen = match ?? approximateMatch;
+      const isApproximate = !match && Boolean(approximateMatch);
+      if (!chosen) {
         return json({ configured: true, source: "none", colors: [], sizes: [], variants: [] });
       }
       // The list endpoint may omit variants, so read the product in full.
-      const full = await client.getProduct(shopId, match.id).catch(() => match);
+      // The full detail is fetched only for the match.
+      const full = await client.getProduct(shopId, chosen.id).catch(() => chosen);
       const options = full.options ?? [];
       const colourOption = options.find((o) => /colou?r/i.test(o.type ?? o.name ?? ""));
       const sizeOption = options.find((o) => /size/i.test(o.type ?? o.name ?? ""));
       return json({
         configured: true,
         source: "product",
-        templateProductId: match.id,
+        approximate: isApproximate,
+        templateProductId: chosen.id,
         colors: (colourOption?.values ?? []).map((v) => ({
           id: v.id,
           title: v.title,
@@ -212,8 +283,20 @@ export const GET: APIRoute = async ({ url, request }) => {
       });
     }
     if (provider) {
+      // Variants are the colour/size list the palette renders from, and the
+      // payload is large (placeholders per variant). Public catalogue data, so
+      // the edge holds it for an hour; the browser holds its own copy for a day.
+      const cached = await cachedCatalogue(url);
+      if (cached) {
+        const hit = new Response(cached.body, cached);
+        hit.headers.set("x-catalog-cache", "edge");
+        return hit;
+      }
       const variants = await client.listVariants(Number(id), Number(provider));
-      return json({ configured: true, variants });
+      const response = json({ configured: true, variants });
+      response.headers.set("x-catalog-cache", "miss");
+      await putInCatalogueCache(url, response);
+      return response;
     }
     const detail: PrintifyBlueprintDetail = await client.getBlueprint(Number(id));
     return json({ configured: true, blueprint: detail });

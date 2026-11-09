@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
 import { listModels } from "@/lib/server/ai";
-import { getProvider } from "@/lib/ai/providers";
+import { filterModels, getProvider } from "@/lib/ai/providers";
 import { validateBody } from "@/lib/security/validation";
 
 // Live model-list fetch for a provider. Proxied through the server so the
@@ -13,6 +13,7 @@ export const prerender = false;
 
 interface ModelsRequest {
   provider?: string;
+  kind?: "chat" | "vision" | "image";
 }
 
 function clean(value: string | null | undefined): string | undefined {
@@ -66,6 +67,23 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   const apiKey = clean(headers.get("x-ai-key")) ?? "";
+  const kind = body.kind ?? "chat";
+
+  // Image models are a curated per-provider list, not the provider's chat
+  // catalogue: /models is a chat list and would never contain them.
+  if (kind === "image") {
+    const models = filterModels(def.id, [], "image");
+    return json({
+      ok: true,
+      provider: providerId,
+      label: def.label,
+      kind,
+      count: models.length,
+      free: 0,
+      models,
+    });
+  }
+
   if (!apiKey && def.auth !== "none" && !def.modelsPublic) {
     return json(
       { ok: false, provider: providerId, configured: false, message: `Paste your ${def.label} API key first.` },
@@ -76,11 +94,12 @@ export const POST: APIRoute = async ({ request }) => {
   const baseUrlOverride = clean(headers.get("x-ai-base-url"));
 
   try {
-    const models = await listModels(providerId, apiKey, baseUrlOverride);
+    const models = filterModels(providerId, await listModels(providerId, apiKey, baseUrlOverride), kind);
     return json({
       ok: true,
       provider: providerId,
       label: def.label,
+      kind,
       count: models.length,
       free: models.filter((m) => m.free).length,
       models,

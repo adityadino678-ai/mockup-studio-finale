@@ -43,6 +43,27 @@ export interface ModelCapabilities {
   vision: boolean;
 }
 
+/**
+ * How a provider generates an image.
+ *
+ * `images` is the OpenAI `POST /images/generations` shape. `chat` is the
+ * OpenAI-compatible chat endpoint that returns image parts on the message
+ * (OpenRouter and Google's compatibility layer both do this for their image
+ * models). There is no third path: a provider without an adapter is not
+ * offered in the image picker at all.
+ */
+export type ImageApi = "images" | "chat";
+
+export interface ImageAdapter {
+  api: ImageApi;
+  /** Path relative to the provider's base URL. */
+  path: string;
+  /** Model ids that can generate images on this provider. */
+  models: ProviderModelSeed[];
+  /** Sizes the provider accepts; the picker only offers these. */
+  sizes?: string[];
+}
+
 export interface ProviderDef {
   id: string;
   label: string;
@@ -73,6 +94,8 @@ export interface ProviderDef {
   modelsPublic?: boolean;
   /** Sort order — lower shows first. */
   priority: number;
+  /** Image generation adapter. Absent means the provider cannot make images. */
+  image?: ImageAdapter;
 }
 
 export interface ModelInfo {
@@ -119,6 +142,14 @@ export const PROVIDERS: ProviderDef[] = [
     freeTier: "Free models available",
     modelsPublic: true,
     priority: 3,
+    image: {
+      api: "chat",
+      path: "/chat/completions",
+      models: [
+        { id: "google/gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image (OpenRouter)" },
+      ],
+      sizes: ["1024x1024"],
+    },
   },
   {
     id: "groq",
@@ -161,6 +192,15 @@ export const PROVIDERS: ProviderDef[] = [
     free: "suffix",
     freeTier: "Some models free",
     priority: 6,
+    image: {
+      api: "images",
+      path: "/images/generations",
+      models: [
+        { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell" },
+        { id: "black-forest-labs/FLUX.1-dev", name: "FLUX.1 Dev" },
+      ],
+      sizes: ["1024x1024", "1024x1536", "1536x1024"],
+    },
   },
   {
     id: "google",
@@ -175,6 +215,14 @@ export const PROVIDERS: ProviderDef[] = [
     free: "none",
     freeTier: "Free tier available",
     priority: 7,
+    image: {
+      // Gemini's OpenAI-compatible layer returns generated pixels on the
+      // assistant message, not on /images/generations.
+      api: "chat",
+      path: "/chat/completions",
+      models: [{ id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image" }],
+      sizes: ["1024x1024"],
+    },
   },
   {
     id: "mistral",
@@ -215,6 +263,15 @@ export const PROVIDERS: ProviderDef[] = [
     docsUrl: "https://fireworks.ai/account/api-keys",
     free: "none",
     priority: 10,
+    image: {
+      api: "images",
+      path: "/images/generations",
+      models: [
+        { id: "accounts/fireworks/models/flux-1-schnell", name: "FLUX.1 Schnell (Fireworks)" },
+        { id: "accounts/fireworks/models/flux-1-dev", name: "FLUX.1 Dev (Fireworks)" },
+      ],
+      sizes: ["1024x1024"],
+    },
   },
   {
     id: "xai",
@@ -228,6 +285,15 @@ export const PROVIDERS: ProviderDef[] = [
     docsUrl: "https://console.x.ai/",
     free: "none",
     priority: 11,
+    image: {
+      api: "images",
+      path: "/images/generations",
+      models: [
+        { id: "grok-2-image", name: "Grok 2 Image" },
+        { id: "grok-2-image-1212", name: "Grok 2 Image (1212)" },
+      ],
+      sizes: ["1024x1024"],
+    },
   },
   {
     id: "openai",
@@ -242,6 +308,15 @@ export const PROVIDERS: ProviderDef[] = [
     free: "none",
     defaultModel: "gpt-4o-mini",
     priority: 12,
+    image: {
+      api: "images",
+      path: "/images/generations",
+      models: [
+        { id: "gpt-image-1", name: "GPT Image 1" },
+        { id: "dall-e-3", name: "DALL·E 3" },
+      ],
+      sizes: ["1024x1024", "1024x1536", "1536x1024"],
+    },
   },
   {
     id: "anthropic",
@@ -283,6 +358,15 @@ export const PROVIDERS: ProviderDef[] = [
     docsUrl: "https://platform.openai.com/docs/api-reference",
     free: "none",
     priority: 15,
+    image: {
+      api: "images",
+      path: "/images/generations",
+      models: [
+        { id: "gpt-image-1", name: "GPT Image 1" },
+        { id: "dall-e-3", name: "DALL·E 3" },
+      ],
+      sizes: ["1024x1024", "1024x1536", "1536x1024"],
+    },
   },
 ];
 
@@ -422,6 +506,84 @@ export function modelCapabilities(providerId: string, modelId: string): ModelCap
     tools: !!caps.tools,
     vision: !!caps.vision,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Model-kind filtering
+//
+// The provider-wide flags above answer "can this provider do vision at all".
+// The agent needs the narrower question "can THIS model see an image", because
+// picking a text-only model silently produces a description invented from the
+// design's name. The rules below are model-id heuristics: a model has to look
+// like a vision model AND come from a provider that supports image input.
+// Anything we cannot recognise is excluded rather than guessed at.
+// ---------------------------------------------------------------------------
+
+/** Model ids that are clearly not vision chat models. */
+const NON_VISION_MODEL =
+  /(embed|embedding|whisper|(^|[-_/])tts|audio|speech|rerank|moderation|dall-e|gpt-image|diffusion|stable-diffusion|(^|[-_/])flux)/i;
+
+/** Model ids that are known to accept image input. */
+const VISION_MODEL =
+  /(vision|llava|pixtral|internvl|molmo|idefics|(^|[-_/])vl([-_/]|$)|[-_]vl[-_]|(^|[-_/])(gpt-4o|gpt-4\.1|gpt-5|chatgpt-4o|o3|o4-mini|gemini|claude|grok-[2-9]|qwen[0-9.]*-vl|nemotron[^ ]*vl))/i;
+
+/** True when the model is one of a provider's image-generation models. */
+export function isImageModel(providerId: string, modelId: string): boolean {
+  const def = getProvider(providerId);
+  const id = (modelId ?? "").trim().toLowerCase();
+  if (!def?.image || !id) return false;
+  return def.image.models.some((m) => {
+    const want = m.id.toLowerCase();
+    return id === want || id.startsWith(`${want}:`) || id.startsWith(`${want}-`);
+  });
+}
+
+/**
+ * True when this exact model can be handed a design image.
+ *
+ * Deliberately conservative. A provider that admits a text-only model cannot
+ * be proven safe by a registry flag, so the id has to carry a vision hint too.
+ */
+export function isVisionModel(providerId: string, modelId: string): boolean {
+  const caps = PROVIDER_CAPS[providerId] ?? {};
+  const id = (modelId ?? "").trim().toLowerCase();
+  if (!caps.vision || !id) return false;
+  if (NON_VISION_MODEL.test(id)) return false;
+  if (isImageModel(providerId, id)) return false;
+  return VISION_MODEL.test(id);
+}
+
+/** Providers that can generate images, in picker order. */
+export function imageProviders(): ProviderDef[] {
+  return providerList().filter((p) => !!p.image);
+}
+
+/** The image models a provider offers. */
+export function imageModelsFor(providerId: string): ProviderModelSeed[] {
+  return getProvider(providerId)?.image?.models ?? [];
+}
+
+/**
+ * Filters a provider's live model list for the picker's `kind`.
+ *
+ * - `vision`: chat models with image input (the Listing-agent picker).
+ * - `image`: that provider's image-generation models.
+ * - `chat`: every chat model (Settings' connection tests).
+ */
+export function filterModels(
+  providerId: string,
+  models: ModelInfo[],
+  kind: "chat" | "vision" | "image",
+): ModelInfo[] {
+  if (kind === "chat") return models;
+  if (kind === "vision") return models.filter((m) => isVisionModel(providerId, m.id));
+  const seeds = imageModelsFor(providerId);
+  const out: ModelInfo[] = [];
+  for (const seed of seeds) {
+    const live = models.find((m) => m.id === seed.id);
+    out.push(live ?? { id: seed.id, name: seed.name ?? seed.id, free: false });
+  }
+  return out;
 }
 
 export const REASONING_EFFORTS = ["low", "medium", "high"] as const;

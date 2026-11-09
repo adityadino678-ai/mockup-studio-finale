@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { json } from "@/lib/server/env";
-import { supabaseAdmin } from "@/lib/auth/supabase-auth";
+import { authClients } from "@/lib/auth/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { z } from "zod";
 
@@ -22,8 +22,8 @@ const syncDesignSchema = z.object({
   ),
 });
 
-export const POST: APIRoute = async ({ request }) => {
-  const auth = await requireAuth(request);
+export const POST: APIRoute = async ({ request, locals }) => {
+  const auth = await requireAuth(request, locals);
   if (auth instanceof Response) return auth;
 
   const body = await request.json().catch(() => ({}));
@@ -38,13 +38,14 @@ export const POST: APIRoute = async ({ request }) => {
 
   const { designs } = parsed.data;
 
-  if (!supabaseAdmin) {
+  const { admin } = authClients(locals);
+  if (!admin) {
     return json(
       { error: "not_configured", message: "Supabase service role not configured" },
       503,
     );
   }
-  const { error } = await supabaseAdmin.from("designs").upsert(
+  const { error } = await admin.from("designs").upsert(
     designs.map((d) => ({
       ...d,
       user_id: auth.userId,
@@ -63,17 +64,18 @@ export const POST: APIRoute = async ({ request }) => {
   return json({ ok: true, synced: designs.length });
 };
 
-export const GET: APIRoute = async ({ request }) => {
-  const auth = await requireAuth(request);
+export const GET: APIRoute = async ({ request, locals }) => {
+  const auth = await requireAuth(request, locals);
   if (auth instanceof Response) return auth;
 
-  if (!supabaseAdmin) {
+  const { admin } = authClients(locals);
+  if (!admin) {
     return json(
       { error: "not_configured", message: "Supabase service role not configured" },
       503,
     );
   }
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await admin
     .from("designs")
     .select("*")
     .eq("user_id", auth.userId)

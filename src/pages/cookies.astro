@@ -1,0 +1,54 @@
+---
+import LegalLayout from "@/layouts/LegalLayout.astro";
+
+const title = "Cookies";
+const description =
+  "Every cookie and browser-storage key ListBulkly uses, and the fact that there are no advertising or analytics cookies.";
+---
+
+<LegalLayout title={title} description={description}>
+  <p>
+    <strong>Draft.</strong> This is the complete list for this build. It stays a
+    draft until the legal entity is added; the contact address below is real.
+  </p>
+
+  <h2>No advertising or analytics cookies</h2>
+  <p>
+    ListBulkly sets no advertising cookies, no analytics cookies and no tracking
+    pixels. There is no third-party tag manager, no session recording and no
+    cross-site profiling.
+  </p>
+
+  <h2>Cookies</h2>
+  <ul>
+    <li>
+      <strong>Supabase session cookie</strong> — set only after sign-in is enabled and
+      you sign in. It keeps you signed in and is removed when the session ends or you
+      sign out. Before authentication is switched on, this cookie does not exist.
+    </li>
+  </ul>
+
+  <h2>Browser storage that is not a cookie</h2>
+  <p>
+    The workspace needs local storage to work at all. It is stored for this site's
+    origin only and is not sent to our server automatically.
+  </p>
+  <ul>
+    <li><strong>IndexedDB</strong> — the library: artwork, mockups, print areas, renders, listing drafts, export history, activity, and the API keys you paste in Settings.</li>
+    <li><strong>localStorage</strong> — small preferences such as whether the sidebar is collapsed, the selected Printify shop, and the companion-extension handshake marker.</li>
+    <li><strong>sessionStorage</strong> — short-lived UI state, such as which chat turn is open.</li>
+  </ul>
+
+  <h2>Clearing it</h2>
+  <p>
+    Clearing this site's data in your browser removes the library and every stored
+    preference. The Settings page also has a "Clear keys from this browser" action.
+    Export anything you need first: the Export Center produces a ZIP.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions about cookies: <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a>.
+    See also <a href="/privacy">Privacy</a> and the <a href="/contact">Contact</a> page.
+  </p>
+</LegalLayout>

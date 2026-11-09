@@ -40,7 +40,6 @@ import { emptySession, loadSession, saveSession } from "@/lib/printify/studio-se
 import { fetchVariants } from "@/lib/printify/catalog-client";
 import { presetsForCategory } from "@/lib/printify/presets";
 import { CATEGORY_SINGULAR } from "@/lib/mockups/categories";
-import { computeFit } from "@/lib/printify/fit";
 import {
   areaCrop,
   areaInches,
@@ -52,10 +51,10 @@ import {
   printAreaFromTemplate,
   printAreaOf,
   printAreaTemplateFrom,
+  seedPrintArea,
   type AreaCrop,
   type PrintAreaOption,
 } from "@/lib/mockups/print-area";
-import { writeStudioPlacement } from "@/lib/mockups/resolve";
 import {
   applyPrintAreaToMockups,
   printAreaScopeTargets,
@@ -65,6 +64,7 @@ import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render"
 import { linkSavedRender } from "@/lib/printify/render-link";
 import { buildStudioListings, catalogProductName } from "@/lib/printify/listing-plan";
 import { saveStudioListingDrafts } from "@/lib/printify/listing-drafts";
+import { isProductMockup } from "@/lib/mockups/info-cards";
 import { canRenderPrintFile, renderPrintFile } from "@/lib/mockups/print-file";
 import { renderComposition } from "@/lib/batch/runner";
 import { Badge, Card } from "@/components/ui/card";
@@ -88,6 +88,33 @@ const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
   { id: "top-60", label: "Top 60%", crop: { x: 0, y: 0, width: 1, height: 0.6 } },
 ];
 
+class PrintAreaCanvasBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <Card className="grid min-h-[420px] place-items-center p-6 text-center">
+          <div>
+            <p className="text-[15px] font-bold text-ink">The print-area canvas could not load.</p>
+            <p className="mt-1 text-sm text-ink-muted">
+              Reload the page. If it still does not open, your mockup or design image may be missing from this browser.
+            </p>
+          </div>
+        </Card>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // react-konva is ~360 kB. It is loaded on demand, when the print area canvas
 // actually opens, so the mockups page does not pay for it.
 const PrintAreaCanvas = React.lazy(() => import("@/components/mockups/print-area-canvas"));
@@ -98,7 +125,13 @@ export function PrintAreasTab({
   /** The mockup the page already chose (from a card's "Set the print area"). */
   initialMockupId?: string | null;
 } = {}) {
-  const mockups = useLiveQuery(() => db.mockups.orderBy("name").toArray(), []);
+  // Info cards are information images, not product photos: they never get a
+  // print area, so they are filtered out here and never appear in this tab.
+  const mockups = useLiveQuery(
+    async () =>
+      (await db.mockups.orderBy("name").toArray()).filter((m) => m.kind !== "info-card"),
+    [],
+  );
   const designs = useLiveQuery(() => db.designs.orderBy("name").toArray(), []);
   const templates = useLiveQuery(
     () => db.templates.where("category").equals("print-area").toArray(),
@@ -158,6 +191,14 @@ export function PrintAreasTab({
    * design. Only a user edit (`markAreaDirty`) claims a draft.
    */
   const draftOwner = React.useRef<string | null>(null);
+  /**
+   * The mockup+design key of an auto-seeded area that the user has not
+   * touched yet. The seed is a draft, never a write: the debounced autosave
+   * only arms on `dirty`, and the seed never sets it. Explicit actions that
+   * promise pixels of exactly what is on screen (Save/Render) DO persist the
+   * seed, so what is stored matches the preview.
+   */
+  const untouchedSeedRef = React.useRef<string | null>(null);
   /** The live debounce handle, so an explicit remove can cancel it. */
   const autoSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -184,6 +225,7 @@ export function PrintAreasTab({
    * `area` state has not been reloaded yet.
    */
   const markAreaDirty = React.useCallback(() => {
+    untouchedSeedRef.current = null;
     draftOwner.current = `${activeMockupId ?? ""}:${designId ?? ""}`;
     draftVersion.current += 1;
     setDirty(true);
@@ -242,6 +284,14 @@ export function PrintAreasTab({
     () => designs?.find((d) => d.id === designId) ?? null,
     [designs, designId],
   );
+  // Read as primitives so the effect below can depend on them honestly: it
+  // re-seeds when the Studio's exact area resolves.
+  const studioBlueprint = session.blueprintId;
+  const studioProvider = session.printProviderId;
+  const categoryPresets = React.useMemo(
+    () => (mockup ? presetsForCategory(mockup.category) : []),
+    [mockup],
+  );
 
   // The ACTIVE design's saved area on this mockup becomes the draft whenever
   // the mockup OR the design tab changes. Each design owns its own frame per
@@ -252,6 +302,7 @@ export function PrintAreasTab({
   // scope the user chose (same type by default).
   React.useEffect(() => {
     if (!mockup) {
+      untouchedSeedRef.current = null;
       setArea(null);
       setDirty(false);
       lastMockupId.current = null;
@@ -260,6 +311,7 @@ export function PrintAreasTab({
     }
     const mockupChanged = lastMockupId.current !== mockup.id;
     const designChanged = lastDesignId.current !== designId;
+    let justFlushed = false;
     if (mockupChanged || designChanged) {
       // Switching away from a draft that has not hit its debounce yet: write
       // it against the OLD mockup AND the old design before the new tab
@@ -270,6 +322,7 @@ export function PrintAreasTab({
         (pending.mockupId !== mockup.id || pending.designId !== designId)
       ) {
         pendingDraft.current = null;
+        justFlushed = true;
         void applyPrintAreaToMockups({
           sourceMockupId: pending.mockupId,
           designId: pending.designId ?? undefined,
@@ -291,9 +344,56 @@ export function PrintAreasTab({
       return;
     }
 
-    setArea(printAreaOf(mockup, designId) ?? null);
+    const stored = printAreaOf(mockup, designId) ?? null;
+    if (stored) {
+      untouchedSeedRef.current = null;
+      setArea(stored);
+      setDirty(false);
+      return;
+    }
+    // Nothing stored: auto-draft a pick the user can save - the Studio's
+    // exact area first, the category's typical size otherwise, nothing when
+    // both are unavailable or the user deliberately removed the area (a null
+    // override wins over any suggestion). A seed never arms the autosave;
+    // persisting it happens on explicit Save/Render. When we JUST flushed the
+    // user's away-switched draft, the stored area is on its way back from
+    // the write, so do not paper over it with a seed this run.
+    if (justFlushed) {
+      untouchedSeedRef.current = null;
+      setArea(null);
+      setDirty(false);
+      return;
+    }
+    const seeded = seedPrintArea(
+      mockup,
+      designId,
+      studioArea && studioBlueprint && studioProvider
+        ? {
+            width: studioArea.width,
+            height: studioArea.height,
+            label: `${studioArea.position}${studioArea.method ? ` (${studioArea.method})` : ""}`,
+            source: {
+              kind: "studio",
+              blueprintId: studioBlueprint,
+              printProviderId: studioProvider,
+              position: studioArea.position,
+              method: studioArea.method,
+            },
+          }
+        : null,
+      categoryPresets[0]
+        ? {
+            width: categoryPresets[0].width,
+            height: categoryPresets[0].height,
+            label: categoryPresets[0].label,
+            source: { kind: "preset", presetId: categoryPresets[0].id },
+          }
+        : null,
+    );
+    untouchedSeedRef.current = seeded ? `${mockup.id}:${designId ?? ""}` : null;
+    setArea(seeded);
     setDirty(false);
-  }, [mockup, dirty, designId]);
+  }, [mockup, dirty, designId, studioArea, studioBlueprint, studioProvider, categoryPresets]);
 
   // The Studio placement for the picked design. Each design owns its
   // placement; every mockup uses it inside that mockup's own frame.
@@ -346,10 +446,6 @@ export function PrintAreasTab({
   // --- the area --------------------------------------------------------------
   const mockupW = mockup?.width ?? 0;
   const mockupH = mockup?.height ?? 0;
-  const categoryPresets = React.useMemo(
-    () => (mockup ? presetsForCategory(mockup.category) : []),
-    [mockup],
-  );
 
   /** Creates the area with a size, keeping the frame where it is. */
   const applyAreaSize = (next: {
@@ -494,11 +590,35 @@ export function PrintAreasTab({
    * false when the write failed, so the caller stops instead of rendering from
    * a half-applied state.
    */
-  const flushDraft = React.useCallback(async (): Promise<boolean> => {
-    if (!dirty || !area) return true;
-    const result = await persistArea(area);
+  /**
+   * Persists the current draft for an explicit user action.
+   *
+   * The scope is ALWAYS explicit at the call site: "Save on this mockup"
+   * stores this design's area on this mockup only, while "Render on every
+   * mockup" applies the draft to every mockup of this type first (so the
+   * renders exist) and then renders them. Neither goes through the broad
+   * `areaScope` default, which stays for the tab-switch and debounce writes
+   * of the staged workflow.
+   */
+  const flushDraft = React.useCallback(async (scope: PrintAreaScope): Promise<boolean> => {
+    if (!dirty) {
+      if (area) {
+        const key = `${mockup?.id ?? ""}:${designId ?? ""}`;
+        if (untouchedSeedRef.current === key) {
+          // An explicit action the user asked for (Save/Render) persists the
+          // auto-seeded area exactly as shown, so the stored pixels match the
+          // preview. The seed itself never arms the autosave.
+          const result = await persistArea(area, { scope });
+          if (result.updated > 0) untouchedSeedRef.current = null;
+          return result.updated > 0;
+        }
+      }
+      return true;
+    }
+    if (!area) return true;
+    const result = await persistArea(area, { scope });
     return result.updated > 0;
-  }, [dirty, area, persistArea]);
+  }, [dirty, area, persistArea, mockup, designId]);
 
   /** The exact print area of the product selected in the Printify Studio. */
   const _useStudioArea = () => {
@@ -575,30 +695,9 @@ export function PrintAreasTab({
   };
 
   // --- the Studio's placement ------------------------------------------------
-  const commitPlacement = async (next: StudioPlacement) => {
-    if (!designId) return;
-    const current = session.placements[designId] ?? session.universalPlacement;
-    const unchanged =
-      current.x === next.x &&
-      current.y === next.y &&
-      current.scale === next.scale &&
-      current.angle === next.angle;
-    if (unchanged) return;
-    // One placement per design. This button changes the picked design only.
-    const updated = await writeStudioPlacement(designId, next, { scope: "design" });
-    setSession(updated);
-  };
-
-  const fitToArea = () => {
-    if (!area || !placement || designMeta.w <= 0) return;
-    const fit = computeFit({
-      artworkWidth: designMeta.w,
-      artworkHeight: designMeta.h,
-      areaWidth: area.areaWidth,
-      areaHeight: area.areaHeight,
-    });
-    void commitPlacement({ ...placement, scale: fit.scale });
-  };
+  // Placement is edited in the Printify Studio (the Design panel). This is
+  // the only writer of placements. The auto-fit action was removed on
+  // purpose and must never come back.
 
   /**
    * Makes this the mockup's placeholder for EVERY design.
@@ -755,8 +854,10 @@ export function PrintAreasTab({
     try {
       // Save the draft FIRST: the fingerprint and the pixels must come from
       // the area that is actually stored, or an unsaved frame would record a
-      // fingerprint the saved area does not reproduce.
-      if (!(await flushDraft())) return;
+      // fingerprint the saved area does not reproduce. This button means
+      // THIS mockup - the button for the whole type is "Render on every
+      // mockup" next to it.
+      if (!(await flushDraft("this"))) return;
       const savedMockup = (await db.mockups.get(mockup.id)) ?? mockup;
       // Resolve transform AND clip from the SAVED design-specific area.
       // renderComposition receives both, so it cannot re-read a different
@@ -860,10 +961,11 @@ export function PrintAreasTab({
     let failed = 0;
     try {
       // Save the active design's draft first, so neither the target set nor a
-      // fingerprint can be derived from an unsaved frame.
-      if (!(await flushDraft())) return;
+      // fingerprint can be derived from an unsaved frame. The draft goes to
+      // every mockup of this type, which is what makes them all renderable.
+      if (!(await flushDraft("category"))) return;
       const freshMockups = await db.mockups.toArray();
-      const targets = freshMockups.filter((m) => printAreaOf(m, design.id));
+      const targets = freshMockups.filter((m) => isProductMockup(m) && printAreaOf(m, design.id));
       if (targets.length === 0) {
         toast.info("No mockup has a print area yet. Set one first.");
         return;
@@ -980,8 +1082,8 @@ export function PrintAreasTab({
       {/* --- the mockup rail --- */}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
-          <span className="text-[13px] font-semibold">Mockups</span>
-          <span className="text-[11px] text-ink-subtle">{mockups?.length ?? 0}</span>
+          <span className="text-sm font-semibold">Mockups</span>
+          <span className="text-xs text-ink-muted">{mockups?.length ?? 0}</span>
         </div>
         <div className="max-h-[640px] overflow-auto p-2">
           {(mockups ?? []).map((m) => {
@@ -1008,23 +1110,23 @@ export function PrintAreasTab({
                   className="mt-1"
                 />
                 <button type="button" onClick={() => setSelectedId(m.id)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-[13px] font-medium">{m.name}</div>
-                  <div className="text-[11px] text-ink-subtle">
+                  <div className="truncate text-sm font-medium">{m.name}</div>
+                  <div className="text-xs text-ink-muted">
                     {m.width}×{m.height} · {CATEGORY_SINGULAR[m.category]}
                   </div>
                   {mArea ? (
                     <div className="mt-1 flex flex-wrap gap-1">
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-xs">
                         {mArea.areaWidth}×{mArea.areaHeight}
                       </Badge>
                       {mArea.reference ? (
-                        <Badge variant="muted" className="text-[10px]">
+                        <Badge variant="muted" className="text-xs">
                           ref {mArea.reference.inches} in
                         </Badge>
                       ) : null}
                     </div>
                   ) : (
-                    <div className="mt-1 text-[10.5px] text-ink-subtle">no area yet</div>
+                    <div className="mt-1 text-[10.5px] text-ink-muted">no area yet</div>
                   )}
                 </button>
               </div>
@@ -1045,7 +1147,7 @@ export function PrintAreasTab({
             mockup, move to the next tab. */}
         {tabDesigns.length === 0 ? (
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-ink-muted">
+            <span className="text-xs text-ink-muted">
               Upload a design in the Printify Studio to place it on a mockup.
             </span>
           </div>
@@ -1065,7 +1167,7 @@ export function PrintAreasTab({
                     onClick={() => setDesignId(d.id)}
                     title={d.name}
                     aria-label={d.name}
-                    className={`border-b-2 px-2.5 py-1 text-[12px] font-semibold transition-colors ${
+                    className={`border-b-2 px-2.5 py-1 text-xs font-semibold transition-colors ${
                       active
                         ? "border-forest text-forest"
                         : "border-transparent text-ink-muted hover:text-ink"
@@ -1086,14 +1188,11 @@ export function PrintAreasTab({
               design's name is on screen - it names what the canvas below is
               editing. */}
           {design ? (
-            <span className="text-[12px] text-ink-subtle">
+            <span className="text-xs text-ink-muted">
               {design.name} · its placement is used on every mockup, and by the Studio
             </span>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={fitToArea} disabled={!area || !design}>
-              Fit to area
-            </Button>
             {area ? (
               <Button size="sm" variant="ghost" onClick={removeArea} title="Remove the print area">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1138,7 +1237,7 @@ export function PrintAreasTab({
                 }}
               />
             ) : (
-              <Card className="p-8 text-center text-[13px] text-ink-muted">
+              <Card className="p-8 text-center text-sm text-ink-muted">
                 Upload a mockup to set a print area on it.
               </Card>
             )}
@@ -1155,7 +1254,7 @@ export function PrintAreasTab({
                     <span className="flex items-center gap-1 text-[11.5px] font-medium">
                       <Crop className="h-3 w-3" /> Visible window
                     </span>
-                    <span className="text-[11px] text-ink-subtle">{describeCrop(crop)}</span>
+                    <span className="text-xs text-ink-muted">{describeCrop(crop)}</span>
                   </div>
                   <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                     <Button
@@ -1193,7 +1292,7 @@ export function PrintAreasTab({
                       </Button>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-[10.5px] leading-snug text-ink-subtle">
+                  <p className="mt-1.5 text-[10.5px] leading-snug text-ink-muted">
                     A window into the area for folded garments: the design is cut at the fold. The
                     area and the print file are not changed.
                   </p>
@@ -1248,7 +1347,7 @@ export function PrintAreasTab({
                   Render on every mockup
                 </Button>
               </div>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-subtle">
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-muted">
                 A template carries the area and the frame as a fraction of the photo. Tick mockups on
                 the left to apply it to them. <strong className="font-medium text-ink-muted">Save on
                 this mockup</strong> saves the composed mockup and uses it in Listing images, and{" "}
@@ -1290,12 +1389,18 @@ function MockupStage({
 }) {
   const [mockupUrl, setMockupUrl] = React.useState<string | null>(null);
   const [designUrl, setDesignUrl] = React.useState<string | null>(null);
+  const [missingMockupBlob, setMissingMockupBlob] = React.useState(false);
 
   React.useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
+    setMissingMockupBlob(false);
     void getAssetBlob(mockup.assetId).then((blob) => {
-      if (cancelled || !blob) return;
+      if (cancelled) return;
+      if (!blob) {
+        setMissingMockupBlob(true);
+        return;
+      }
       url = URL.createObjectURL(blob);
       setMockupUrl(url);
     });
@@ -1325,37 +1430,52 @@ function MockupStage({
     };
   }, [designMeta.assetId]);
 
+  if (missingMockupBlob) {
+    return (
+      <Card className="grid min-h-[420px] place-items-center p-6 text-center">
+        <div>
+          <p className="text-[15px] font-bold text-ink">This mockup image is missing.</p>
+          <p className="mt-1 text-sm text-ink-muted">
+            Re-upload it on the Mockups tab; the print area opens after the image is back.
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
   if (!mockupUrl) {
     return (
-      <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
+      <Card className="grid min-h-[420px] place-items-center text-sm text-ink-muted">
         Loading the mockup…
       </Card>
     );
   }
 
   return (
-    <React.Suspense
-      fallback={
-        <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
-          Loading the canvas…
-        </Card>
-      }
-    >
-      <PrintAreaCanvas
-        mockupUrl={mockupUrl}
-        mockupW={mockup.width}
-        mockupH={mockup.height}
-        designUrl={designUrl}
-        designW={designMeta.w}
-        designH={designMeta.h}
-        area={area}
-        placement={placement}
-        measuring={measuring}
-        cropMode={cropMode}
-        onAreaChange={onAreaChange}
-        onCropChange={onCropChange}
-        onMeasure={onMeasure}
-      />
-    </React.Suspense>
+    <PrintAreaCanvasBoundary>
+      <React.Suspense
+        fallback={
+          <Card className="grid min-h-[420px] place-items-center text-sm text-ink-muted">
+            Loading the canvas…
+          </Card>
+        }
+      >
+        <PrintAreaCanvas
+          mockupUrl={mockupUrl}
+          mockupW={mockup.width}
+          mockupH={mockup.height}
+          designUrl={designUrl}
+          designW={designMeta.w}
+          designH={designMeta.h}
+          area={area}
+          placement={placement}
+          measuring={measuring}
+          cropMode={cropMode}
+          onAreaChange={onAreaChange}
+          onCropChange={onCropChange}
+          onMeasure={onMeasure}
+        />
+      </React.Suspense>
+    </PrintAreaCanvasBoundary>
   );
 }

@@ -1,0 +1,103 @@
+---
+/**
+ * /auth/confirm — the landing site for a Supabase confirmation link.
+ *
+ * Supabase's implicit flow puts the tokens in the URL FRAGMENT (`#access_token=…`),
+ * which never reaches the server, so this page reads them in the browser. If the
+ * project is configured for PKCE the link carries `?code=…` instead, which is
+ * exchanged through /api/auth/callback.
+ */
+import SketchLayout from "@/layouts/SketchLayout.astro";
+import { SketchNav } from "@/components/sketch/nav";
+import { SketchFooter } from "@/components/sketch/footer";
+
+const title = "Confirm your email";
+const description = "Finish creating a ListBulkly account by confirming your email address.";
+---
+
+<SketchLayout title={`${title} — ListBulkly`} description={description} noindex>
+  <SketchNav
+    links={[
+      { href: "/", label: "Home" },
+      { href: "/printify-studio", label: "Studio" },
+    ]}
+    loginHref="/?auth=in"
+    signupHref="/?auth=up"
+    signupLabel="Create account"
+  />
+
+  <main class="sk-container sk-section confirm-page">
+    <span class="sk-cap">ListBulkly · Account</span>
+    <h1 class="sk-part-title">Confirm your email</h1>
+    <p class="sk-note" id="confirm-text">Checking the link…</p>
+    <div class="confirm-page__actions">
+      <a class="sk-btn" href="/?auth=in">Go to log in</a>
+      <a class="sk-btn sk-btn--outline" href="/printify-studio">Open the Studio</a>
+    </div>
+  </main>
+
+  <SketchFooter />
+</SketchLayout>
+
+<script>
+  (function () {
+    const TOKEN_KEY = "mockup-studio:auth-token";
+    const text = document.getElementById("confirm-text") as HTMLElement;
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const query = new URLSearchParams(location.search);
+    const error = hash.get("error_description") || hash.get("error") || query.get("error_description");
+    const token = hash.get("access_token");
+    const code = query.get("code");
+
+    function say(message: string) {
+      text.textContent = message;
+    }
+
+    if (error) {
+      say("That link could not be used: " + error.replace(/\+/g, " "));
+      return;
+    }
+
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      // Keep the token out of the address bar and out of history.
+      history.replaceState(null, "", location.pathname);
+      say("Email confirmed. Taking you to the Studio…");
+      setTimeout(() => location.replace("/printify-studio"), 900);
+      return;
+    }
+
+    if (code) {
+      fetch("/api/auth/callback?code=" + encodeURIComponent(code))
+        .then(async (res) => {
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body.accessToken) {
+            say("That link could not be used: " + (body.message || "it may have expired."));
+            return;
+          }
+          localStorage.setItem(TOKEN_KEY, body.accessToken);
+          history.replaceState(null, "", location.pathname);
+          say("Email confirmed. Taking you to the Studio…");
+          setTimeout(() => location.replace("/printify-studio"), 900);
+        })
+        .catch(() => say("Could not reach the server. Try the link again."));
+      return;
+    }
+
+    say("This link has no confirmation token. Open the newest link from your email, or log in if you already confirmed.");
+  })();
+</script>
+
+<style>
+  .confirm-page {
+    max-width: 44rem;
+    margin-inline: auto;
+  }
+
+  .confirm-page__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+  }
+</style>

@@ -738,9 +738,14 @@ export function createPrintifyClient(explicitKey?: string) {
      * This is how we find a TEMPLATE: a product the seller already made for
      * the same blueprint and print provider carries that provider's real
      * colour values and their hexes, which the catalogue never exposes.
+     * `limit` may not exceed 50 (Printify contract). `page` is 1-based.
      */
-    async listShopProducts(shopId: number, limit = 50): Promise<PrintifyShopProduct[]> {
-      const data = await request<unknown>(`/shops/${shopId}/products.json?limit=${limit}`);
+    async listShopProducts(shopId: number, limit = 50, page = 1): Promise<PrintifyShopProduct[]> {
+      const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit) || 50));
+      const safePage = Math.max(1, Math.trunc(page) || 1);
+      const data = await request<unknown>(
+        `/shops/${shopId}/products.json?limit=${safeLimit}&page=${safePage}`,
+      );
       const list = Array.isArray(data)
         ? data
         : Array.isArray((data as { data?: unknown })?.data)

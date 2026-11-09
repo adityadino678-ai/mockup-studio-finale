@@ -28,7 +28,7 @@ function DropdownMenuContent({
       <DropdownMenuPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-[10rem] overflow-hidden rounded-md border border-border-subtle bg-surface p-1 shadow-pop",
+          "z-50 min-w-[10rem] overflow-hidden rounded-none border-2 border-ink bg-paper p-1 shadow-pop",
           className,
         )}
         {...props}
@@ -45,8 +45,8 @@ function DropdownMenuItem({
   return (
     <DropdownMenuPrimitive.Item
       className={cn(
-        "relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] text-ink outline-none transition-colors",
-        "focus:bg-surface-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex cursor-pointer select-none items-center gap-2 rounded-none px-2 py-1.5 text-xs font-semibold text-ink outline-none transition-colors",
+        "focus:bg-wash data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "[&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:text-ink-muted",
         inset && "pl-8",
         className,
@@ -63,7 +63,7 @@ function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typ
 function DropdownMenuLabel({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Label>) {
   return (
     <DropdownMenuPrimitive.Label
-      className={cn("px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-subtle", className)}
+      className={cn("px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted", className)}
       {...props}
     />
   );
@@ -81,8 +81,8 @@ function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-ink shadow-subtle data-[placeholder]:text-ink-subtle",
-        "focus-visible:border-forest focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "flex h-10 w-full items-center justify-between gap-2 rounded-none border-2 border-ink bg-paper px-3 py-2 text-sm text-ink data-[placeholder]:text-ink-muted",
+        "focus-visible:border-blue disabled:cursor-not-allowed disabled:opacity-50",
         "[&>span]:line-clamp-1 cursor-pointer",
         className,
       )}
@@ -107,7 +107,7 @@ function SelectContent({
       <SelectPrimitive.Content
         position={position}
         className={cn(
-          "relative z-50 max-h-[16rem] min-w-[8rem] overflow-hidden rounded-md border border-border-subtle bg-surface shadow-pop",
+          "relative z-50 max-h-[16rem] min-w-[8rem] overflow-hidden rounded-none border-2 border-ink bg-paper shadow-pop",
           position === "popper" && "w-full min-w-[var(--radix-select-trigger-width)] translate-y-1",
           className,
         )}
@@ -123,8 +123,8 @@ function SelectItem({ className, children, ...props }: React.ComponentProps<type
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-[13px] text-ink outline-none",
-        "focus:bg-surface-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex w-full cursor-pointer select-none items-center rounded-none py-1.5 pl-8 pr-2 text-xs font-semibold text-ink outline-none",
+        "focus:bg-wash data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}
       {...props}
@@ -145,7 +145,10 @@ const Tabs = TabsPrimitive.Root;
 function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
   return (
     <TabsPrimitive.List
-      className={cn("inline-flex h-9 items-center justify-center gap-1 rounded-lg bg-surface-muted p-1", className)}
+      className={cn(
+        "inline-flex h-10 flex-wrap items-center justify-center gap-1 rounded-none border-2 border-ink bg-paper p-1",
+        className,
+      )}
       {...props}
     />
   );
@@ -155,8 +158,8 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[13px] font-medium text-ink transition-colors cursor-pointer",
-        "data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-subtle",
+        "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-none px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink",
+        "data-[state=active]:bg-ink data-[state=active]:text-paper",
         className,
       )}
       {...props}
@@ -183,7 +186,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          "z-50 rounded-md bg-forest px-2.5 py-1.5 text-xs text-white shadow-pop",
+          "z-50 max-w-xs rounded-none border border-orange bg-ink px-2.5 py-1.5 text-xs font-semibold text-paper shadow-pop",
           className,
         )}
         {...props}
@@ -199,8 +202,8 @@ function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxP
       className={cn(
         // A checkbox has no fill until it is checked, so its border IS its
         // only affordance - it has to be clearly visible.
-        "peer h-4 w-4 shrink-0 rounded-[4px] border border-ink-muted bg-surface shadow-subtle",
-        "data-[state=checked]:border-forest data-[state=checked]:bg-forest data-[state=checked]:text-white",
+        "peer h-4 w-4 shrink-0 cursor-pointer rounded-none border-2 border-ink bg-paper",
+        "data-[state=checked]:border-ink data-[state=checked]:bg-ink data-[state=checked]:text-paper",
         "focus-visible:outline-2 focus-visible:outline-forest disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer",
         className,
       )}
@@ -220,13 +223,13 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
       className={cn(
         // 24px tall: the track is the only affordance, so it must clear the
         // 24x24 minimum target size.
-        "peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
-        "data-[state=checked]:bg-forest data-[state=unchecked]:bg-border-strong disabled:cursor-not-allowed disabled:opacity-50",
+        "peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-ink transition-colors",
+        "data-[state=checked]:bg-ink data-[state=unchecked]:bg-wash disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb className="pointer-events-none block h-5 w-5 rounded-full bg-white shadow-subtle transition-transform data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0" />
+      <SwitchPrimitive.Thumb className="pointer-events-none block h-4 w-4 rounded-full border border-ink bg-paper transition-transform data-[state=checked]:translate-x-6 data-[state=unchecked]:translate-x-0.5" />
     </SwitchPrimitive.Root>
   );
 }
@@ -238,10 +241,10 @@ function Slider({ className, ...props }: React.ComponentProps<typeof SliderPrimi
       className={cn("relative flex w-full touch-none select-none items-center", className)}
       {...props}
     >
-      <SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-surface-muted">
-        <SliderPrimitive.Range className="absolute h-full bg-sage" />
+      <SliderPrimitive.Track className="relative h-2 w-full grow overflow-hidden rounded-none border border-ink bg-wash">
+        <SliderPrimitive.Range className="absolute h-full bg-orange" />
       </SliderPrimitive.Track>
-      <SliderPrimitive.Thumb className="block h-3.5 w-3.5 rounded-full border border-forest bg-white shadow-subtle focus-visible:outline-2 focus-visible:outline-forest cursor-pointer" />
+      <SliderPrimitive.Thumb className="block h-4 w-4 cursor-pointer rounded-full border-2 border-ink bg-paper focus-visible:outline-2 focus-visible:outline-blue" />
     </SliderPrimitive.Root>
   );
 }
@@ -261,7 +264,7 @@ function PopoverContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          "z-50 w-72 rounded-md border border-border-subtle bg-surface p-3 shadow-pop outline-none",
+          "z-50 w-72 rounded-none border-2 border-ink bg-paper p-3 shadow-pop outline-none",
           className,
         )}
         {...props}
@@ -274,11 +277,11 @@ function PopoverContent({
 function Progress({ className, value, ...props }: React.ComponentProps<typeof ProgressPrimitive.Root>) {
   return (
     <ProgressPrimitive.Root
-      className={cn("relative h-1.5 w-full overflow-hidden rounded-full bg-surface-muted", className)}
+      className={cn("relative h-2 w-full overflow-hidden rounded-none border border-ink bg-wash", className)}
       {...props}
     >
       <ProgressPrimitive.Indicator
-        className="h-full w-full flex-1 bg-forest transition-transform duration-200"
+        className="h-full w-full flex-1 bg-orange transition-transform duration-200"
         style={{ transform: `translateX(-${100 - (value ?? 0)}%)` }}
       />
     </ProgressPrimitive.Root>
@@ -296,7 +299,7 @@ function ScrollArea({ className, children, ...props }: React.ComponentProps<type
         orientation="vertical"
         className="flex w-2 touch-none select-none p-0.5 bg-transparent transition-colors"
       >
-        <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-border-strong" />
+        <ScrollAreaPrimitive.Thumb className="relative flex-1 rounded-full bg-ink/60" />
       </ScrollAreaPrimitive.Scrollbar>
     </ScrollAreaPrimitive.Root>
   );

@@ -22,6 +22,7 @@ import {
   printAreaFromTemplate,
   printAreaOf,
   printAreaTemplateFrom,
+  seedPrintArea,
   studioPlacementFromTransform,
 } from "@/lib/mockups/print-area";
 import { presetsForCategory, findPrintAreaPreset, PRINT_AREA_PRESETS } from "@/lib/printify/presets";
@@ -468,6 +469,89 @@ describe("a design's print area", () => {
       printProviderId: 30,
       position: "front",
     });
+  });
+});
+
+describe("seedPrintArea", () => {
+  const studioSeed = {
+    width: 4500,
+    height: 5400,
+    label: "front",
+    source: { kind: "studio", blueprintId: 71, printProviderId: 30, position: "front" } as const,
+  };
+  const presetSeed = {
+    width: 4500,
+    height: 5400,
+    label: "Tee · DTG front",
+    source: { kind: "preset", presetId: "tee-dtg-front" } as const,
+  };
+
+  it("prefers the Studio's exact area over a category preset", () => {
+    const seeded = seedPrintArea({ width: 3000, height: 4000 }, null, studioSeed, presetSeed);
+    expect(seeded?.source).toEqual(studioSeed.source);
+    expect(seeded?.label).toBe("front");
+  });
+
+  it("falls back to the preset when the Studio has no area", () => {
+    const seeded = seedPrintArea({ width: 3000, height: 4000 }, null, null, presetSeed);
+    expect(seeded?.source).toEqual(presetSeed.source);
+    expect(seeded?.areaWidth).toBe(4500);
+  });
+
+  it("gives up quietly when neither source exists", () => {
+    expect(seedPrintArea({ width: 3000, height: 4000 }, null, null, null)).toBeNull();
+  });
+
+  it("builds a sensible frame (centred, 40% of the photo width, upright)", () => {
+    const seeded = seedPrintArea({ width: 3000, height: 4000 }, null, studioSeed, null);
+    expect(seeded?.frame.scale).toBeCloseTo(0.4);
+    expect(seeded?.frame.x).toBeCloseTo(0.5);
+    expect(seeded?.frame.rotation).toBe(0);
+    expect(seeded?.clipMode).toBe("area");
+    expect(seeded?.crop).toBeUndefined();
+  });
+
+  it("does not seed when a shared area is already stored", () => {
+    const stored = area();
+    expect(seedPrintArea({ width: 3000, height: 4000, printArea: stored }, null, studioSeed, null)).toBeNull();
+  });
+
+  it("does not seed when THIS design has any override row - including a null one from Remove", () => {
+    expect(
+      seedPrintArea(
+        { width: 3000, height: 4000, designAreas: { a: null } },
+        "a",
+        studioSeed,
+        presetSeed,
+      ),
+    ).toBeNull();
+  });
+
+  it("does not seed when THIS design has a stored override area", () => {
+    expect(
+      seedPrintArea(
+        { width: 3000, height: 4000, designAreas: { a: area() } },
+        "a",
+        studioSeed,
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("seeds other designs when a sibling removed its area", () => {
+    const seeded = seedPrintArea(
+      { width: 3000, height: 4000, designAreas: { a: null } },
+      "b",
+      studioSeed,
+      presetSeed,
+    );
+    expect(seeded?.source).toEqual(studioSeed.source);
+  });
+
+  it("honours a shared area even when the design tab has no override", () => {
+    expect(
+      seedPrintArea({ width: 3000, height: 4000, printArea: area() }, "a", studioSeed, null),
+    ).toBeNull();
   });
 });
 

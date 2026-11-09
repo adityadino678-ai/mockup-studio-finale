@@ -91,7 +91,16 @@ new CustomEvent("mockup-studio:apply-request", {
   mockup selection: every group keeps its `group_key`, `label` and
   `variant_ids`, every group's `mockup_ids` is cleared, and only the new
   uploads are placed in `not_linked`. That is what removes Printify's
-  generated/default mockups. `replace: false` opts back into the old
+  generated/default mockups. Groups that end up with no mockup ids are then
+  **dropped from the PUT** — Printify's own UI does the same, and its validator
+  rejects a variant group sent with an empty `mockup_ids` (HTTP 400). The
+  omitted groups are not lost: Printify keeps them server-side and re-derives
+  their ids against the new selection, so a replaced variant group comes back
+  empty instead of keeping its old generated mockups (verified live against a
+  real product, Nov 2026). Uploaded entries are sent as
+  `{id, src, type: "UPLOADED", ownership: "MPL"}` with the REAL mockup-library
+  id and https URL from the upload step — image-file ids or missing `src` are
+  rejected or silently dropped. `replace: false` opts back into the old
   dedupe/prepend merge; an older payload with no flag is treated as `true`.
 - `requestId` — any string the app makes up (e.g. `crypto.randomUUID()`), echoed
   back so the app can match a late answer to the right dialog. Optional: the

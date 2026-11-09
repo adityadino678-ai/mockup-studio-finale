@@ -1,0 +1,132 @@
+---
+import LegalLayout from "@/layouts/LegalLayout.astro";
+
+const title = "Privacy";
+const description =
+  "What ListBulkly stores on your device, what reaches our server, and which third parties receive data when you press Send, Create or Publish.";
+---
+
+<LegalLayout title={title} description={description}>
+  <p>
+    <strong>Draft.</strong> The facts below describe what this build of the app
+    actually does. The contact address is real; the registered company name,
+    postal address, company number and governing law are still PLACEHOLDER, so this
+    page is not yet a binding policy.
+  </p>
+
+  <h2>The short version</h2>
+  <ul>
+    <li>Your designs, mockups, renders, listing drafts and exports live in this browser's IndexedDB, on your device. We do not keep a copy.</li>
+    <li>Data leaves your browser only when you press a button that sends it: Create on Printify, Send, Publish, an AI chat message, or Etsy research.</li>
+    <li>There are no advertising cookies, no third-party analytics and no tracking pixels.</li>
+    <li>We do not sell personal data, and we do not build advertising profiles.</li>
+    <li>The local tools work without an account.</li>
+  </ul>
+
+  <h2>Who we are</h2>
+  <p>
+    ListBulkly is operated by <strong>PLACEHOLDER — legal entity name, registered
+    address and company number</strong>. Privacy contact:
+    <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a>. This page will be
+    dated and put in force only after those company details exist.
+  </p>
+
+  <h2>What stays on your device</h2>
+  <p>
+    The workspace is local-first. The following are written to IndexedDB for this
+    site's origin and are never uploaded by us:
+  </p>
+  <ul>
+    <li>Artwork files, ink variants and background-removed copies.</li>
+    <li>Mockup photos, print areas, crops and garment references.</li>
+    <li>Composited renders and their fingerprints.</li>
+    <li>Listing drafts, prices, image selections, batch scope and the Studio session.</li>
+    <li>Export history and activity entries.</li>
+  </ul>
+  <p>
+    Small preferences (for example whether the sidebar is collapsed, the selected
+    Printify shop and the extension handshake marker) use
+    <code>localStorage</code>/<code>sessionStorage</code> instead.
+  </p>
+
+  <h2>What our server receives</h2>
+  <ul>
+    <li><strong>Provider requests you trigger.</strong> The server relays them to Printify, an AI provider, Etsy or another integration. The request body is used for that call and is not written to a database.</li>
+    <li><strong>API keys you paste in Settings.</strong> They are saved in this browser's IndexedDB and sent with the matching request as headers. The server uses them for that request only; it does not store them.</li>
+    <li><strong>The operator's own keys.</strong> A site-wide Printify or AI key, when configured, is held as a Cloudflare Worker secret and is never sent to your browser.</li>
+    <li><strong>Request metadata.</strong> Our host (Cloudflare) processes standard request data such as IP address, time, URL and user agent in order to serve and protect the site.</li>
+    <li><strong>Upstream error text.</strong> When Printify rejects a request, its message is shown to you so you can fix the cause. It may name the product or field involved.</li>
+  </ul>
+
+  <h2>Third parties</h2>
+  <p>Nothing is sent to a provider until you use the feature that needs it.</p>
+  <ul>
+    <li><strong>Printify</strong> — creating and updating products, uploading artwork, mockups and the mockup selection, and publishing when you press Publish. Receives the artwork, mockup images, title, description, tags, price and variant data needed for that call.</li>
+    <li><strong>Your chosen AI provider</strong> — the chat messages, prompts and images you send in the agent panel or save-listing tools. The provider is the one you pick; its own privacy terms apply.</li>
+    <li><strong>Etsy</strong> — read-only keyword research. Receives the search query. It does not receive your library, your drafts or your Printify data.</li>
+    <li><strong>Supabase</strong> — sign-in and session handling when authentication is enabled. Receives the email address and session data used to sign you in.</li>
+    <li><strong>Resend</strong> — transactional email, once a verified sending domain exists. Until then Supabase Auth sends its own verification and reset mail.</li>
+    <li><strong>Razorpay</strong> — payments, when billing is switched on. Payment details are entered with Razorpay; we never receive full card numbers.</li>
+    <li><strong>Cloudflare</strong> — hosting, CDN and Worker runtime for this site.</li>
+  </ul>
+  <p>
+    Printify and Etsy are independent companies. ListBulkly is not affiliated with
+    or endorsed by either of them, and their terms apply to the accounts you connect.
+  </p>
+
+  <h2>Cookies</h2>
+  <p>
+    There are no advertising or analytics cookies. The only cookie this site sets is
+    the session cookie created by Supabase Auth once sign-in is enabled; before that,
+    there is no authentication cookie. See <a href="/cookies">Cookies</a> for the
+    full list.
+  </p>
+
+  <h2>Retention and deletion</h2>
+  <ul>
+    <li><strong>On your device:</strong> until you delete the item, clear the site's data in your browser, or the browser evicts storage under pressure. Clearing site data for this origin removes the whole library.</li>
+    <li><strong>Saved API keys:</strong> the Settings page has a "Clear keys from this browser" action.</li>
+    <li><strong>On our server:</strong> there is no design or listing database to retain. Request logs held by our host follow its retention settings.</li>
+    <li><strong>Account data:</strong> deletion requests go to
+      <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a> with "delete my account" in the subject.</li>
+  </ul>
+
+  <h2>Your rights</h2>
+  <p>
+    Depending on where you live, you may have the right to access, correct, export,
+    delete or object to the processing of your personal data, and to complain to your
+    local data-protection authority. Most of your data is already on your device: the
+    Export Center produces a copy, and clearing site data deletes it. For anything
+    held by an account or a provider, contact
+    <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a>. We do not sell
+    personal information.
+  </p>
+
+  <h2>Children</h2>
+  <p>
+    ListBulkly is a seller tool and is not directed to children. It is not intended
+    for use by anyone under 16 (or the minimum age in your jurisdiction —
+    <strong>PLACEHOLDER</strong>).
+  </p>
+
+  <h2>International transfers</h2>
+  <p>
+    The site runs on Cloudflare's global network, and the providers listed above
+    process data in the regions where they operate. Where a transfer needs a legal
+    mechanism, <strong>PLACEHOLDER — transfer mechanism</strong> will be recorded
+    here.
+  </p>
+
+  <h2>Changes</h2>
+  <p>
+    When this policy changes, the date at the top changes with it. A material change
+    will be announced on this page before it takes effect. This draft is not in force
+    yet.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions or requests: <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a>.
+    The full contact details are on the <a href="/contact">Contact</a> page.
+  </p>
+</LegalLayout>

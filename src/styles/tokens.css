@@ -1,0 +1,118 @@
+/*
+ * ListBulkly — "The Sketchbook"
+ * ---------------------------------------------------------------------------
+ * THE single source of truth for colour, type, spacing, shape and motion.
+ *
+ * Rules:
+ *  - The five brand colours below are the whole palette. Do not add hex values
+ *    here or anywhere else. Product mockup imagery is the only exception and
+ *    lives in the tools, not in this system.
+ *  - No component or page may declare its own colour, font-family or spacing
+ *    scale. Read these custom properties instead.
+ *  - Orange is for large display text, stripes and buttons only. Body copy is
+ *    ink on paper; text sitting on blue is paper. That keeps contrast at AA.
+ *  - No gradients anywhere in this system.
+ * ---------------------------------------------------------------------------
+ */
+
+:root {
+  /* --- Palette (approved) ------------------------------------------------ */
+  --paper: #f7f3ec;
+  --ink: #15110e;
+  --blue: #3f63c9;
+  --orange: #e8702a;
+  --wash: #dde5f7;
+
+  /* --- Type -------------------------------------------------------------- */
+  --font-display:
+    "Josefin Sans Variable", "Josefin Sans", "Century Gothic", "Avenir Next",
+    system-ui, sans-serif;
+  --font-body: var(--font-display);
+  --font-hand: "Caveat Variable", Caveat, "Segoe Print", "Bradley Hand", cursive;
+
+  --text-xs: 0.72rem;
+  --text-sm: 0.82rem;
+  --text-base: 1rem;
+  --text-md: 1.1rem;
+  --text-lg: 1.3rem;
+  --text-xl: 1.6rem;
+  --text-2xl: 1.9rem;
+  --text-3xl: 2.6rem;
+  --text-display: clamp(4.5rem, 13vw, 9.5rem);
+  --text-finale: clamp(4rem, 17vw, 12rem);
+  --text-part: clamp(5rem, 15vw, 11rem);
+
+  --weight-regular: 400;
+  --weight-hand: 500;
+  --weight-bold: 700;
+
+  --leading-body: 1.65;
+  --leading-display: 1.15;
+  --leading-flat: 0.9;
+
+  --tracking-display: 0.1em;
+  --tracking-button: 0.16em;
+  --tracking-nav: 0.14em;
+  --tracking-logo: 0.14em;
+  --tracking-marquee: 0.3em;
+  --tracking-tight: 0.02em;
+  --tracking-caption: 0.04em;
+
+  /* --- Spacing (4px base) ------------------------------------------------ */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-14: 3.5rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+
+  /* --- Layout ------------------------------------------------------------ */
+  --content-max: 1100px;
+  --measure: 30em;
+  --gutter: 5vw;
+  --nav-height: 60px;
+  --dialog-max: 400px;
+
+  /* Hairline ink rules instead of boxed cards. */
+  --hairline-width: 1px;
+  --rule-width: 2px;
+  --hairline: var(--hairline-width) solid var(--ink);
+  --rule: var(--rule-width) solid var(--ink);
+
+  /* Square by design: the sketchbook has no rounded cards. */
+  --radius: 0;
+  --shadow-dialog: 8px 8px 0 var(--orange);
+  --backdrop: rgb(21 17 14 / 0.6);
+  --grain-opacity: 0.07;
+
+  /* --- Motion ------------------------------------------------------------ */
+  --ease-draw: cubic-bezier(0.6, 0.1, 0.3, 1);
+  --ease-loop: ease-in-out;
+  --duration-hover: 0.2s;
+  --duration-finale: 0.3s;
+  --duration-draw: 1.5s;
+  --duration-fade: 0.9s;
+  --duration-skeleton: 1.6s;
+  --stagger: 0.3s;
+  --loop-tee: 7s;
+  --loop-scene: 5s;
+  --loop-marquee: 26s;
+  --tilt-hover: -1.5deg;
+  --tilt-marquee: -1.2deg;
+  --tilt-odd: -4deg;
+  --tilt-even: 3deg;
+
+  /* --- Layers ------------------------------------------------------------ */
+  --z-nav: 40;
+  --z-grain: 50;
+  --z-toast: 60;
+}

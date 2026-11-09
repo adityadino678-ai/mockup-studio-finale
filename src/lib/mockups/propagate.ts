@@ -23,6 +23,7 @@
 
 import { db } from "@/lib/db/schema";
 import { printAreaOf } from "@/lib/mockups/print-area";
+import { isProductMockup } from "@/lib/mockups/info-cards";
 import type { Mockup, MockupPrintArea } from "@/types/domain";
 
 export type PrintAreaScope = "this" | "category" | "all";
@@ -40,9 +41,12 @@ export function printAreaScopeTargets(
   source: Mockup,
   scope: PrintAreaScope,
 ): Mockup[] {
+  // Info cards are not product photos, so they never receive a print area or
+  // a design render, even though they share the same `mockups` table.
+  if (!isProductMockup(source)) return [];
   if (scope === "this") return [source];
-  if (scope === "all") return [...mockups];
-  return mockups.filter((m) => m.category === source.category);
+  if (scope === "all") return mockups.filter(isProductMockup);
+  return mockups.filter((m) => isProductMockup(m) && m.category === source.category);
 }
 
 /**

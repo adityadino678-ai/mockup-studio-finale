@@ -1,24 +1,13 @@
 import type { APIRoute } from "astro";
 import { json, serverEnv } from "@/lib/server/env";
 import { credentialsFromRequest } from "@/lib/server/creds";
+import { sameOriginRequest } from "@/lib/server/same-origin";
 import { getProvider } from "@/lib/ai/providers";
 
 // Server-side integration status check. Never returns secret values — only
 // whether credentials are present (in the browser request or on the server),
 // which source they came from, and basic provider info.
 export const prerender = false;
-
-function sameOriginRequest(request: Request): boolean {
-  const site = request.headers.get("sec-fetch-site");
-  if (site && site !== "same-origin" && site !== "none") return false;
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
-}
 
 export const GET: APIRoute = ({ request }) => {
   if (!sameOriginRequest(request)) {
@@ -37,7 +26,7 @@ export const GET: APIRoute = ({ request }) => {
         ? creds.printify.source === "browser"
           ? "Connected using the API key saved in this browser."
           : "Printify connected on the server via PRINTIFY_API_KEY."
-        : "No Printify key. Paste yours in Settings (stored in this browser) or set PRINTIFY_API_KEY on the server.",
+        : "No Printify key yet. Paste yours in Settings → API connections; it stays in this browser.",
       checkedAt: Date.now(),
     },
     etsy: {

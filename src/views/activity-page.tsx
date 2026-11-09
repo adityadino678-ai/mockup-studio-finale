@@ -34,11 +34,8 @@ export function ActivityPage() {
   );
 
   return (
-    <div className="mx-auto max-w-3xl p-8">
-      <PageHeader
-        title="Activity"
-        description="A log of everything that happened in this workspace. The most recent 2,000 events are kept."
-      />
+    <div className="mx-auto max-w-3xl p-5 sm:p-8">
+      <PageHeader title="Activity" description="" />
       {!activity ? (
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -49,7 +46,7 @@ export function ActivityPage() {
         <EmptyState
           icon={<History />}
           title="No activity yet"
-          description="Actions like uploads, placements, batches and exports will be recorded here."
+          description="Nothing recorded yet."
         />
       ) : (
         <Card>
@@ -65,10 +62,10 @@ export function ActivityPage() {
                     <Badge variant={meta.variant} className="w-[92px] justify-center shrink-0">
                       {meta.label}
                     </Badge>
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-ink" title={rec.message}>
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink" title={rec.message}>
                       {rec.message}
                     </span>
-                    <span className="shrink-0 text-[11px] text-ink-subtle">
+                    <span className="shrink-0 text-xs text-ink-muted">
                       {formatDateTime(rec.createdAt)}
                     </span>
                   </li>

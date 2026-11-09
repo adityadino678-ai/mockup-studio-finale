@@ -1,0 +1,6 @@
+# ListBulkly
+# The internal styleguide and the API are not for crawlers. Everything else is.
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /styleguide

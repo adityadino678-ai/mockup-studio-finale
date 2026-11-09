@@ -1,0 +1,80 @@
+---
+/**
+ * 404 — served by Astro for any unmatched path (and fetched from /404.html by the
+ * Cloudflare adapter). It is a real page, not a redirect, so a mistyped URL keeps
+ * its address and the browser keeps its history.
+ */
+import SketchLayout from "@/layouts/SketchLayout.astro";
+import { SketchNav } from "@/components/sketch/nav";
+import { SketchFooter } from "@/components/sketch/footer";
+import { SketchButton } from "@/components/sketch/button";
+
+Astro.response.status = 404;
+
+const title = "Page not found";
+const description =
+  "That address is not on the shelf. The landing page, Printify Studio and the Mockups library are one click away.";
+---
+
+<SketchLayout title={`${title} — ListBulkly`} description={description}>
+  <SketchNav
+    links={[{ href: "/", label: "Home" }, { href: "/printify-studio", label: "Studio" }]}
+    loginHref={null}
+    signupHref="/printify-studio"
+    signupLabel="Open the Studio"
+  />
+
+  <main class="sk-container sk-section not-found">
+    <span class="sk-cap">Error 404</span>
+    <h1 class="sk-part-title not-found__code">404</h1>
+    <p class="sk-note">
+      This page is not on the shelf. Nothing in your library was touched — it lives in
+      this browser, not on the server.
+    </p>
+    <p class="sk-muted not-found__hint">
+      Check the address, or start again from one of these:
+    </p>
+    <div class="not-found__actions">
+      <SketchButton href="/">The landing page</SketchButton>
+      <SketchButton href="/printify-studio" variant="outline">Printify Studio</SketchButton>
+      <SketchButton href="/mockups" variant="outline">Mockups</SketchButton>
+    </div>
+  </main>
+
+  <SketchFooter
+    links={[
+      { href: "/privacy", label: "Privacy" },
+      { href: "/terms", label: "Terms" },
+      { href: "/refunds", label: "Refunds" },
+      { href: "/cookies", label: "Cookies" },
+      { href: "/contact", label: "Contact" },
+    ]}
+  />
+</SketchLayout>
+
+<style>
+  .not-found {
+    max-width: 54rem;
+    margin-inline: auto;
+  }
+
+  .not-found__code {
+    margin: var(--space-3) 0 var(--space-2);
+    font-size: clamp(6rem, 22vw, 12rem);
+    line-height: var(--leading-flat);
+  }
+
+  .not-found__hint {
+    margin-top: var(--space-6);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-nav);
+    font-size: var(--text-xs);
+  }
+
+  .not-found__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+  }
+</style>

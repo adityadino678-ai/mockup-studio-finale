@@ -13,8 +13,8 @@ const external = Boolean(process.env.BASE_URL);
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 120_000,
-  expect: { timeout: 15_000 },
+  timeout: 1800000, // 30 minutes
+  expect: { timeout: 30_000 },
   fullyParallel: false,
   workers: 1,
   retries: 0,

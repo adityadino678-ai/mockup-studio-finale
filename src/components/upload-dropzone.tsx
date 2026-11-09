@@ -64,8 +64,8 @@ export function UploadDropzone({
         className,
       )}
     >
-      <UploadCloud className={cn("text-ink-subtle", compact ? "h-5 w-5" : "h-7 w-7")} />
-      <div className="text-[13px] font-medium text-ink">{label}</div>
+      <UploadCloud className={cn("text-ink-muted", compact ? "h-5 w-5" : "h-7 w-7")} />
+      <div className="text-sm font-medium text-ink">{label}</div>
       {hint && <div className="text-xs text-ink-muted">{hint}</div>}
       <input
         ref={inputRef}

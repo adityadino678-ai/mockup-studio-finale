@@ -7,9 +7,9 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
     <input
       type={type}
       className={cn(
-        "flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors",
-        "placeholder:text-ink-subtle",
-        "focus-visible:border-forest focus-visible:outline-none",
+        "flex h-10 w-full rounded-none border-2 border-ink bg-paper px-3 py-1 text-base text-ink transition-colors",
+        "placeholder:text-ink-muted",
+        "focus-visible:border-blue",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
@@ -22,9 +22,9 @@ function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
-        "flex min-h-[80px] w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-ink shadow-subtle transition-colors",
-        "placeholder:text-ink-subtle",
-        "focus-visible:border-forest focus-visible:outline-none",
+        "flex min-h-[80px] w-full rounded-none border-2 border-ink bg-paper px-3 py-2 text-base text-ink transition-colors",
+        "placeholder:text-ink-muted",
+        "focus-visible:border-blue",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
@@ -36,7 +36,10 @@ function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
 function Label({ className, ...props }: React.ComponentProps<typeof LabelPrimitive.Root>) {
   return (
     <LabelPrimitive.Root
-      className={cn("text-[13px] font-medium text-ink leading-none select-none", className)}
+      className={cn(
+        "select-none text-xs font-bold uppercase leading-none tracking-wide text-ink",
+        className,
+      )}
       {...props}
     />
   );
@@ -60,7 +63,13 @@ function FieldLabel({
   children: React.ReactNode;
 }) {
   return (
-    <LabelPrimitive.Root htmlFor={htmlFor} className={cn("text-[12px] text-ink-muted", className)}>
+    <LabelPrimitive.Root
+      htmlFor={htmlFor}
+      className={cn(
+        "text-xs font-bold uppercase tracking-wide text-ink-muted",
+        className,
+      )}
+    >
       {children}
     </LabelPrimitive.Root>
   );

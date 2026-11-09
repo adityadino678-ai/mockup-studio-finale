@@ -1,36 +1,41 @@
 "use client";
 
 // ---------------------------------------------------------------------------
-// Background removal: two local engines and nothing else.
+// Background removal: hybrid pipeline (Problem 2).
 //
-//   flood-key     - instant, exact and local. It removes a solid background
-//                   that touches the image border, which is what most print
-//                   artwork has.
-//   border-model  - instant and local. It FOLLOWS a background that fades or
-//                   vignettes, so it removes a studio backdrop where the flood
-//                   key leaves a halo.
+//   flood-key     - instant, exact and local. Removes a solid background that
+//                   touches the image border. Used in Auto when the background
+//                   is flat/solid and passes sanity checks. Enclosed
+//                   same-colour areas (e.g. white text on white) stay intact
+//                   because the flood is border-connected only.
+//   border-model  - instant and local. FOLLOWS a background that fades or
+//                   vignettes. Offline fallback when the ML model cannot load.
+//   ml            - in-browser segmentation (onnxruntime-web, MIT; U2Netp /
+//                   U-2-Net full) in a Web Worker (WebGPU when available,
+//                   else single-thread WASM, no COOP/COEP required). Soft mask
+//                   is refined at ORIGINAL resolution (never downscaled output),
+//                   feather 0-2 px, decontaminated via edge-refine.
 //
-// There is no hosted service, no API key and no model download: both engines
-// are deterministic, run on this device and can be used without a limit. A
-// busy photographic background is outside what they can do, and the failure
-// says so instead of silently escalating to something that costs money.
-//
-// The cheap engine runs first and the second one is only used when the first
-// provably cannot help. Every failure is thrown with a message that is safe to
-// show to the user.
+// Auto: flat+solid -> flood-key. Otherwise ML (downscaled copy) -> refine.
+// Artwork/logo/text mode prefers colour-key so text/enclosed areas survive.
+// Photo/object/person mode prefers ML. If the model cannot load (offline, no
+// WebGPU/WASM, blocked), fall back to flood-key / border-model honestly.
 // ---------------------------------------------------------------------------
 
 import { removeBgBorderModel, removeBgFloodKey } from "@/lib/bg-removal/engine";
 import { FLOOD_KEY_DEFAULTS } from "@/lib/bg-removal/flood-key";
 
-export type RemoveEngine = "auto" | "flood-key" | "border-model";
+export type RemoveEngine = "auto" | "flood-key" | "border-model" | "ml";
+export type RemoveMode = "auto" | "artwork" | "photo";
 
 export interface RemoveOutcome {
   blob: Blob;
   /** Fraction of pixels whose ALPHA CHANGED. */
   removed: number;
   /** Which engine actually did the work. */
-  engine: "flood-key" | "border-model";
+  engine: "flood-key" | "border-model" | "ml";
+  /** Honest fallback note when the ML model was unavailable. */
+  warning?: string;
 }
 
 /**
@@ -71,9 +76,17 @@ const ARTWORK_WAS_BACKGROUND =
 
 export interface RemoveOptions {
   engine?: RemoveEngine;
+  /** "auto" (hybrid), "artwork" (colour-key, preserves text), "photo" (ML). */
+  mode?: RemoveMode;
   tolerance?: number;
+  /** Edge feather, 0-2 px (default 1). */
+  feather?: number;
+  modelSize?: "small" | "large";
+  /** Extra colour to remove (colour-pick tool). */
+  extraColour?: { r: number; g: number; b: number } | null;
   /** Called with a short human-readable stage, e.g. "Removing background…". */
   onProgress?: (stage: string) => void;
+  onDownload?: (loaded: number, total: number) => void;
 }
 
 /**
@@ -85,6 +98,7 @@ export interface RemoveOptions {
 export type RemovalDecision =
   | { action: "use-flood-key" }
   | { action: "use-border-model" }
+  | { action: "use-ml" }
   | { action: "escalate" }
   | { action: "artwork-was-background" }
   | { action: "no-background" };
@@ -94,19 +108,19 @@ export type RemovalDecision =
  *
  * The flood-key engine is tried first because it is instant and exact. It is
  * abandoned in exactly one case: it changed almost nothing, which means the
- * background was not a solid colour - so the border model gets its turn.
+ * background was not a solid colour - so the ML / border model gets its turn.
  */
 export function decideRemoval(input: {
   removed: number;
   transparency: number;
-  engine: "flood-key" | "border-model";
+  engine: "flood-key" | "border-model" | "ml";
 }): RemovalDecision {
-  if (input.engine === "border-model") {
+  if (input.engine === "border-model" || input.engine === "ml") {
     if (input.removed < MIN_REMOVED) return { action: "no-background" };
     if (input.transparency > MAX_BORDER_TRANSPARENCY) {
       return { action: "artwork-was-background" };
     }
-    return { action: "use-border-model" };
+    return input.engine === "ml" ? { action: "use-ml" } : { action: "use-border-model" };
   }
   if (input.removed < MIN_REMOVED) return { action: "escalate" };
   if (input.transparency > MAX_TRANSPARENCY) return { action: "artwork-was-background" };
@@ -114,7 +128,7 @@ export function decideRemoval(input: {
 }
 
 /**
- * Removes the background of an image with the local engines.
+ * Removes the background of an image with the hybrid pipeline.
  *
  * Throws an `Error` whose message is safe to show to the user; the caller is
  * expected to catch it and surface the message.
@@ -124,11 +138,34 @@ export async function removeBackgroundAuto(
   opts: RemoveOptions = {},
 ): Promise<RemoveOutcome> {
   const engine = opts.engine ?? "auto";
+  const mode: RemoveMode = opts.mode ?? "auto";
   const tolerance = opts.tolerance ?? FLOOD_KEY_DEFAULTS.tolerance;
+  const feather = Math.max(0, Math.min(2, opts.feather ?? 1));
   const onProgress = opts.onProgress;
+  const onDownload = opts.onDownload;
 
   if (engine === "border-model") {
     return runBorderModel(blob, tolerance, onProgress);
+  }
+
+  if (engine === "ml") {
+    // Forced ML: no flood/border fallback by hand.
+    onProgress?.("Removing background…");
+    const { removeBgMlSegmentation } = await import("@/lib/bg-removal/engine");
+    const result = await removeBgMlSegmentation(blob, {
+      tolerance,
+      feather,
+      modelSize: opts.modelSize ?? "small",
+      onProgress,
+      onDownload,
+    });
+    const decision = decideRemoval({ removed: result.removed, transparency: result.transparency, engine: "ml" });
+    if (decision.action === "artwork-was-background") throw new Error(ARTWORK_WAS_BACKGROUND);
+    if (decision.action !== "use-ml") throw new Error(NO_BACKGROUND);
+    // Extra colour removal (colour-pick tool).
+    const outBlob = opts.extraColour ? await applyExtraColour(result.blob, opts.extraColour, tolerance) : result.blob;
+    onProgress?.("Done");
+    return { blob: outBlob, removed: result.removed, engine: "ml" };
   }
 
   if (engine === "flood-key") {
@@ -151,7 +188,36 @@ export async function removeBackgroundAuto(
     return { blob: result.blob, removed: result.removed, engine: "flood-key" };
   }
 
-  // auto: the solid-background engine first, the faded-backdrop one second.
+  // Photo mode prefers ML directly; artwork prefers colour-key (flood).
+  if (mode === "photo") {
+    onProgress?.("Removing background…");
+    try {
+      const { removeBgMlSegmentation } = await import("@/lib/bg-removal/engine");
+      const ml = await removeBgMlSegmentation(blob, {
+        tolerance,
+        feather,
+        modelSize: opts.modelSize ?? "small",
+        onProgress,
+        onDownload,
+      });
+      const d = decideRemoval({ removed: ml.removed, transparency: ml.transparency, engine: "ml" });
+      if (d.action === "use-ml") {
+        const outBlob = opts.extraColour ? await applyExtraColour(ml.blob, opts.extraColour, tolerance) : ml.blob;
+        onProgress?.("Done");
+        return { blob: outBlob, removed: ml.removed, engine: "ml" };
+      }
+      if (d.action === "artwork-was-background") throw new Error(ARTWORK_WAS_BACKGROUND);
+    } catch (e) {
+      // Fall through to flood/border below and say so honestly via warning.
+      if (e instanceof Error && /artwork itself/i.test(e.message)) throw e;
+    }
+    // ML unavailable or empty -> local fallback with honest note.
+    const fallback = await runAutoLocal(blob, tolerance, onProgress, true);
+    return { ...fallback, warning: "The segmentation model was unavailable, so the local removers were used." };
+  }
+
+  // Auto + artwork: flood first (exact for flat/solid, preserves enclosed
+  // same-colour text). Only escalate when flood provably cannot help.
   onProgress?.("Removing background…");
   const flood = await removeBgFloodKey(blob, tolerance);
   const floodDecision = decideRemoval({
@@ -166,12 +232,82 @@ export async function removeBackgroundAuto(
     throw new Error(ARTWORK_WAS_BACKGROUND);
   }
   if (floodDecision.action === "use-flood-key") {
+    const outBlob = opts.extraColour ? await applyExtraColour(flood.blob, opts.extraColour, tolerance) : flood.blob;
     onProgress?.("Done");
-    return { blob: flood.blob, removed: flood.removed, engine: "flood-key" };
+    return { blob: outBlob, removed: flood.removed, engine: "flood-key" };
   }
 
-  // The flood key found nothing usable: the background is not one flat
-  // colour. The border model follows a gradient or a vignette.
+  if (mode === "artwork") {
+    // Artwork deliberately skips ML so white-on-white text inside the design
+    // survives. Border model is the only escalation.
+    const border = await runAutoLocal(blob, tolerance, onProgress, false);
+    return border;
+  }
+
+  // Auto: not flat/solid. Try the faded-backdrop engine first (instant,
+  // offline, exact for gradients), then ML for busy/photo backgrounds.
+  // Keeping border before ML preserves the fast path and the offline
+  // fallback; ML is the last resort for busy backgrounds both local engines
+  // provably cannot touch.
+  onProgress?.("Removing background (following a faded backdrop)…");
+  try {
+    const border = await removeBgBorderModel(blob, tolerance);
+    const borderDecision = decideRemoval({
+      removed: border.removed,
+      transparency: border.transparency,
+      engine: "border-model",
+    });
+    if (borderDecision.action === "use-border-model") {
+      const outBlob = opts.extraColour ? await applyExtraColour(border.blob, opts.extraColour, tolerance) : border.blob;
+      onProgress?.("Done");
+      return { blob: outBlob, removed: border.removed, engine: "border-model" };
+    }
+    if (borderDecision.action === "artwork-was-background") throw new Error(ARTWORK_WAS_BACKGROUND);
+  } catch (e) {
+    if (e instanceof Error && /artwork itself/i.test(e.message)) throw e;
+    // Border failure just means "continue to ML".
+  }
+
+  // Busy-photo path: ML segmentation, with honest offline fallback.
+  let mlWarning: string | undefined;
+  try {
+    const { removeBgMlSegmentation } = await import("@/lib/bg-removal/engine");
+    onProgress?.("Loading the segmentation model…");
+    const ml = await removeBgMlSegmentation(blob, {
+      tolerance,
+      feather,
+      modelSize: opts.modelSize ?? "small",
+      onProgress,
+      onDownload,
+    });
+    const d = decideRemoval({ removed: ml.removed, transparency: ml.transparency, engine: "ml" });
+    if (d.action === "use-ml") {
+      const outBlob = opts.extraColour ? await applyExtraColour(ml.blob, opts.extraColour, tolerance) : ml.blob;
+      onProgress?.("Done");
+      return { blob: outBlob, removed: ml.removed, engine: "ml" };
+    }
+    if (d.action === "artwork-was-background") throw new Error(ARTWORK_WAS_BACKGROUND);
+    mlWarning = "The segmentation model found nothing to remove.";
+  } catch (e) {
+    if (e instanceof Error && /artwork itself/i.test(e.message)) throw e;
+    mlWarning = "The segmentation model was unavailable (offline, no WebGPU/WASM, or blocked).";
+  }
+
+  throw new Error(
+    mlWarning
+      ? `${NO_BACKGROUND} ${mlWarning} ${BUSY_BACKGROUND}`
+      : `${NO_BACKGROUND} ${BUSY_BACKGROUND}`,
+  );
+}
+
+/** Local-only auto chain (flood already failed) used as the ML fallback. */
+async function runAutoLocal(
+  blob: Blob,
+  tolerance: number,
+  onProgress?: (stage: string) => void,
+  silent: boolean = false,
+): Promise<RemoveOutcome> {
+  void silent;
   onProgress?.("Removing background (following a faded backdrop)…");
   const border = await removeBgBorderModel(blob, tolerance);
   const borderDecision = decideRemoval({
@@ -186,8 +322,33 @@ export async function removeBackgroundAuto(
   if (borderDecision.action === "artwork-was-background") {
     throw new Error(ARTWORK_WAS_BACKGROUND);
   }
-
   throw new Error(`${NO_BACKGROUND} ${BUSY_BACKGROUND}`);
+}
+
+async function applyExtraColour(
+  blob: Blob,
+  colour: { r: number; g: number; b: number },
+  tolerance: number,
+): Promise<Blob> {
+  try {
+    const { removeExtraColourFromPixels } = await import("@/lib/bg-removal/ml-mask");
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Could not get 2D context");
+    ctx.drawImage(bmp, 0, 0);
+    bmp.close();
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    removeExtraColourFromPixels(image.data, canvas.width, canvas.height, colour, tolerance);
+    ctx.putImageData(image, 0, 0);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Canvas export failed"))), "image/png");
+    });
+  } catch {
+    return blob;
+  }
 }
 
 /** The faded-backdrop engine, on its own. */

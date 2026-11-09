@@ -23,14 +23,14 @@ import {
   confirmSaveChatImage,
   confirmSaveListingDetails,
   executeTool,
-} from "@/lib/client/tools";
+} from "@/agent-tools/runners";
 import {
   agentTool,
   etsyQueryFromText,
   parseToolArguments,
   routeIntent,
   toOpenAiTools,
-} from "@/lib/ai/tools";
+} from "@/agent-tools/registry";
 import { loadSession, saveSession } from "@/lib/printify/studio-session";
 import { db } from "@/lib/db/schema";
 import type { ChatMessage, StudioSession } from "@/types/domain";

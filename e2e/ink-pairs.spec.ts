@@ -256,8 +256,8 @@ test("a colour with no ink choice prints on nothing and blocks Create", async ({
   const readout = page.getByText(/Black ink: .* White ink:/);
   await expect(readout).toContainText("Black ink: 1 colour (Black)");
   await expect(readout).toContainText("White ink: 0 colours");
-  await expect(page.getByText(/still need Black ink or White ink/)).toContainText("Navy");
-  await expect(page.getByText(/still need Black ink or White ink/)).toContainText("Create is blocked");
+  await expect(page.getByText(/undecided/i)).toContainText("Navy");
+  await expect(page.getByText(/undecided/i)).toContainText("block Create");
 
   // Create really refuses: the dialog opens, confirming sends nothing, and
   // the reason is the same one the Colors tab named.

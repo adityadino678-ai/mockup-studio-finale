@@ -7,7 +7,7 @@ import type { ToolCallData } from "@/types/domain";
 
 function StatusIcon({ status }: { status: ToolCallData["status"] }) {
   if (status === "running" || status === "pending")
-    return <Loader2 className="h-3 w-3 animate-spin text-ink-subtle" />;
+    return <Loader2 className="h-3 w-3 animate-spin text-ink-muted" />;
   if (status === "error") return <AlertTriangle className="h-3 w-3 text-danger" />;
   return <Check className="h-3 w-3 text-forest" />;
 }
@@ -44,32 +44,32 @@ export function ToolCard({ call, onConfirm, onCancel }: ToolCardProps) {
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
       >
         <StatusIcon status={call.status} />
-        <Wrench className="h-3 w-3 text-ink-subtle" />
-        <span className="text-[12px] font-medium text-ink">{call.name}</span>
-        {call.summary && <span className="min-w-0 flex-1 truncate text-[11px] text-ink-subtle">{call.summary}</span>}
-        <ChevronRight className={cn("ml-auto h-3 w-3 shrink-0 text-ink-subtle transition-transform", open && "rotate-90")} />
+        <Wrench className="h-3 w-3 text-ink-muted" />
+        <span className="text-xs font-medium text-ink">{call.name}</span>
+        {call.summary && <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">{call.summary}</span>}
+        <ChevronRight className={cn("ml-auto h-3 w-3 shrink-0 text-ink-muted transition-transform", open && "rotate-90")} />
       </button>
       {open && (
-        <pre className="scroll-thin max-h-64 overflow-auto border-t border-border-subtle px-3 py-2 text-[11px] leading-relaxed text-ink-muted">
+        <pre className="scroll-thin max-h-64 overflow-auto border-t border-border-subtle px-3 py-2 text-xs leading-relaxed text-ink-muted">
           {detail}
         </pre>
       )}
       {awaitingConfirm && (
         <div className="flex items-center gap-2 border-t border-border-subtle bg-surface-muted px-2.5 py-2">
-          <span className="min-w-0 flex-1 text-[11px] text-ink-muted">
+          <span className="min-w-0 flex-1 text-xs text-ink-muted">
             Nothing is created until you approve.
           </span>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-border-subtle px-2 py-1 text-[11px] text-ink-muted hover:bg-surface hover:text-ink"
+            className="rounded-md border border-border-subtle px-2 py-1 text-xs text-ink-muted hover:bg-surface hover:text-ink"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-md bg-forest px-2.5 py-1 text-[11px] font-medium text-white hover:bg-forest-deep"
+            className="rounded-md bg-forest px-2.5 py-1 text-xs font-medium text-white hover:bg-forest-deep"
           >
             Create
           </button>

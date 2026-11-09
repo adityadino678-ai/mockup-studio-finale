@@ -1,13 +1,12 @@
 ---
-// The root is now the picture-book landing page, not a redirect.
-// It prerenders to static HTML and lives behind the shared CSP (nonce'd
-// inline scripts + Google Fonts from fonts.gstatic.com).
-import AppLayout from "@/layouts/AppLayout.astro";
-import { LandingRoute } from "@/routes/LandingRoute";
+// The public ListBulkly landing page.
+//
+// This is the owner-supplied landing document, served verbatim from
+// `src/landing/exact.html` (doctype, inline style and inline script included).
+// It is intentionally not rendered through SketchLayout: the document owns its
+// own head, fonts and page chrome. Keep it in sync with the supplied file
+// rather than re-implementing it as a React view.
+import landing from "../landing/exact.html?raw";
 ---
 
-<AppLayout>
-  <main>
-    <LandingRoute client:load />
-  </main>
-</AppLayout>
+<Fragment set:html={landing} />

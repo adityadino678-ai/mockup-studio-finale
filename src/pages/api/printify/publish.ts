@@ -84,7 +84,7 @@ export const POST: APIRoute = async ({ request }) => {
     return json(
       {
         error:
-          "Printify is not configured. Paste your Printify API key in Settings, or set PRINTIFY_API_KEY on the server, before publishing.",
+          "Printify is not configured. Paste your Printify API key in Settings → API connections, before publishing.",
       },
       503,
     );

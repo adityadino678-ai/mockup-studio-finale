@@ -3,7 +3,7 @@ import { json } from "@/lib/server/env";
 import { aiConfig, outputTokenBudget, streamChat, type AiMessage } from "@/lib/server/ai";
 import { credentialsFromRequest } from "@/lib/server/creds";
 import { encodeSse } from "@/lib/ai/sse";
-import { toOpenAiTools } from "@/lib/ai/tools";
+import { toOpenAiTools } from "@/agent-tools/registry";
 import { validateBody } from "@/lib/security/validation";
 
 export const prerender = false;
@@ -41,11 +41,21 @@ Etsy ranks listings by relevance to the search query. To rank well:
 Decision table — which tool does "save X" actually mean:
 - draft_listing = IDEATION only. Returns copy ideas. Saves NOTHING. Use it for "draft", "write", "brainstorm", "give me ideas", "what could the title be".
 - save_listing_details = the WRITE. Writes title/description/tags/price into the user's saved listing drafts. Use it for "save", "apply", "update", "set", "change", "commit", "store" — and for "use this copy", "make the title say X", "price it at 24.99". THIS is what the user means when they say "save my listing".
+- read_design_image = look at ONE design before you describe it. Read the design first, then write the copy. Never invent what an image shows.
+- update_checklist = replace the live task checklist shown to the user. Send the whole list every time and keep exactly one item active while you work.
+- ask_user = pause and ask ONE question with short chips. Use it only when genuinely blocked: an unreadable image, an ambiguous design name, or a choice with no safe default. The turn stops until the user answers.
+- spawn_research_pass = one bounded Etsy research pass. At most TWO passes per turn; each pass is shown in the checklist. Reuse the observed data instead of researching again.
 - create_printify_product = the ONLY confirm-gated tool. It uploads artwork and spends the user's Printify key, so it always waits for a click on its card.
 
 How writes behave: the local-write tools (save_listing_details, create_batch_job, create_mockup_render, save_placement, create_ink_variant, remove_background, save_chat_image) run IMMEDIATELY when you call them — no user click needed. Only create_printify_product needs approval. Never tell the user to "approve the card" for a local write; it has already happened by the time your tool result returns.
 
-Never claim an action happened unless a tool result in this conversation shows it. If a tool returned an error, say so plainly.
+## Vision and honesty
+- Before writing a description for a design, call read_design_image for that design. Read ONE design and write ONE description; never describe a design you have not seen in this conversation.
+- If the image cannot be read, or you cannot tell what it shows, say so plainly and call ask_user. Never guess at the artwork, its colours, its text, or its subject.
+- Never claim an action happened unless a tool result in this conversation shows it. If a tool returned an error, say so plainly.
+
+## Description length
+- Write each description at whatever length the design and the request actually need. There is no target, default, minimum or maximum length. Do not pad to a word count and do not truncate to save space.
 
 ## Boundaries
 - You only help with print-on-demand listings, Etsy research/copy, and Mockup Studio workflows.
@@ -60,6 +70,10 @@ interface ChatRequest {
   /** Names of the agent tools this turn may use. */
   tools?: string[];
   maxTokens?: number;
+  /** Surface context: which page, which listing, which agent role. */
+  context?: string;
+  /** The user's Agents Brain instructions - appended to the system prompt. */
+  brain?: string;
   /** When true, emit a `debug` frame describing exactly what was sent upstream. */
   debug?: boolean;
 }
@@ -105,7 +119,19 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ error: "A user message is required" }, 400);
   }
 
-  const messages: AiMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+  // The user's Agents Brain: standing instructions added to the system
+  // prompt. Capped like the surface context; empty means the built-in prompt.
+  const brain = typeof body.brain === "string" ? body.brain.trim().slice(0, 4000) : "";
+  const prompt = brain ? `${SYSTEM_PROMPT}\n\n## User instructions (Agents Brain)\n${brain}` : SYSTEM_PROMPT;
+
+  const messages: AiMessage[] = [{ role: "system", content: prompt }, ...history];
+  const context = typeof body.context === "string" ? body.context.trim().slice(0, 4000) : "";
+  if (context) {
+    messages[0] = {
+      role: "system",
+      content: `${prompt}\n\n## Current surface\n${context}`,
+    };
+  }
   const effort = typeof body.effort === "string" && body.effort.trim() ? body.effort.trim() : undefined;
   const toolNames = Array.isArray(body.tools) ? body.tools : [];
   const tools = toOpenAiTools(toolNames);

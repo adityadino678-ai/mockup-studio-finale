@@ -10,6 +10,7 @@ const MUTATING_PATHS = [
   "/api/etsy/research",
   "/api/ai/assistant",
   "/api/ai/chat",
+  "/api/ai/images",
   "/api/ai/seo",
   "/api/ai/title",
   "/api/integrations/models",
@@ -27,6 +28,20 @@ interface MiddlewareContext {
   locals: { RATE_LIMIT_KV?: unknown } & Record<string, unknown>;
   [key: string]: unknown;
 }
+
+/**
+ * `astro dev` serves every route through this middleware too, but the strict
+ * policy is written for the deployed Worker. In dev it blocks Vite's own
+ * modules - `/@vite/client`, the HMR socket, the CSS module and Astro's dev
+ * toolbar - because they are injected without the per-request nonce. The
+ * visible result is a page that half-loads, then full-reloads itself when Vite
+ * re-optimises a dependency (the HMR client that coordinates that reload is
+ * the script being blocked), which reads as "the buttons stopped working" and
+ * "the page will not load".
+ *
+ * Production keeps the strict nonce policy; only the local dev server skips it.
+ */
+const IS_DEV = import.meta.env.DEV;
 
 export const onRequest = async (context: MiddlewareContext, next: () => Promise<Response>) => {
   const { request } = context;
@@ -49,7 +64,12 @@ export const onRequest = async (context: MiddlewareContext, next: () => Promise<
   applySecurityHeaders(response);
 
   // --- CSP header on every response ---------------------------------------
-  response.headers.set("Content-Security-Policy", cspHeader(nonce));
+  // Dev is exempt: Vite's client/HMR/CSS modules carry no nonce, so a strict
+  // policy breaks the local server instead of protecting anything (see
+  // IS_DEV above). The deployed Worker always sends the policy.
+  if (!IS_DEV) {
+    response.headers.set("Content-Security-Policy", cspHeader(nonce));
+  }
 
   // --- no-store for API responses -----------------------------------------
   if (pathname.startsWith("/api/")) {

@@ -110,8 +110,13 @@ try{
   const mergedIds=replace?newIds:[...newIds,...(existingNot?existingNot.mockup_ids:[]).filter(id=>!newSet.has(id))];
   const notLinked={group_key:'not_linked',label:'not_linked',variant_ids:existingNot?existingNot.variant_ids:[],mockup_ids:[...new Set(mergedIds)]};
   /* Replacement keeps every group's identity and variant partition but drops
-     its old mockup ids, so no generated/default mockup survives. */
-  const groups=[notLinked,...existingClean.filter(g=>g.group_key!=='not_linked').map(g=>replace?Object.assign({},g,{mockup_ids:[]}):g)];
+     its old mockup ids, so no generated/default mockup survives. Groups that
+     end up EMPTY are then dropped from the PUT - Printify's own UI does the
+     same, and today's validator rejects a variant group sent with an empty
+     mockup_ids (HTTP 400). Omitted groups are not lost: the BFF keeps them
+     server-side and empties them against the new selection (verified live,
+     Nov 2026). */
+  const groups=[notLinked,...existingClean.filter(g=>g.group_key!=='not_linked').map(g=>replace?Object.assign({},g,{mockup_ids:[]}):g)].filter(g=>g.mockup_ids.length>0);
   const url=base+'/selected-mockups';
   for(let attempt=0;attempt<4;attempt++){
    const res=await call(url,{method:'PUT',headers,body:JSON.stringify({groups,selected_mockups:selected})});

@@ -31,8 +31,11 @@
  * The payload's `replace` flag (the app sends true) makes the uploads the
  * product's WHOLE selection: Printify's generated/default mockups and any
  * earlier selection are removed from every group, while the groups themselves
- * and their variant ids are preserved. `replace: false` keeps the old
- * dedupe/prepend merge.
+ * and their variant ids are preserved - and every group that ends up with no
+ * mockup ids is dropped from the PUT, which is what Printify's own UI does
+ * (an empty variant group is rejected with HTTP 400; the server keeps omitted
+ * groups and empty them against the new selection). `replace: false` keeps
+ * the old dedupe/prepend merge.
  * ------------------------------------------------------------------------- */
 
 "use strict";
@@ -225,13 +228,20 @@ function applyMockups(payload) {
         };
         /* Replacement keeps every group's identity and variant partition but
            drops its old mockup ids. That is what removes Printify's generated
-           mockups without losing the product's group configuration. */
+           mockups without losing the product's group configuration.
+           Groups that end up EMPTY are then DROPPED from the PUT - Printify's
+           own UI does the same, and today's validator rejects a variant group
+           sent with an empty `mockup_ids` (HTTP 400, Laravel "required"). The
+           omitted groups are not lost: the BFF keeps them server-side and
+           re-derives their ids against the new selection, so a replaced
+           variant group comes back empty instead of keeping its old generated
+           mockups (verified live against the real product, Nov 2026). */
         const groups = [
           notLinked,
           ...existingClean
             .filter((g) => g.group_key !== "not_linked")
             .map((g) => (replace ? Object.assign({}, g, { mockup_ids: [] }) : g)),
-        ];
+        ].filter((g) => g.mockup_ids.length > 0);
 
         const url = base + "/selected-mockups";
         for (let attempt = 0; attempt < 4; attempt++) {
