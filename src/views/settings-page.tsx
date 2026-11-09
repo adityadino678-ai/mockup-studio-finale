@@ -524,8 +524,10 @@ const counts = useLiveQuery(async () => {
                     <Label htmlFor="auth-email">Email</Label>
                     <Input
                       id="auth-email"
+                      name="email"
                       type="email"
                       required
+                      autoComplete="email"
                       className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
                     />
                   </div>
@@ -533,9 +535,11 @@ const counts = useLiveQuery(async () => {
                     <Label htmlFor="auth-password">Password</Label>
                     <Input
                       id="auth-password"
+                      name="password"
                       type="password"
                       required
                       minLength={8}
+                      autoComplete={authMode === "signin" ? "current-password" : "new-password"}
                       className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
                     />
                   </div>
@@ -544,7 +548,9 @@ const counts = useLiveQuery(async () => {
                       <Label htmlFor="auth-full-name">Full name (optional)</Label>
                       <Input
                         id="auth-full-name"
+                        name="full_name"
                         type="text"
+                        autoComplete="name"
                         className="flex h-9 w-full rounded-md border border-border-strong bg-surface px-3 py-1 text-sm text-ink shadow-subtle transition-colors focus-visible:border-forest focus-visible:outline-none"
                       />
                     </div>
