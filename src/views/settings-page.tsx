@@ -44,7 +44,6 @@ import {
   LogOut,
   RefreshCw,
   Search,
-  Server,
   Settings as SettingsIcon,
   Trash2,
   User,
@@ -435,17 +434,14 @@ const counts = useLiveQuery(async () => {
 
   return (
     <div className="mx-auto max-w-3xl p-5 sm:p-8">
-      <PageHeader title="Settings" description="Workspace storage and external integrations." />
+      <PageHeader title="Settings" description="Workspace storage and integrations." />
 
       <Card className="mb-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <HardDrive className="h-4 w-4 text-forest" /> Local storage
           </CardTitle>
-          <CardDescription>
-            ListBulkly stores all designs, mockups and generated images in your browser&rsquo;s
-            IndexedDB. Nothing is uploaded anywhere.
-          </CardDescription>
+          <CardDescription>Stored in this browser only.</CardDescription>
         </CardHeader>
         <CardContent>
           {!counts ? (
@@ -494,9 +490,7 @@ const counts = useLiveQuery(async () => {
               )}
               Account
             </CardTitle>
-            <CardDescription>
-              Sign in with email. Optional — the library stays in this browser.
-            </CardDescription>
+            <CardDescription>Optional.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {!supabaseConfigured && (
@@ -593,9 +587,7 @@ const counts = useLiveQuery(async () => {
           <CardTitle className="flex items-center gap-2">
             <KeyRound className="h-4 w-4 text-forest" /> API connections
           </CardTitle>
-          <CardDescription>
-            Keys stay in this browser (IndexedDB), are sent per-request via the server, and are never stored server-side. Clear any time.
-          </CardDescription>
+          <CardDescription>Keys stay in this browser.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {integrationsError && (
@@ -627,8 +619,7 @@ const counts = useLiveQuery(async () => {
                     placeholder="Paste your Printify personal access token"
                   />
                   <p className="text-[11px] text-ink-subtle">
-                    Create one at{" "}
-                    <a
+                    {"Create one at "}<a
                       href="https://developers.printify.com/"
                       target="_blank"
                       rel="noreferrer"
@@ -636,7 +627,7 @@ const counts = useLiveQuery(async () => {
                     >
                       developers.printify.com
                     </a>
-                    . Used to read the live catalog and to create products you explicitly confirm.
+                    {"."}
                   </p>
                 </div>
 
@@ -694,9 +685,8 @@ const counts = useLiveQuery(async () => {
                     </Button>
                   </div>
                   <p className="text-[11px] text-ink-subtle">
-                    Used for product creation, Send and Publish.
                     {selectedShop && !selectedShop.connected
-                      ? " This shop is not connected to a sales channel (Etsy), so publishing to it will fail — connect it in Printify or pick a connected shop."
+                      ? "This shop is not connected to a sales channel (Etsy), so publishing to it will fail — connect it in Printify or pick a connected shop."
                       : ""}
                   </p>
                   {shopNotice && <p className="text-[11px] text-warning">{shopNotice}</p>}
@@ -966,8 +956,7 @@ const counts = useLiveQuery(async () => {
                       )}
                     </div>
                     <p className="text-[10px] text-ink-subtle">
-                      Fetched live from {def?.label ?? "the provider"}. Free models are tagged from the
-                      provider&rsquo;s own pricing where available.
+                      Free models are tagged where available.
                     </p>
                   </div>
                 )}
@@ -978,10 +967,6 @@ const counts = useLiveQuery(async () => {
               <Separator />
 
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-                  <Server className="h-3.5 w-3.5" /> A server-set key still works as a fallback when no
-                  key is saved here.
-                </p>
                 <div className="flex gap-2">
                   <Button size="sm" variant="ghost" onClick={onClear}>
                     <Trash2 className="h-3.5 w-3.5" /> Clear

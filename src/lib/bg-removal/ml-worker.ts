@@ -25,14 +25,14 @@ let backend: "webgpu" | "wasm" = "wasm";
 
 async function ensureOrt(): Promise<Ort> {
   if (ort) return ort;
-  // @ts-expect-error CDN module has no bundled types here by design.
-  ort = await import(/* @vite-ignore */ `${ORT_CDN}ort.wasm.min.js`);
-  const o = ort as unknown as { env: { wasm: { wasmPaths?: string; numThreads?: number } } };
+  const mod = (await import(/* @vite-ignore */ `${ORT_CDN}ort.wasm.min.js`)) as unknown as Ort;
+  ort = mod;
+  const o = mod as unknown as { env: { wasm: { wasmPaths?: string; numThreads?: number } } };
   if (o && o.env && o.env.wasm) {
     o.env.wasm.wasmPaths = ORT_CDN;
     o.env.wasm.numThreads = 1;
   }
-  return ort;
+  return mod;
 }
 
 function resizeBilinearRgba(

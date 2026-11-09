@@ -3,6 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
+import { HowItWorks } from "@/components/ui/how-it-works";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { UploadDropzone } from "@/components/upload-dropzone";
@@ -260,8 +261,10 @@ export function BackgroundRemoverView() {
     }
   };
 
-  const done = jobs.filter((j) => j.status === "done").length;
-  const failed = jobs.filter((j) => j.status === "error").length;
+  const _done = jobs.filter((j) => j.status === "done").length;
+  const _failed = jobs.filter((j) => j.status === "error").length;
+  void _done;
+  void _failed;
 
   return (
     <div className="mx-auto max-w-6xl p-5 sm:p-8" data-bg-remover-page="">
@@ -269,17 +272,22 @@ export function BackgroundRemoverView() {
         title="Background Remover"
         description="Drop cut-outs here. Edges stay sharp at full size."
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-border-subtle px-2 py-1 text-sm text-ink-muted">
-              {done > 0 ? `${done} done${failed ? ` · ${failed} failed` : ""}` : "No files yet"}
-            </span>
+          <>
+            <HowItWorks
+              title="Background Remover"
+              steps={[
+                "Drop one or many images.",
+                "Choose Auto, Artwork, or Photo.",
+                "Review the cutout, adjust, and download.",
+              ]}
+            />
             <Button size="sm" variant="outline" onClick={downloadActive} disabled={!active?.resultBlob}>
               <Download className="h-3.5 w-3.5" /> PNG
             </Button>
             <Button size="sm" onClick={saveActive} disabled={!active?.resultBlob}>
               <Save className="h-3.5 w-3.5" /> Save to my designs
             </Button>
-          </div>
+          </>
         }
       />
 

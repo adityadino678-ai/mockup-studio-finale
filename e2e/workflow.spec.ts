@@ -602,8 +602,8 @@ test.describe("core workflow", () => {
     // would change the URL while leaving the previous view on screen, so the
     // assertion checks that the target page's own copy is rendered.
     const sections: Array<{ link: RegExp; path: string; copy: RegExp }> = [
-      { link: /^Mockups$/, path: "/mockups", copy: /Photos of your products/ },
-      { link: /^Printify Studio$/, path: "/printify-studio", copy: /Upload designs, choose product\/colours/ },
+      { link: /^Mockups$/, path: "/mockups", copy: /Your product photos/ },
+      { link: /^Printify Studio$/, path: "/printify-studio", copy: /Upload designs, pick a product, create listings/ },
       {
         link: /^Listing images$/,
         path: "/listing-images",
@@ -619,9 +619,9 @@ test.describe("core workflow", () => {
         path: "/listing-preview",
         copy: /Each tab is one listing/,
       },
-      { link: /^Export Center$/, path: "/export", copy: /organized ZIP archive with a manifest/ },
+      { link: /^Export Center$/, path: "/export", copy: /Download organized ZIP archives/ },
       { link: /^Activity$/, path: "/activity", copy: /No activity yet/ },
-      { link: /^Settings$/, path: "/settings", copy: /Workspace storage and external integrations/ },
+      { link: /^Settings$/, path: "/settings", copy: /Workspace storage and integrations/ },
     ];
 
     await gotoApp(page, "/printify-studio");

@@ -105,10 +105,7 @@ export function ExportCenterPage() {
 
   return (
     <div className="mx-auto max-w-5xl p-5 sm:p-8">
-      <PageHeader
-        title="Export Center"
-        description="Download your work as an organized ZIP archive with a manifest."
-      />
+      <PageHeader title="Export Center" description="Download organized ZIP archives." />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
         <Card>

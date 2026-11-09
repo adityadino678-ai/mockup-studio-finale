@@ -2018,7 +2018,7 @@ export function ListingPreviewView() {
           <EmptyState
             icon={<Eye />}
             title="No listings to preview"
-            description="No listings to preview. Tick designs on the Studio's Designs tab; a pair is one listing."
+            description="Tick designs in Studio."
           />
           <div className="flex justify-center">
             <Button asChild size="sm" variant="outline">

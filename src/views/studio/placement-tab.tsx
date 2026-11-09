@@ -530,7 +530,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
         <EmptyState
           icon={<Package />}
           title="Choose a product first"
-          description="The design panel needs a product, because the print area and its size come from the product's placeholders."
+          description="Choose a product."
           actions={[{ label: "Go to Colors", onClick: onGoToColors }]}
         />
       ) : (

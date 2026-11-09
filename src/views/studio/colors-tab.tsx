@@ -462,7 +462,7 @@ export function ColorsTab({
         <EmptyState
           icon={<Package />}
           title="Choose a product"
-          description="Pick the product your designs will be printed on. The colour and size list comes from Printify's live catalogue."
+          description="Choose a product."
         />
       ) : (
         <>
@@ -519,8 +519,7 @@ export function ColorsTab({
                   : "Approximate colours"}
               </span>
             </div>
-            <p className="text-[12px] text-ink-muted">
-              Panels are independent. "No ink" designs print their panel; "Has ink" designs print their panel split black/white. A colour in both panels prints with each row's own artwork.
+            <p className="text-[12px] text-ink-muted">Panels are independent.
             </p>
             {catalog.colourError && (
               <div

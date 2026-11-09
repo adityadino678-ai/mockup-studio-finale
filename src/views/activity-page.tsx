@@ -35,10 +35,7 @@ export function ActivityPage() {
 
   return (
     <div className="mx-auto max-w-3xl p-5 sm:p-8">
-      <PageHeader
-        title="Activity"
-        description="Workspace activity log (latest 2,000 events)."
-      />
+      <PageHeader title="Activity" description="" />
       {!activity ? (
         <div className="space-y-2">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -49,7 +46,7 @@ export function ActivityPage() {
         <EmptyState
           icon={<History />}
           title="No activity yet"
-          description="Actions like uploads, placements, batches and exports will be recorded here."
+          description="Nothing recorded yet."
         />
       ) : (
         <Card>

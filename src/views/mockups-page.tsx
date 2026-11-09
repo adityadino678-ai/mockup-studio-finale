@@ -25,6 +25,7 @@ import { db, getSetting, setSetting } from "@/lib/db/schema";
 import { createMockupFromFile, deleteMockup, updateMockup } from "@/lib/db/repo";
 import type { Mockup, MockupCategory } from "@/types/domain";
 import { PageHeader } from "@/components/layout/page-header";
+import { HowItWorks } from "@/components/ui/how-it-works";
 import { AssetThumb } from "@/components/asset-thumb";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -118,7 +119,17 @@ export function MockupsPage() {
     <div className={cn("mx-auto p-5 sm:p-8", tab === "areas" ? "max-w-[1600px]" : "max-w-6xl")}>
       <PageHeader
         title="Mockups"
-        description="Photos of your products. Uploaded mockups stay on this device."
+        description="Your product photos."
+        actions={
+          <HowItWorks
+            title="Mockups"
+            steps={[
+              "Upload mockup photos.",
+              "Map a Printify print area onto a photo.",
+              "Save renders for listings and export.",
+            ]}
+          />
+        }
       />
 
       {/* The upper section: the library, the info cards, and the print areas. */}

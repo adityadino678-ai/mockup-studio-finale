@@ -194,9 +194,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       inkPairIds: [...new Set([...inkPairIds, blackId, whiteId])],
       designIds: [...new Set([...selected, blackId, whiteId])],
     });
-    toast.success(
-      "Paired as one listing — use the Black ink / White ink boxes to set each design's role",
-    );
+    toast.success("Paired as one listing");
   };
 
   /** The two ticked designs, from the batch checkboxes. */
@@ -599,7 +597,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
             ? `Processing ${uploading} file${uploading > 1 ? "s" : ""}…`
             : "Drop designs here, or click to browse"
         }
-        hint="PNG, JPEG or WebP · up to 40 MB each · multiple files welcome"
+        hint="PNG, JPG, WebP · 40 MB max"
         onFiles={handleFiles}
       />
 

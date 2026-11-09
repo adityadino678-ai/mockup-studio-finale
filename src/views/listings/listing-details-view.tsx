@@ -720,7 +720,7 @@ export function ListingDetailsView() {
         <EmptyState
           icon={<Tags />}
           title="No listings to fill in"
-          description="Tick the designs this batch should create on the Designs tab of the Printify Studio. Each design becomes one listing; a pair becomes one listing shared by both designs."
+          description="Tick designs in Studio."
           actions={[
             { label: "Go to Designs", onClick: () => navigate("/printify-studio") },
           ]}

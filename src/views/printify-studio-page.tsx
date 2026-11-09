@@ -3,6 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/layout/page-header";
+import { HowItWorks } from "@/components/ui/how-it-works";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { DesignsTab } from "@/views/studio/designs-tab";
@@ -425,13 +426,24 @@ export function PrintifyStudioPage() {
     <div className="mx-auto max-w-6xl p-5 sm:p-8">
       <PageHeader
         title="Printify Studio"
-        description="Upload designs, choose product/colours, place artwork, and create one Printify product per design. Products are unpublished drafts; Publish is separate."
+        description="Upload designs, pick a product, create listings."
         actions={
           catalog.configured ? (
-            <Button size="sm" variant="outline" onClick={() => setTab("colors")}>
-              <Cloud className="h-3.5 w-3.5" />
-              {selectedBlueprint ? selectedBlueprint.title : "Choose a product"}
-            </Button>
+            <>
+              <HowItWorks
+                title="Printify Studio"
+                steps={[
+                  "Upload designs in the Designs tab.",
+                  "Pick a product and colours in the Colors tab.",
+                  "Place the artwork in the Design panel.",
+                  "Create one Printify product per design. Send creates an unpublished draft.",
+                ]}
+              />
+              <Button size="sm" variant="outline" onClick={() => setTab("colors")}>
+                <Cloud className="h-3.5 w-3.5" />
+                {selectedBlueprint ? selectedBlueprint.title : "Choose a product"}
+              </Button>
+            </>
           ) : (
             <span className="text-[12px] text-ink-muted">Printify is not connected</span>
           )
