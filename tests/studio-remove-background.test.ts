@@ -17,7 +17,7 @@ import {
 //   flood-key    - exact, needs one flat colour touching the border.
 //   border-model - FOLLOWS a backdrop that fades/vignettes. Offline fallback.
 //   ml           - in-browser segmentation (onnxruntime-web, MIT; U2Netp /
-//                  ISNet general-use) in a Worker. No AGPL, no non-commercial
+//                  U-2-Net full) in a Worker. No AGPL, no non-commercial
 //                  weights, no hosted service (see docs/bg-removal-model.md).
 //
 // Auto chain: flood-key -> border-model -> ml (ML is the last resort for busy

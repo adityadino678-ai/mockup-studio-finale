@@ -19,14 +19,21 @@ cross-origin isolation headers are required).
 
 | Size | Model | Licence | Source | Approx size |
 |---|---|---|---|---|
-| Small (fast) | U2Netp | MIT | https://github.com/NathanUA/U-2-Net | ~4 MB |
-| Large (accurate) | ISNet general-use (DIS) | Apache-2.0 | https://github.com/xaveroam/isnet | ~170 MB |
+| Small (fast) | U2Netp | MIT | https://github.com/NathanUA/U-2-Net | ~4.4 MB |
+| Large (accurate) | U-2-Net (full) | MIT | https://github.com/NathanUA/U-2-Net | ~168 MB |
 
-- **Chosen:** U2Netp (small) by default for speed; ISNet general-use (large)
+- **Chosen:** U2Netp (small) by default for speed; U-2-Net (large, same family)
   offered as the accurate option when the size allows.
-- **Download host:** Hugging Face (`https://huggingface.co/...`), which is a
-  free CORS-enabled host (`Access-Control-Allow-Origin: *`). Models are
-  fetched lazily on first use, cached in Cache Storage
+- **Download host:** Hugging Face mirror
+  (`https://huggingface.co/tomjackson2023/rembg`), which hosts the same
+  weights the MIT-licensed rembg project ships (`u2netp.onnx`, `u2net.onnx`)
+  and serves them CORS-enabled (`Access-Control-Allow-Origin: *`). Both URLs
+  were verified live (HTTP 200, correct sizes) with a headless-browser
+  inference run on 2026-11-09: the model loads in `onnxruntime-web` WASM and
+  the FIRST declared output is the salient subject mask (segmented a real
+  photograph at ~26% of the frame with a clean 0→1 range — the worker takes
+  the first declared output, matching rembg's own `preds[0]` selection).
+  Models are fetched lazily on first use, cached in Cache Storage
   (`listbulkly-ml-v1`), and reused. No large files live in this repository.
 - **Explicitly NOT used:** `@imgly/background-removal` (AGPL) and BRIA RMBG
   1.4 / 2.0 (non-commercial) are prohibited for this commercially licensed

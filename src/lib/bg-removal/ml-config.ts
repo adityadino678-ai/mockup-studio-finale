@@ -1,11 +1,11 @@
 // ML model registry (Problem 2). Commercially licensable only.
 //
 //   - runtime: onnxruntime-web (MIT, commercially usable)
-//   - small:  U2Netp (MIT, NathanUA/U-2-Net), ~4 MB, fast
-//   - large:  ISNet general-use (DIS, Apache-2.0), ~170 MB, accurate
+//   - small:  U2Netp (MIT, NathanUA/U-2-Net), ~4.4 MB, fast
+//   - large:  U-2-Net full (MIT, NathanUA/U-2-Net), ~168 MB, accurate
 //
 // No AGPL packages (e.g. @imgly/background-removal) and no non-commercial
-// weights (e.g. BRIA RMBG 1.4/2.0) are used. See docs/bg-removal-model.md.
+// weights (e.g. BRIA RMBG) are used. See docs/bg-removal-model.md.
 
 export type MlModelSize = "small" | "large";
 
@@ -24,26 +24,28 @@ export const ML_MODELS: Record<MlModelSize, MlModel> = {
     name: "U2Netp",
     licence: "MIT",
     source: "https://github.com/NathanUA/U-2-Net",
-    approxBytes: 4_500_000,
+    approxBytes: 4_574_861,
   },
   large: {
     size: "large",
-    name: "ISNet general-use (DIS)",
-    licence: "Apache-2.0",
-    source: "https://github.com/xaveroam/isnet",
-    approxBytes: 170_000_000,
+    name: "U-2-Net (full)",
+    licence: "MIT",
+    source: "https://github.com/NathanUA/U-2-Net",
+    approxBytes: 175_997_641,
   },
 };
 
 /**
- * CORS-enabled free host for lazy model download (Hugging Face).
- * Models are NEVER committed to git; they are fetched on first use and cached
- * in Cache Storage. If these URLs are blocked, the app falls back honestly to
- * the local flood-key / border-model engines.
+ * CORS-enabled free host for lazy model download (Hugging Face). The
+ * `tomjackson2023/rembg` mirror hosts the same weights the MIT-licensed rembg
+ * project ships, verified reachable (HEAD 200) on 2026-11-09. Models are NEVER
+ * committed to git; they are fetched on first use and cached in Cache Storage.
+ * If these URLs are blocked, the app falls back honestly to the local
+ * flood-key / border-model engines.
  */
 export const ML_MODEL_URLS: Record<MlModelSize, string> = {
-  small: "https://huggingface.co/skytnt/anime-seg/resolve/main/u2netp.onnx",
-  large: "https://huggingface.co/xaveroam/isnet-general-use/resolve/main/isnet-general-use.onnx",
+  small: "https://huggingface.co/tomjackson2023/rembg/resolve/main/u2netp.onnx",
+  large: "https://huggingface.co/tomjackson2023/rembg/resolve/main/u2net.onnx",
 };
 
 /** Input size the worker resizes to before inference (speed vs accuracy). */

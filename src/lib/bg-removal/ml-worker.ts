@@ -135,7 +135,12 @@ self.onmessage = async (event: MessageEvent) => {
       ]);
       const feeds = { [inputName]: tensor } as unknown as Parameters<typeof session.run>[0];
       const results = await session.run(feeds);
-      const out = results[Object.keys(results)[0]] as { data?: Float32Array | Float64Array };
+      // U-2-Net exports several side outputs (d0..d6); d0 is the salient mask.
+      // ORT preserves the graph's declared output order, but never assume it:
+      // pick by name when present, else the declared first output.
+      const outNames = (session as unknown as { outputNames?: readonly string[] }).outputNames ?? Object.keys(results);
+      const chosen = outNames.find((n) => n === "d0") ?? outNames[0];
+      const out = results[chosen] as { data?: Float32Array | Float64Array };
       const raw = out.data ?? new Float32Array(ML_INPUT_SIZE * ML_INPUT_SIZE);
       const mask = new Float32Array(raw.length);
       for (let i = 0; i < raw.length; i++) {
@@ -145,8 +150,11 @@ self.onmessage = async (event: MessageEvent) => {
         // detecting range: values > 1 are logits, values <= 1 are probabilities.
         if (v >= 0 && v <= 1) mask[i] = v;
       }
+      // The mask is square; derive its true size from the data instead of
+      // assuming the model outputs exactly ML_INPUT_SIZE.
+      const side = Math.round(Math.sqrt(mask.length));
       self.postMessage(
-        { id: msg.id, mask, sw: ML_INPUT_SIZE, sh: ML_INPUT_SIZE, backend },
+        { id: msg.id, mask, sw: side, sh: side, backend },
         { transfer: [mask.buffer] },
       );
     }

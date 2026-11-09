@@ -11,7 +11,7 @@
 //   border-model  - instant and local. FOLLOWS a background that fades or
 //                   vignettes. Offline fallback when the ML model cannot load.
 //   ml            - in-browser segmentation (onnxruntime-web, MIT; U2Netp /
-//                   ISNet general-use) in a Web Worker (WebGPU when available,
+//                   U-2-Net full) in a Web Worker (WebGPU when available,
 //                   else single-thread WASM, no COOP/COEP required). Soft mask
 //                   is refined at ORIGINAL resolution (never downscaled output),
 //                   feather 0-2 px, decontaminated via edge-refine.
