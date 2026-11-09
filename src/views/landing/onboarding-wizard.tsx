@@ -94,7 +94,7 @@ export function OnboardingWizard() {
                 saveProgress([], false);
                 setStepIndex(0);
               }}
-              className="px-5 py-2 border-2 border-ink bg-paper text-ink text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-wash"
+              className="px-5 py-2 border-2 border-ink bg-paper text-ink text-xs font-bold uppercase tracking-[0.12em] hover:bg-wash"
             >
               Restart
             </button>
@@ -115,7 +115,7 @@ export function OnboardingWizard() {
       <div className="max-w-3xl mx-auto py-12">
         {/* Progress */}
         <div className="mb-8">
-          <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-blue mb-2">
+          <p className="text-xs font-bold tracking-wide uppercase text-blue mb-2">
             Onboarding {stepIndex + 1} of {STEPS.length}
           </p>
           <div className="w-full bg-wash border border-ink h-2 overflow-hidden">
@@ -153,7 +153,7 @@ export function OnboardingWizard() {
               {stepIndex > 0 && (
                 <button
                   onClick={() => setStepIndex((i) => i - 1)}
-                  className="px-4 py-2 border-2 border-ink bg-paper text-ink text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-wash"
+                  className="px-4 py-2 border-2 border-ink bg-paper text-ink text-xs font-bold uppercase tracking-[0.12em] hover:bg-wash"
                 >
                   Back
                 </button>
@@ -161,7 +161,7 @@ export function OnboardingWizard() {
               {!isDone(current.id) && (
                 <button
                   onClick={() => completeStep(current.id)}
-                  className="px-5 py-2 border-2 border-ink bg-ink text-paper text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-orange hover:text-ink"
+                  className="px-5 py-2 border-2 border-ink bg-ink text-paper text-xs font-bold uppercase tracking-[0.12em] hover:bg-orange hover:text-ink"
                 >
                   {last ? "Finish" : "Next"}
                 </button>
@@ -169,7 +169,7 @@ export function OnboardingWizard() {
               {isDone(current.id) && (
                 <button
                   onClick={() => setStepIndex((i) => i + 1)}
-                  className="px-5 py-2 border-2 border-ink bg-ink text-paper text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-orange hover:text-ink"
+                  className="px-5 py-2 border-2 border-ink bg-ink text-paper text-xs font-bold uppercase tracking-[0.12em] hover:bg-orange hover:text-ink"
                 >
                   Continue
                 </button>

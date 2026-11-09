@@ -46,11 +46,11 @@ function VariantSlot({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[13px] font-medium text-ink">{label}</span>
+        <span className="text-sm font-medium text-ink">{label}</span>
         {assetId ? <Badge>created</Badge> : <Badge variant="outline">missing</Badge>}
       </div>
       <AssetThumb assetId={assetId ?? ""} className="h-[150px] w-full rounded-md border border-border-subtle" checkerboard />
-      <p className="min-h-[28px] text-[11px] leading-relaxed text-ink-muted">{description}</p>
+      <p className="min-h-[28px] text-xs leading-relaxed text-ink-muted">{description}</p>
       <div className="flex flex-wrap gap-1.5">
         {onGenerate && !assetId && (
           <Button variant="outline" size="sm" onClick={onGenerate} disabled={busy}>
@@ -191,7 +191,7 @@ export function InkVariantsDialog({
         <Separator />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[13px] text-ink-muted">Default variant used by batches:</div>
+          <div className="text-sm text-ink-muted">Default variant used by batches:</div>
           <div className="flex gap-1.5">
             {(["main", "white", "black"] as InkVariant[]).map((v) => (
               <Button

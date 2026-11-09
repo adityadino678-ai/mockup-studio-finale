@@ -15,7 +15,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<"h3">) {
 }
 
 function CardDescription({ className, ...props }: React.ComponentProps<"p">) {
-  return <p className={cn("text-[13px] leading-relaxed text-ink-muted", className)} {...props} />;
+  return <p className={cn("text-sm leading-relaxed text-ink-muted", className)} {...props} />;
 }
 
 function CardContent({ className, ...props }: React.ComponentProps<"div">) {
@@ -27,7 +27,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 const badgeVariants = cva(
-  "inline-flex items-center gap-1 whitespace-nowrap rounded-none border px-1.5 py-0.5 text-[9px] font-bold uppercase leading-tight tracking-[0.12em]",
+  "inline-flex items-center gap-1 whitespace-nowrap rounded-none border px-1.5 py-0.5 text-xs font-bold uppercase leading-tight tracking-[0.12em]",
   {
     variants: {
       variant: {

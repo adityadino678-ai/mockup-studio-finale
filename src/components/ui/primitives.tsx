@@ -45,7 +45,7 @@ function DropdownMenuItem({
   return (
     <DropdownMenuPrimitive.Item
       className={cn(
-        "relative flex cursor-pointer select-none items-center gap-2 rounded-none px-2 py-1.5 text-[12px] font-semibold text-ink outline-none transition-colors",
+        "relative flex cursor-pointer select-none items-center gap-2 rounded-none px-2 py-1.5 text-xs font-semibold text-ink outline-none transition-colors",
         "focus:bg-wash data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "[&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:text-ink-muted",
         inset && "pl-8",
@@ -63,7 +63,7 @@ function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typ
 function DropdownMenuLabel({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Label>) {
   return (
     <DropdownMenuPrimitive.Label
-      className={cn("px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-subtle", className)}
+      className={cn("px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted", className)}
       {...props}
     />
   );
@@ -81,7 +81,7 @@ function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "flex h-10 w-full items-center justify-between gap-2 rounded-none border-2 border-ink bg-paper px-3 py-2 text-[14px] text-ink data-[placeholder]:text-ink-subtle",
+        "flex h-10 w-full items-center justify-between gap-2 rounded-none border-2 border-ink bg-paper px-3 py-2 text-sm text-ink data-[placeholder]:text-ink-muted",
         "focus-visible:border-blue disabled:cursor-not-allowed disabled:opacity-50",
         "[&>span]:line-clamp-1 cursor-pointer",
         className,
@@ -123,7 +123,7 @@ function SelectItem({ className, children, ...props }: React.ComponentProps<type
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex w-full cursor-pointer select-none items-center rounded-none py-1.5 pl-8 pr-2 text-[12px] font-semibold text-ink outline-none",
+        "relative flex w-full cursor-pointer select-none items-center rounded-none py-1.5 pl-8 pr-2 text-xs font-semibold text-ink outline-none",
         "focus:bg-wash data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className,
       )}
@@ -158,7 +158,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-none px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink",
+        "inline-flex cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-none px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink",
         "data-[state=active]:bg-ink data-[state=active]:text-paper",
         className,
       )}
@@ -186,7 +186,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          "z-50 max-w-xs rounded-none border border-orange bg-ink px-2.5 py-1.5 text-[11px] font-semibold text-paper shadow-pop",
+          "z-50 max-w-xs rounded-none border border-orange bg-ink px-2.5 py-1.5 text-xs font-semibold text-paper shadow-pop",
           className,
         )}
         {...props}

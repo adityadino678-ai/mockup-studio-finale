@@ -48,11 +48,11 @@ export function AssetImage({ assetId, className, alt, placeholder }: AssetImageP
     return (
       <div
         className={cn(
-          "flex items-center justify-center bg-surface-muted text-ink-subtle",
+          "flex items-center justify-center bg-surface-muted text-ink-muted",
           className,
         )}
       >
-        <span className="text-[11px]">unavailable</span>
+        <span className="text-xs">unavailable</span>
       </div>
     );
   }

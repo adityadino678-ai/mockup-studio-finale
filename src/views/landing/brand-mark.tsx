@@ -80,7 +80,7 @@ export function BrandMark({
       </svg>
       <span
         style={{ fontFamily: "var(--font-display)" }}
-        className="text-[15px] font-bold uppercase tracking-[0.14em] text-ink"
+        className="text-[15px] font-bold uppercase tracking-wide text-ink"
       >
         ListBulkly
       </span>

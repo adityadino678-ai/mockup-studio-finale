@@ -278,10 +278,10 @@ export function ColorsTab({
     return (
       <Card>
         <CardContent className="space-y-2 p-5">
-          <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
+          <div className="flex items-center gap-2 text-sm font-medium text-ink">
             <Package className="h-4 w-4" /> Printify is not connected
           </div>
-          <p className="text-[13px] leading-relaxed text-ink-muted">
+          <p className="text-sm leading-relaxed text-ink-muted">
             {catalog.error ??
               "Paste a Printify API key in Settings to browse the catalogue and create listings. Your designs stay on this device either way."}
           </p>
@@ -298,7 +298,7 @@ export function ColorsTab({
           data-ink-reset=""
           className="flex items-start justify-between gap-3 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2"
         >
-          <p className="text-[12px] leading-relaxed text-ink">
+          <p className="text-xs leading-relaxed text-ink">
             The old automatic colour split was cleared. A colour no longer inherits the ink of a
             similar shade — <strong>only your Black ink / White ink marks decide</strong>. Your
             &ldquo;No ink variants&rdquo; colours were not touched.
@@ -318,7 +318,7 @@ export function ColorsTab({
         <CardContent className="space-y-4 p-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[240px] flex-1 space-y-1.5">
-              <Label className="text-[12px] text-ink-muted">Product</Label>
+              <Label className="text-xs text-ink-muted">Product</Label>
               <Button
                 variant="outline"
                 className="w-full justify-between"
@@ -332,7 +332,7 @@ export function ColorsTab({
               </Button>
             </div>
             <div className="w-[220px] space-y-1.5">
-              <Label className="text-[12px] text-ink-muted">Print provider</Label>
+              <Label className="text-xs text-ink-muted">Print provider</Label>
               <Select
                 value={session.printProviderId ? String(session.printProviderId) : "none"}
                 onValueChange={(v) => update({ printProviderId: v === "none" ? undefined : Number(v) })}
@@ -361,16 +361,16 @@ export function ColorsTab({
             <div className="space-y-3 rounded-lg border border-border-subtle bg-surface-muted/50 p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative w-[260px]">
-                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
                   <Input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search products…"
-                    className="h-8 pl-8 text-[12px]"
+                    className="h-8 pl-8 text-xs"
                   />
                 </div>
                 <Select value={category} onValueChange={setCategory}>
-                  <SelectTrigger className="h-8 w-[190px] text-[12px]">
+                  <SelectTrigger className="h-8 w-[190px] text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -384,7 +384,7 @@ export function ColorsTab({
                     ))}
                   </SelectContent>
                 </Select>
-                <span className="text-[11px] text-ink-subtle">
+                <span className="text-xs text-ink-muted">
                   showing {Math.min(shown.length, filtered.length)} of {filtered.length} matching
                 </span>
               </div>
@@ -428,10 +428,10 @@ export function ColorsTab({
                             <div className="h-20 w-full bg-surface-muted" />
                           )}
                           <div className="p-2">
-                            <div className="truncate text-[12px] font-medium text-ink" title={b.title}>
+                            <div className="truncate text-xs font-medium text-ink" title={b.title}>
                               {b.title}
                             </div>
-                            <div className="truncate text-[10px] text-ink-subtle">{b.brand}</div>
+                            <div className="truncate text-xs text-ink-muted">{b.brand}</div>
                           </div>
                         </button>
                       );
@@ -453,7 +453,7 @@ export function ColorsTab({
           )}
 
           {catalog.error && (
-            <p className="text-[12px] text-danger">{catalog.error}</p>
+            <p className="text-xs text-danger">{catalog.error}</p>
           )}
         </CardContent>
       </Card>
@@ -470,8 +470,8 @@ export function ColorsTab({
           <Card>
             <CardContent className="space-y-3 p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-[14px] font-semibold text-ink">Sizes</h2>
-                <span className="text-[11px] text-ink-muted">
+                <h2 className="text-sm font-semibold text-ink">Sizes</h2>
+                <span className="text-xs text-ink-muted">
                   {session.sizes.length === 0
                     ? "No size selected — every size will be listed."
                     : `${session.sizes.length} selected`}
@@ -491,7 +491,7 @@ export function ColorsTab({
                       size="sm"
                       variant={active ? "default" : "outline"}
                       onClick={() => toggleSize(size)}
-                      className="h-7 min-w-[44px] px-2.5 text-[12px]"
+                      className="h-7 min-w-[44px] px-2.5 text-xs"
                     >
                       {size}
                     </Button>
@@ -504,11 +504,11 @@ export function ColorsTab({
           {/* --- colours, one panel per row --------------------------------- */}
           <div className="space-y-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-[14px] font-semibold text-ink">Which colours each row prints</h2>
+              <h2 className="text-sm font-semibold text-ink">Which colours each row prints</h2>
               <span
                 data-colour-status=""
                 className={cn(
-                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[12px]",
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
                   catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
                     ? "border-forest/30 bg-surface"
                     : "border-dashed border-ink-muted/40 bg-surface-muted/50",
@@ -519,7 +519,7 @@ export function ColorsTab({
                   : "Approximate colours"}
               </span>
             </div>
-            <p className="text-[12px] text-ink-muted">Panels are independent.
+            <p className="text-xs text-ink-muted">Panels are independent.
             </p>
             {catalog.colourError && (
               <div
@@ -527,7 +527,7 @@ export function ColorsTab({
                 data-colour-error=""
                 className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2"
               >
-                <span className="text-[12px] text-ink-muted">Using approximate colours</span>
+                <span className="text-xs text-ink-muted">Using approximate colours</span>
                 {onRetry && (
                   <Button size="sm" variant="outline" onClick={onRetry} disabled={catalog.colourLoading}>
                     Retry
@@ -543,7 +543,7 @@ export function ColorsTab({
               data-hex-editor=""
               className="flex flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2"
             >
-              <span className="text-[12px] text-ink">
+              <span className="text-xs text-ink">
                 {editingHex.name}
               </span>
               <input
@@ -557,7 +557,7 @@ export function ColorsTab({
                 value={editingHex.value}
                 onChange={(e) => setEditingHex((h) => (h ? { ...h, value: e.target.value } : h))}
                 aria-label={`Hex value for ${editingHex.name}`}
-                className="h-8 w-28 text-[12px]"
+                className="h-8 w-28 text-xs"
                 placeholder="#000000"
               />
               <Button
@@ -582,13 +582,13 @@ export function ColorsTab({
                 <CardContent className="space-y-3 p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <div>
-                      <h2 className="text-[14px] font-semibold text-ink">
+                      <h2 className="text-sm font-semibold text-ink">
                         {ROW_LABELS[row]}{" "}
-                        <span className="font-normal text-ink-subtle">
+                        <span className="font-normal text-ink-muted">
                           ({state?.colors.length ?? 0} colours)
                         </span>
                       </h2>
-                      <p className="text-[11px] text-ink-muted">{ROW_HINTS[row]}</p>
+                      <p className="text-xs text-ink-muted">{ROW_HINTS[row]}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant={overCap(row) ? "danger" : "muted"}>
@@ -598,7 +598,7 @@ export function ColorsTab({
                   </div>
 
                   {overCap(row) && (
-                    <p className="flex items-center gap-1.5 text-[12px] text-danger">
+                    <p className="flex items-center gap-1.5 text-xs text-danger">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       Printify allows at most {MAX_VARIANTS} variants per product. Drop a colour or
                       a size.
@@ -619,12 +619,12 @@ export function ColorsTab({
                             className="h-7 w-7 animate-pulse rounded-full bg-surface-muted"
                           />
                         ))}
-                        <span className="w-full text-[12px] text-ink-muted">
+                        <span className="w-full text-xs text-ink-muted">
                           Loading colours…
                         </span>
                       </div>
                     ) : (
-                      <p className="text-[12px] text-ink-muted">
+                      <p className="text-xs text-ink-muted">
                         Choose a print provider to load its colours.
                       </p>
                     )
@@ -638,7 +638,7 @@ export function ColorsTab({
                       {catalog.variantsLoading && (
                         <span
                           role="status"
-                          className="w-full text-[12px] text-ink-muted"
+                          className="w-full text-xs text-ink-muted"
                         >
                           Loading colours for this provider…
                         </span>
@@ -687,12 +687,12 @@ export function ColorsTab({
                     <>
                       <Separator />
                       <div className="space-y-2">
-                        <p className="text-[12px] text-ink-muted">
+                        <p className="text-xs text-ink-muted">
                           Switch each colour between <strong>Black ink</strong> and{" "}
                           <strong>White ink</strong>. A colour prints with the ink you mark and with
                           nothing else — an unmarked colour is not printed by either design.
                         </p>
-                        <p className="text-[12px] font-medium text-ink">
+                        <p className="text-xs font-medium text-ink">
                           Black ink: {blackInkList.length} colour
                           {blackInkList.length === 1 ? "" : "s"}
                           {blackInkList.length > 0 ? ` (${joinShort(blackInkList)})` : ""} · White
@@ -705,7 +705,7 @@ export function ColorsTab({
                         {problems.length > 0 && (
                           <div className="space-y-1">
                             {invisible.length > 0 && (
-                              <p className="text-[12px] font-medium text-danger">
+                              <p className="text-xs font-medium text-danger">
                                 {invisible.length} colour{invisible.length === 1 ? "" : "s"} would be
                                 invisible with the ink you chose.
                               </p>
@@ -714,7 +714,7 @@ export function ColorsTab({
                               <p
                                 key={p.name}
                                 className={cn(
-                                  "flex items-start gap-1.5 text-[12px]",
+                                  "flex items-start gap-1.5 text-xs",
                                   p.severity === "none" ? "text-danger" : "text-warning",
                                 )}
                               >
@@ -740,8 +740,8 @@ export function ColorsTab({
               <CardContent className="space-y-3 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-[14px] font-semibold text-ink">Where each colour prints</h2>
-                    <p className="text-[12px] text-ink-muted">
+                    <h2 className="text-sm font-semibold text-ink">Where each colour prints</h2>
+                    <p className="text-xs text-ink-muted">
                       One row per ink colour. The arrow names the design that will print it, so a
                       misroute is visible before you create anything.
                     </p>
@@ -772,7 +772,7 @@ export function ColorsTab({
                       >
                         <span className="flex min-w-[130px] flex-1 items-center gap-2">
                           <ColorSwatch name={name} hex={hexFor(name)} approximate={isApprox ? isApprox(name) : false} className="h-5 w-5" />
-                          <span className="truncate text-[13px] text-ink">{name}</span>
+                          <span className="truncate text-sm text-ink">{name}</span>
                           {onSetHex && (
                             <input
                               type="color"
@@ -790,7 +790,7 @@ export function ColorsTab({
                             aria-pressed={isBlack}
                             aria-label={`${name}: print with black ink`}
                             onClick={() => setInk(name, "black")}
-                            className="h-7 rounded-l-md px-2.5 text-[11px]"
+                            className="h-7 rounded-l-md px-2.5 text-xs"
                           >
                             Black ink
                           </Button>
@@ -800,14 +800,14 @@ export function ColorsTab({
                             aria-pressed={isWhite}
                             aria-label={`${name}: print with white ink`}
                             onClick={() => setInk(name, "white")}
-                            className="-ml-px h-7 rounded-r-md px-2.5 text-[11px]"
+                            className="-ml-px h-7 rounded-r-md px-2.5 text-xs"
                           >
                             White ink
                           </Button>
                         </span>
                         <span
                           className={cn(
-                            "min-w-[190px] flex-1 text-[12px]",
+                            "min-w-[190px] flex-1 text-xs",
                             undecided ? "text-warning" : "text-forest",
                           )}
                         >
@@ -841,8 +841,8 @@ export function ColorsTab({
           {/* --- the live split readout ------------------------------------- */}
           <Card>
             <CardContent className="space-y-1.5 p-4">
-              <h2 className="text-[14px] font-semibold text-ink">The split, at a glance</h2>
-              <p className="text-[12px] text-ink-muted">
+              <h2 className="text-sm font-semibold text-ink">The split, at a glance</h2>
+              <p className="text-xs text-ink-muted">
                 No ink variants row →{" "}
                 <strong>
                   {plainColors.length} colour{plainColors.length === 1 ? "" : "s"}
@@ -857,7 +857,7 @@ export function ColorsTab({
                 ink.{undecidedInkList.length > 0 ? `, ${undecidedInkList.length} still to decide` : ""}
               </p>
               {undecidedInkList.length > 0 && (
-                <p className="flex items-start gap-1.5 text-[12px] text-warning">
+                <p className="flex items-start gap-1.5 text-xs text-warning">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
                     {undecidedInkList.length} colour
@@ -866,7 +866,7 @@ export function ColorsTab({
                 </p>
               )}
               {inkColors.length > 0 && blackInkList.length === inkColors.length && (
-                <p className="flex items-start gap-1.5 text-[12px] text-warning">
+                <p className="flex items-start gap-1.5 text-xs text-warning">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
                     Every ink colour is on black ink, so the white-ink design would print on
@@ -875,7 +875,7 @@ export function ColorsTab({
                 </p>
               )}
               {inkColors.length > 0 && whiteInkList.length === inkColors.length && (
-                <p className="flex items-start gap-1.5 text-[12px] text-warning">
+                <p className="flex items-start gap-1.5 text-xs text-warning">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
                     Every ink colour is on white ink, so the black-ink design would print on
@@ -884,7 +884,7 @@ export function ColorsTab({
                 </p>
               )}
               {plainColors.length > 0 && inkColors.length > 0 && (
-                <p className="text-[11px] text-ink-subtle">
+                <p className="text-xs text-ink-muted">
                   Colours in both panels: {plainColors.filter((c) => inkColors.includes(c)).length}
                   {(() => {
                     const both = plainColors.filter((c) => inkColors.includes(c));
@@ -897,7 +897,7 @@ export function ColorsTab({
           </Card>
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
-            <p className="text-[12px] text-ink-muted">
+            <p className="text-xs text-ink-muted">
               {catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
                 ? "Colours use the real hexes from your Printify product."
                 : "Approximate colours — right-click a swatch to set the exact hex."}

@@ -210,10 +210,10 @@ export function DesignCard({
       <div className="min-w-0 space-y-1.5 border-t border-border-subtle px-3 py-2">
         <div className="flex items-start justify-between gap-1">
           <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium text-ink" title={design.name}>
+            <div className="truncate text-sm font-medium text-ink" title={design.name}>
               {design.name}
             </div>
-            <div className="truncate text-[11px] text-ink-subtle">{design.dimensions}</div>
+            <div className="truncate text-xs text-ink-muted">{design.dimensions}</div>
           </div>
           {hasActions && (
             <DropdownMenu>
@@ -282,12 +282,12 @@ export function DesignCard({
             />
             <label
               htmlFor={`ink-pair-${design.id}`}
-              className="cursor-pointer text-[11px] text-ink-muted"
+              className="cursor-pointer text-xs text-ink-muted"
             >
               Ink variants
             </label>
             {missingInk && !pairInfo && (
-              <span className="text-[10px] text-warning" data-ink-missing="">
+              <span className="text-xs text-warning" data-ink-missing="">
                 make them first
               </span>
             )}
@@ -300,7 +300,7 @@ export function DesignCard({
           // design is one half of the pair, never both.
           <div className="space-y-1 pt-0.5" data-ink-pair-role="">
             <p
-              className="truncate text-[10px] text-ink-subtle"
+              className="truncate text-xs text-ink-muted"
               title={`Paired with "${pairInfo.partnerName}"`}
             >
               Paired with “{pairInfo.partnerName}”
@@ -340,7 +340,7 @@ export function DesignCard({
                 <button
                   type="button"
                   onClick={onUnpair}
-                  className="ml-auto cursor-pointer text-[10px] text-ink-subtle underline"
+                  className="ml-auto cursor-pointer text-xs text-ink-muted underline"
                 >
                   Unpair
                 </button>

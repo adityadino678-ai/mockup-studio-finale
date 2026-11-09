@@ -1954,7 +1954,7 @@ export function ListingPreviewView() {
               <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
                 <Eye className="h-4 w-4 text-forest" /> Listing preview
               </h2>
-              <p className="text-[12px] text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 Each tab is one listing. <strong>Send</strong> updates the product and stops unpublished; <strong>Publish</strong> is separate.
               </p>
             </div>
@@ -1985,7 +1985,7 @@ export function ListingPreviewView() {
                       title={entry.designName}
                       aria-label={entry.designName}
                       disabled={publishing}
-                      className={`border-b-2 px-2.5 py-1 text-[12px] font-semibold transition-colors disabled:cursor-not-allowed ${
+                      className={`border-b-2 px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
                         active
                           ? "border-forest text-forest"
                           : "border-transparent text-ink-muted hover:text-ink"
@@ -2003,7 +2003,7 @@ export function ListingPreviewView() {
           )}
 
           {listing && (
-            <p className="text-[12px] text-ink-subtle">
+            <p className="text-xs text-ink-muted">
               {listing.partnerName
                 ? `${listing.designName} + ${listing.partnerName} · one listing`
                 : listing.designName}
@@ -2042,10 +2042,10 @@ export function ListingPreviewView() {
                           className="aspect-square w-full"
                           alt={previewCard.name}
                         />
-                        <span className="absolute left-2 top-2 rounded bg-ink px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        <span className="absolute left-2 top-2 rounded bg-ink px-1.5 py-0.5 text-xs font-medium text-white">
                           Info card
                         </span>
-                        <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-[10px] text-white">
+                        <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-xs text-white">
                           {previewCard.name} — uploads after the mockups
                         </span>
                       </div>
@@ -2058,10 +2058,10 @@ export function ListingPreviewView() {
                             alt={`${previewImage.mockup.name} — ${isMainPreview ? "main image" : `preview ${clampedIndex + 1} of ${selected.length}`} for ${listing.designName}`}
                             placeholder={<AssetThumb assetId={previewEntry.assetId} className="aspect-square w-full" alt="" />}
                           />
-                          <span className="absolute left-2 top-2 rounded bg-forest px-1.5 py-0.5 text-[10px] font-medium text-white">
+                          <span className="absolute left-2 top-2 rounded bg-forest px-1.5 py-0.5 text-xs font-medium text-white">
                             {isMainPreview ? "Main image" : `${clampedIndex + 1} / ${selected.length}`}
                           </span>
-                          <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-[10px] text-white">
+                          <span className="absolute bottom-2 left-2 max-w-[80%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-xs text-white">
                             {previewImage.mockup.name}
                           </span>
                         </div>
@@ -2071,9 +2071,9 @@ export function ListingPreviewView() {
                         // image the product does not have.
                         <Link
                           href="/listing-images"
-                          className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed border-border-strong bg-surface-muted/40 p-4 text-center text-[12px] text-ink-muted transition-colors hover:bg-surface-muted"
+                          className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed border-border-strong bg-surface-muted/40 p-4 text-center text-xs text-ink-muted transition-colors hover:bg-surface-muted"
                         >
-                          <CircleDashed className="h-6 w-6 text-ink-subtle" />
+                          <CircleDashed className="h-6 w-6 text-ink-muted" />
                           <span className="font-medium text-ink">Not rendered yet</span>
                           <span>
                             {isMainPreview
@@ -2084,8 +2084,8 @@ export function ListingPreviewView() {
                         </Link>
                       )
                     ) : (
-                      <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed border-border-strong bg-surface-muted/40 p-4 text-center text-[12px] text-ink-muted">
-                        <Images className="h-6 w-6 text-ink-subtle" />
+                      <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-md border border-dashed border-border-strong bg-surface-muted/40 p-4 text-center text-xs text-ink-muted">
+                        <Images className="h-6 w-6 text-ink-muted" />
                         <span className="font-medium text-ink">No images selected</span>
                         <span>
                           {cleared
@@ -2133,7 +2133,7 @@ export function ListingPreviewView() {
                               key={image.mockup.id}
                               href="/listing-images"
                               title={`${image.mockup.name} is not rendered yet`}
-                              className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded border border-dashed border-border-strong bg-surface-muted/40 text-center text-[9px] leading-tight text-ink-muted transition-colors hover:bg-surface-muted"
+                              className="flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded border border-dashed border-border-strong bg-surface-muted/40 text-center text-xs leading-tight text-ink-muted transition-colors hover:bg-surface-muted"
                               aria-label={`${image.mockup.name} — not rendered yet`}
                             >
                               <CircleDashed className="h-3.5 w-3.5" />
@@ -2162,7 +2162,7 @@ export function ListingPreviewView() {
                                 className="h-full w-full"
                                 alt={card.name}
                               />
-                              <span className="absolute bottom-1 right-1 rounded bg-ink/70 px-1 py-0.5 text-[8px] font-medium text-white">
+                              <span className="absolute bottom-1 right-1 rounded bg-ink/70 px-1 py-0.5 text-xs font-medium text-white">
                                 Info
                               </span>
                             </button>
@@ -2171,7 +2171,7 @@ export function ListingPreviewView() {
                       </div>
                     )}
 
-                    <p className="text-[11px] text-ink-subtle">
+                    <p className="text-xs text-ink-muted">
                       {totalItems} image{totalItems === 1 ? "" : "s"} — the first is the
                       main image — chosen on{" "}
                       <Link href="/listing-images" className="text-forest underline">
@@ -2207,7 +2207,7 @@ export function ListingPreviewView() {
                       );
                       if (outdated.length === 0) return null;
                       return (
-                        <p className="text-[11px] text-warning">
+                        <p className="text-xs text-warning">
                           {outdated.length} saved Mockups render
                           {outdated.length === 1 ? "" : "s"} may be out of date. {" "}
                           <Link href="/listing-images" className="text-forest underline">
@@ -2232,7 +2232,7 @@ export function ListingPreviewView() {
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="warning">No price set</Badge>
-                          <Link href="/listing-details" className="text-[11px] text-forest underline">
+                          <Link href="/listing-details" className="text-xs text-forest underline">
                             Set a price on Listing details
                           </Link>
                         </div>
@@ -2244,7 +2244,7 @@ export function ListingPreviewView() {
                         {listingCopy.description}
                       </div>
                     ) : (
-                      <p className="rounded-md bg-surface-muted/50 px-3 py-2 text-[12px] text-ink-subtle">
+                      <p className="rounded-md bg-surface-muted/50 px-3 py-2 text-xs text-ink-muted">
                         No description yet.{" "}
                         <Link href="/listing-details" className="text-forest underline">
                           Write it on Listing details
@@ -2261,7 +2261,7 @@ export function ListingPreviewView() {
                           </Badge>
                         ))
                       ) : (
-                        <span className="text-[11px] text-ink-subtle">
+                        <span className="text-xs text-ink-muted">
                           No tags yet.{" "}
                           <Link href="/listing-details" className="text-forest underline">
                             Add tags
@@ -2271,7 +2271,7 @@ export function ListingPreviewView() {
                     </div>
 
                     {listing.partnerName && (
-                      <p className="rounded-md bg-sage-soft px-3 py-2 text-[11px] text-forest">
+                      <p className="rounded-md bg-sage-soft px-3 py-2 text-xs text-forest">
                         One listing, two designs: <strong>{listing.designName}</strong> prints the
                         colours marked <strong>Black ink</strong>, and{" "}
                         <strong>{listing.partnerName}</strong> prints the colours marked{" "}
@@ -2281,7 +2281,7 @@ export function ListingPreviewView() {
                       </p>
                     )}
 
-                    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 border-t border-border-subtle pt-3 text-[12px]">
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 border-t border-border-subtle pt-3 text-xs">
                       <dt className="text-ink-muted">Product type</dt>
                       <dd className="text-ink">{productName}</dd>
                       <dt className="text-ink-muted">Colours</dt>
@@ -2315,7 +2315,7 @@ export function ListingPreviewView() {
                           <button
                             type="button"
                             onClick={() => openPrintifyProduct(linkedProduct.productId)}
-                            className="inline-flex items-center gap-1 font-mono text-[11px] text-forest hover:underline"
+                            className="inline-flex items-center gap-1 font-mono text-xs text-forest hover:underline"
                           >
                             {linkedProduct.productId}
                             <ExternalLink className="h-3 w-3" />
@@ -2329,7 +2329,7 @@ export function ListingPreviewView() {
                         {targetShop ? (
                           <span className="inline-flex flex-wrap items-center gap-1.5">
                             {targetShop.title || "Untitled shop"}
-                            <span className="font-mono text-[11px] text-ink-muted">
+                            <span className="font-mono text-xs text-ink-muted">
                               #{targetShop.id}
                             </span>
                             {targetShop.connected ? (
@@ -2365,7 +2365,7 @@ export function ListingPreviewView() {
                 <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
                   <ClipboardCheck className="h-4 w-4 text-forest" /> What Printify gets
                 </h2>
-                <p className="text-[12px] text-ink-muted">
+                <p className="text-xs text-ink-muted">
                   Every line is read from this browser right now — nothing here is an estimate. A
                   cross means the shop would get less than a complete listing.
                 </p>
@@ -2382,7 +2382,7 @@ export function ListingPreviewView() {
                       ) : (
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
                       )}
-                      <p className="min-w-0 flex-1 text-[12px] text-ink">
+                      <p className="min-w-0 flex-1 text-xs text-ink">
                         <span className="font-medium">{check.label}</span>
                         <span className="text-ink-muted"> — {check.detail}</span>
                       </p>
@@ -2404,12 +2404,12 @@ export function ListingPreviewView() {
                     <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
                       <Rocket className="h-4 w-4 text-forest" /> Send to Printify
                     </h2>
-                    <p className="text-[12px] text-ink-muted">
+                    <p className="text-xs text-ink-muted">
                       Create the draft if this listing has none, upload its images, and apply the
                       mockup selection. The run stops with the product updated in Printify — it
                       never publishes. Publishing is a separate, explicit click.
                     </p>
-                    <p className="mt-1 text-[11px] text-ink-muted">
+                    <p className="mt-1 text-xs text-ink-muted">
                       {extensionReady
                         ? "Printify bridge extension detected — the mockup step is one click."
                         : "Printify bridge extension not detected — the dialog offers the bookmarklet instead."}
@@ -2439,14 +2439,14 @@ export function ListingPreviewView() {
 
                 {blockers.length > 0 && (
                   <div className="space-y-1 rounded-md bg-surface-muted px-3 py-2">
-                    <p className="text-[12px] font-medium text-ink">
+                    <p className="text-xs font-medium text-ink">
                       Both buttons stay off until this is true:
                     </p>
                     <ul className="space-y-1">
                       {blockers.map((blocker) => (
                         <li
                           key={blocker}
-                          className="flex items-start gap-1.5 text-[11px] text-ink-muted"
+                          className="flex items-start gap-1.5 text-xs text-ink-muted"
                         >
                           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warning" />
                           <span>{blocker}</span>
@@ -2457,12 +2457,12 @@ export function ListingPreviewView() {
                 )}
 
                 {publishedState && (
-                  <div className="space-y-1 rounded-md bg-sage-soft px-3 py-2 text-[12px] text-forest">
+                  <div className="space-y-1 rounded-md bg-sage-soft px-3 py-2 text-xs text-forest">
                     <p className="flex items-center gap-1.5 font-medium">
                       <Check className="h-3.5 w-3.5" /> Published — live on your shop
                     </p>
                     <p className="flex flex-wrap items-center gap-1.5">
-                      Product <span className="font-mono text-[11px]">{publishedState.productId}</span>
+                      Product <span className="font-mono text-xs">{publishedState.productId}</span>
                       <button
                         type="button"
                         onClick={() => openPrintifyProduct(publishedState.productId)}
@@ -2471,7 +2471,7 @@ export function ListingPreviewView() {
                         Open it on Printify <ExternalLink className="h-3 w-3" />
                       </button>
                     </p>
-                    <p className="text-[11px]">
+                    <p className="text-xs">
                       The button above stays off now: publishing an already-published product errors
                       upstream. This page updates unpublished drafts; edit the live product on
                       Printify.
@@ -2518,7 +2518,7 @@ export function ListingPreviewView() {
           {pipeline && (
             <div className="space-y-3">
               {pipeline.phase === "confirm" && (
-                <div className="space-y-1 rounded-md bg-surface-muted px-3 py-2 text-[12px]">
+                <div className="space-y-1 rounded-md bg-surface-muted px-3 py-2 text-xs">
                   <p className="font-medium text-ink">{pipelineCopy?.title}</p>
                   <p className="text-ink-muted">
                     {pipelineCopy?.hasPrice
@@ -2535,7 +2535,7 @@ export function ListingPreviewView() {
                       : "not resolved"}
                   </p>
                   {pipelineMockupsCurrent && (
-                    <p className="rounded-md bg-sage-soft px-2 py-1 text-[11px] text-forest">
+                    <p className="rounded-md bg-sage-soft px-2 py-1 text-xs text-forest">
                       These exact mockups were already applied to this product. Send will
                       update only the title, description, tags and price — no image is
                       re-rendered, re-uploaded or re-applied.
@@ -2547,7 +2547,7 @@ export function ListingPreviewView() {
                       // The shared creation path sends the artwork centred at
                       // its default scale, not this design's custom placement.
                       // Say so before the click, not after the shop shows it.
-                      <p className="text-[11px] text-warning">
+                      <p className="text-xs text-warning">
                         This design has a custom placement. Creating the draft uses the shared
                         creation path, which centres the artwork at 100% on the print area — check
                         the product in Printify after the run.
@@ -2559,22 +2559,22 @@ export function ListingPreviewView() {
               <ol className="space-y-2">
                 {pipeline.steps.map((step, index) => (
                   <li key={step.key} data-step={step.key} data-status={step.status} className="flex gap-2">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[11px] font-semibold text-ink-muted">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold text-ink-muted">
                       {index + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
+                      <p className="flex items-center gap-1.5 text-xs font-medium text-ink">
                         {step.title}
                         <StepIcon status={step.status} />
                       </p>
-                      <p className="text-[11px] leading-relaxed text-ink-muted">{step.detail}</p>
+                      <p className="text-xs leading-relaxed text-ink-muted">{step.detail}</p>
                     </div>
                   </li>
                 ))}
               </ol>
 
               {pipeline.phase === "confirm" && (
-                <p className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
+                <p className="rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
                   {pipelineMockupsCurrent
                     ? "The images are unchanged, so this run only updates the product copy and price. It does NOT publish: the product stays an unpublished draft in Printify."
                     : pipeline.intent === "send"
@@ -2587,10 +2587,10 @@ export function ListingPreviewView() {
                 <div className="space-y-3 rounded-md border border-border-subtle p-3">
                   {extensionReady && (
                     <div className="space-y-1.5 rounded-md border border-forest/40 bg-forest-soft/20 px-3 py-2">
-                      <p className="text-[12px] font-medium text-ink">
+                      <p className="text-xs font-medium text-ink">
                         {applied ? "Mockups applied" : "Apply in Printify — one click"}
                       </p>
-                      <p className="text-[11px] text-ink-muted">
+                      <p className="text-xs text-ink-muted">
                         {applied
                           ? `Applied ${applied.done} of ${applied.total} product${
                               applied.total === 1 ? "" : "s"
@@ -2598,7 +2598,7 @@ export function ListingPreviewView() {
                           : "The Printify bridge extension opens the product in a background tab, selects these mockups with your own sign-in, and closes it. It does not publish."}
                       </p>
                       {applied && applied.failures.length > 0 && (
-                        <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                        <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-2 py-1 text-xs text-warning">
                           {applied.failures.map((line) => (
                             <p key={line}>{line}</p>
                           ))}
@@ -2636,22 +2636,22 @@ export function ListingPreviewView() {
                   )}
 
                   {extensionOld && (
-                    <p className="rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                    <p className="rounded-md bg-warning-soft px-2 py-1 text-xs text-warning">
                       {extensionReloadMessage()}
                     </p>
                   )}
                   <div className="space-y-1.5">
-                    <p className="text-[12px] font-medium text-ink">
+                    <p className="text-xs font-medium text-ink">
                       {extensionReady ? "Or use the bookmarklet" : "1. Copy the payload"}
                     </p>
-                    <p className="text-[11px] text-ink-muted">
+                    <p className="text-xs text-ink-muted">
                       It is copied automatically when the browser allows it; otherwise use the
                       button. The bookmarklet reads this exact text.
                     </p>
                     <Textarea
                       readOnly
                       value={pipeline.payload ?? ""}
-                      className="h-20 font-mono text-[10px]"
+                      className="h-20 font-mono text-xs"
                       onFocus={(event) => event.currentTarget.select()}
                       aria-label="Mockup payload"
                     />
@@ -2660,12 +2660,12 @@ export function ListingPreviewView() {
                     </Button>
                   </div>
                   <div className="space-y-1.5">
-                    <p className="text-[12px] font-medium text-ink">
+                    <p className="text-xs font-medium text-ink">
                       {extensionReady
                         ? "2. Run it on the product"
                         : "2. Apply it in your own Printify session"}
                     </p>
-                    <p className="text-[11px] text-ink-muted">
+                    <p className="text-xs text-ink-muted">
                       Save the bookmarklet once, open{" "}
                       {pipeline.productId ? "this product" : "the product"} on printify.com, then
                       click it. It reads the payload and uses your signed-in session — no token
@@ -2697,7 +2697,7 @@ export function ListingPreviewView() {
                       </Button>
                     </div>
                   </div>
-                  <p className="rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
+                  <p className="rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
                     Continue only once the selection is applied. Continuing records the update in
                     Printify — it does not publish. Publishing is the separate button after this
                     step.
@@ -2706,12 +2706,12 @@ export function ListingPreviewView() {
               )}
 
               {pipeline.phase === "updated" && (
-                <div className="space-y-1.5 rounded-md bg-sage-soft px-3 py-2 text-[12px] text-forest">
+                <div className="space-y-1.5 rounded-md bg-sage-soft px-3 py-2 text-xs text-forest">
                   <p className="flex items-center gap-1.5 font-medium">
                     <Check className="h-3.5 w-3.5" /> Updated in Printify — still unpublished
                   </p>
-                  <p className="font-mono text-[11px]">{pipeline.productId}</p>
-                  <p className="text-[11px]">
+                  <p className="font-mono text-xs">{pipeline.productId}</p>
+                  <p className="text-xs">
                     {pipeline.fastPath
                       ? "Only the title, description, tags and price changed. The mockups were already current, so nothing was re-uploaded or re-applied. Nothing was published."
                       : "The draft now has this listing's images and mockup selection. Nothing was published, so it is not on your shop yet."}{" "}
@@ -2721,12 +2721,12 @@ export function ListingPreviewView() {
               )}
 
               {pipeline.phase === "done" && (
-                <div className="space-y-1.5 rounded-md bg-sage-soft px-3 py-2 text-[12px] text-forest">
+                <div className="space-y-1.5 rounded-md bg-sage-soft px-3 py-2 text-xs text-forest">
                   <p className="flex items-center gap-1.5 font-medium">
                     <Check className="h-3.5 w-3.5" /> Published — live on your shop
                   </p>
-                  <p className="font-mono text-[11px]">{pipeline.productId}</p>
-                  <p className="text-[11px]">
+                  <p className="font-mono text-xs">{pipeline.productId}</p>
+                  <p className="text-xs">
                     Changing the copy here afterwards does not update the live product; edit it on
                     Printify instead.
                   </p>
@@ -2735,12 +2735,12 @@ export function ListingPreviewView() {
 
               {pipeline.phase === "failed" && (
                 <div role="alert" className="space-y-1.5 rounded-md bg-danger-soft px-3 py-2">
-                  <p className="text-[12px] font-medium text-danger">
+                  <p className="text-xs font-medium text-danger">
                     The run stopped. Nothing was retried and nothing after this step ran.
                   </p>
-                  <p className="break-words font-mono text-[11px] text-danger">{pipeline.error}</p>
+                  <p className="break-words font-mono text-xs text-danger">{pipeline.error}</p>
                   {pipeline.errorCode === 8254 && (
-                    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-danger">
+                    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-danger">
                       {pipeline.errorShop && (
                         <span>
                           Shop {pipeline.errorShop.title ? `"${pipeline.errorShop.title}" ` : ""}
@@ -2766,7 +2766,7 @@ export function ListingPreviewView() {
               )}
 
               {pipeline.phase === "failed" && (
-                <p className="text-[11px] text-ink-muted">
+                <p className="text-xs text-ink-muted">
                   A product created before the failure is an unpublished draft. Fix the cause, then
                   open this dialog again: the run restarts from step 1, skips a product that is
                   already linked to this listing, and uploads the images again.

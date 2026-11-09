@@ -62,10 +62,10 @@ export function ActivityPage() {
                     <Badge variant={meta.variant} className="w-[92px] justify-center shrink-0">
                       {meta.label}
                     </Badge>
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-ink" title={rec.message}>
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink" title={rec.message}>
                       {rec.message}
                     </span>
-                    <span className="shrink-0 text-[11px] text-ink-subtle">
+                    <span className="shrink-0 text-xs text-ink-muted">
                       {formatDateTime(rec.createdAt)}
                     </span>
                   </li>

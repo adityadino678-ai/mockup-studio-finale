@@ -87,7 +87,7 @@ export const ColorSwatch = React.memo(function ColorSwatch({
           <span
             aria-hidden
             className={cn(
-              "absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ring-2 ring-surface",
+              "absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ring-2 ring-surface",
               ink === "ambiguous" ? "bg-warning text-white" : "bg-forest text-white",
             )}
           >

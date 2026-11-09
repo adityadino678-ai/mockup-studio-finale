@@ -13,14 +13,14 @@ export function ReasoningBlock({ text, streaming }: { text: string; streaming?: 
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-[11px] font-medium text-ink-muted hover:text-ink"
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs font-medium text-ink-muted hover:text-ink"
       >
         <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
         <Brain className="h-3 w-3" />
         {streaming ? "Reasoning…" : "Reasoning"}
       </button>
       {open && (
-        <div className="scroll-thin max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-border-subtle px-3 py-2 text-[12px] leading-relaxed text-ink-muted">
+        <div className="scroll-thin max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-border-subtle px-3 py-2 text-xs leading-relaxed text-ink-muted">
           {text || "…"}
         </div>
       )}

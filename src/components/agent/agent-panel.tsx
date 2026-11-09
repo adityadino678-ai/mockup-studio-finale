@@ -509,8 +509,8 @@ export function AgentPanel({ surface, onClose }: AgentPanelProps) {
           <Sparkles className="h-3.5 w-3.5" />
         </div>
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="truncate text-[13px] font-semibold text-ink">{title}</div>
-          <div className="truncate text-[10px] text-ink-subtle">
+          <div className="truncate text-sm font-semibold text-ink">{title}</div>
+          <div className="truncate text-xs text-ink-muted">
             {surface === "studio" ? "Image generation" : "Research, write and save listing copy"}
           </div>
         </div>
@@ -518,7 +518,7 @@ export function AgentPanel({ surface, onClose }: AgentPanelProps) {
           type="button"
           onClick={onClose}
           aria-label="Close the agent panel"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted hover:text-ink"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-muted hover:text-ink"
         >
           <X className="h-4 w-4" />
         </button>
@@ -559,14 +559,14 @@ export function AgentPanel({ surface, onClose }: AgentPanelProps) {
             />
           )}
           {error && (
-            <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] leading-relaxed text-danger">
+            <div className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-xs leading-relaxed text-danger">
               {error}
               {canContinue && (
                 <button
                   type="button"
                   onClick={() => void continueTurn()}
                   disabled={busy}
-                  className="mt-2 block rounded-md bg-forest px-2.5 py-1 text-[11px] font-medium text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
+                  className="mt-2 block rounded-md bg-forest px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
                 >
                   Continue
                 </button>
@@ -600,7 +600,7 @@ function Checklist({ items }: { items: AgentChecklistItem[] }) {
   return (
     <ul className="space-y-1" data-agent-checklist>
       {items.map((item, index) => (
-        <li key={index} className="flex items-center gap-2 text-[11px]">
+        <li key={index} className="flex items-center gap-2 text-xs">
           {item.status === "done" ? (
             <Check className="h-3 w-3 shrink-0 text-forest" />
           ) : item.status === "failed" ? (
@@ -610,7 +610,7 @@ function Checklist({ items }: { items: AgentChecklistItem[] }) {
           ) : (
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />
           )}
-          <span className={cn(item.status === "pending" ? "text-ink-subtle" : "text-ink")}>
+          <span className={cn(item.status === "pending" ? "text-ink-muted" : "text-ink")}>
             {item.label}
           </span>
         </li>
@@ -644,14 +644,14 @@ function QuestionCard({
       role="group"
       aria-label="The agent is waiting for an answer"
     >
-      <p className="mb-2 text-[12px] font-medium leading-relaxed text-ink">{question.question}</p>
+      <p className="mb-2 text-xs font-medium leading-relaxed text-ink">{question.question}</p>
       <div className="mb-2 flex flex-wrap gap-1.5">
         {question.options.map((option) => (
           <button
             key={option}
             type="button"
             onClick={() => onAnswer(option)}
-            className="rounded-full border border-border-strong bg-surface px-2.5 py-1 text-[11px] text-ink transition-colors hover:border-forest hover:text-forest"
+            className="rounded-full border border-border-strong bg-surface px-2.5 py-1 text-xs text-ink transition-colors hover:border-forest hover:text-forest"
           >
             {option}
           </button>
@@ -670,12 +670,12 @@ function QuestionCard({
             onChange={(e) => onChange(e.target.value)}
             placeholder="Or type your own answer…"
             aria-label="Your answer"
-            className="h-7 min-w-0 flex-1 rounded-md border border-border-strong bg-surface px-2 text-[12px] text-ink outline-none placeholder:text-ink-subtle focus:border-forest"
+            className="h-7 min-w-0 flex-1 rounded-md border border-border-strong bg-surface px-2 text-xs text-ink outline-none placeholder:text-ink-muted focus:border-forest"
           />
           <button
             type="submit"
             disabled={!value.trim()}
-            className="h-7 rounded-md bg-forest px-2.5 text-[11px] font-medium text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
+            className="h-7 rounded-md bg-forest px-2.5 text-xs font-medium text-white transition-colors hover:bg-forest-deep disabled:opacity-40"
           >
             Answer
           </button>

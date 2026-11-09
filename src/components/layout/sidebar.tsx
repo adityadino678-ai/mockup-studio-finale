@@ -115,7 +115,7 @@ export function Sidebar() {
             </span>
           ) : (
             <div className="leading-none">
-              <div className="text-[18px] font-bold uppercase tracking-[0.14em] text-ink">
+              <div className="text-[18px] font-bold uppercase tracking-wide text-ink">
                 List<span className="text-orange">/</span>Bulkly
               </div>
               <div className="mt-1.5 font-hand text-[16px] leading-none text-blue">
@@ -132,7 +132,7 @@ export function Sidebar() {
             {collapsed ? (
               <div className="mx-auto my-3 h-0.5 w-6 bg-ink/30" aria-hidden />
             ) : (
-              <div className="px-2 pb-1.5 pt-4 text-[10px] font-bold uppercase tracking-[0.2em] text-ink-subtle">
+              <div className="px-2 pb-1.5 pt-4 text-xs font-bold uppercase tracking-wide text-ink-muted">
                 {group.label}
               </div>
             )}
@@ -146,7 +146,7 @@ export function Sidebar() {
                   aria-label={collapsed ? item.label : undefined}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "mb-1 flex items-center border-l-2 text-[11px] font-bold uppercase tracking-[0.1em] transition-colors",
+                    "mb-1 flex items-center border-l-2 text-xs font-bold uppercase tracking-wide transition-colors",
                     collapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-2.5 py-2",
                     active
                       ? "border-orange bg-wash text-ink"
@@ -170,7 +170,7 @@ export function Sidebar() {
           aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
           aria-expanded={!collapsed}
           className={cn(
-            "flex w-full items-center border border-ink bg-paper py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-ink transition-colors hover:bg-wash",
+            "flex w-full items-center border border-ink bg-paper py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-ink transition-colors hover:bg-wash",
             collapsed ? "justify-center px-0" : "gap-2 px-2",
           )}
         >
@@ -181,12 +181,12 @@ export function Sidebar() {
           <>
             <Link
               href="/"
-              className="mt-2 flex items-center justify-between px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-ink-subtle hover:text-blue"
+              className="mt-2 flex items-center justify-between px-1 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted hover:text-blue"
             >
               <span>Public page</span>
               <span aria-hidden>↗</span>
             </Link>
-            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 px-1 text-[9px] font-bold uppercase tracking-[0.12em] text-ink-subtle">
+            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 px-1 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted">
               <Link href="/?auth=in" className="hover:text-blue">
                 Log in
               </Link>
@@ -206,7 +206,7 @@ export function Sidebar() {
                 Contact
               </Link>
             </div>
-            <div className="mt-2 px-1 text-[9px] font-bold uppercase tracking-[0.16em] text-ink-subtle">
+            <div className="mt-2 px-1 text-xs font-bold uppercase tracking-[0.16em] text-ink-muted">
               Local-first · account optional
             </div>
           </>

@@ -60,7 +60,7 @@ export function MessageItem({
             return (
               <ul key={i} className="mb-1 space-y-1 rounded-md border border-border-subtle p-2">
                 {part.items.map((item, j) => (
-                  <li key={j} className="flex items-center gap-2 text-[12px]">
+                  <li key={j} className="flex items-center gap-2 text-xs">
                     <span
                       className={
                         item.status === "done"
@@ -69,12 +69,12 @@ export function MessageItem({
                             ? "text-status-error"
                             : item.status === "active"
                               ? "text-ink"
-                              : "text-ink-subtle"
+                              : "text-ink-muted"
                       }
                     >
                       {item.status === "done" ? "✓" : item.status === "failed" ? "✕" : item.status === "active" ? "▸" : "○"}
                     </span>
-                    <span className={item.status === "pending" ? "text-ink-subtle" : ""}>{item.label}</span>
+                    <span className={item.status === "pending" ? "text-ink-muted" : ""}>{item.label}</span>
                   </li>
                 ))}
               </ul>
@@ -84,7 +84,7 @@ export function MessageItem({
             return (
               <div
                 key={i}
-                className="mb-2 rounded-md border border-border-subtle bg-surface-raised p-2 text-[12px]"
+                className="mb-2 rounded-md border border-border-subtle bg-surface-raised p-2 text-xs"
               >
                 <p className="mb-1 font-medium">{part.question.question}</p>
                 <div className="flex flex-wrap gap-1">
@@ -94,7 +94,7 @@ export function MessageItem({
                       className={
                         part.answer === option
                           ? "rounded-full border border-ink bg-ink px-2 py-0.5 text-surface"
-                          : "rounded-full border border-border-subtle px-2 py-0.5 text-ink-subtle"
+                          : "rounded-full border border-border-subtle px-2 py-0.5 text-ink-muted"
                       }
                     >
                       {option}
@@ -106,7 +106,7 @@ export function MessageItem({
           }
           if (isUser) {
             return (
-              <p key={i} className="whitespace-pre-wrap text-[13px] leading-relaxed">
+              <p key={i} className="whitespace-pre-wrap text-sm leading-relaxed">
                 {part.text}
               </p>
             );
@@ -119,7 +119,7 @@ export function MessageItem({
           ) : null;
         })}
       </div>
-      <div className="px-1 text-[10px] text-ink-subtle">
+      <div className="px-1 text-xs text-ink-muted">
         {message.model ? `${message.model} · ` : ""}
         {timeLabel(message.createdAt)}
       </div>

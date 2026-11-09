@@ -445,7 +445,7 @@ export function PrintifyStudioPage() {
               </Button>
             </>
           ) : (
-            <span className="text-[12px] text-ink-muted">Printify is not connected</span>
+            <span className="text-xs text-ink-muted">Printify is not connected</span>
           )
         }
       />

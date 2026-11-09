@@ -208,11 +208,11 @@ export function DesignGallery({
   return (
     <section data-design-row={row}>
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[14px] font-semibold text-ink">
+        <h2 className="text-sm font-semibold text-ink">
           {ROW_LABELS[row]}{" "}
-          <span className="font-normal text-ink-subtle">({designs.length})</span>
+          <span className="font-normal text-ink-muted">({designs.length})</span>
         </h2>
-        <p className="text-[11px] text-ink-muted">{ROW_HINTS[row]}</p>
+        <p className="text-xs text-ink-muted">{ROW_HINTS[row]}</p>
       </div>
 
       {onPairInk && row === "ink" && designs.length > 0 && (
@@ -227,21 +227,21 @@ export function DesignGallery({
               >
                 <Link2 className="h-3.5 w-3.5" /> Pair these two as one listing
               </Button>
-              <span className="text-[11px] text-ink-subtle">
+              <span className="text-xs text-ink-muted">
                 Same placeholder, one for black ink and one for white ink.
               </span>
             </>
           ) : pairable.length === 1 ? (
-            <span className="text-[11px] text-ink-subtle">
+            <span className="text-xs text-ink-muted">
               Tick another design&apos;s &ldquo;Ink variants&rdquo; box to pair the two as one
               listing.
             </span>
           ) : pairable.length === 0 ? (
-            <span className="text-[11px] text-ink-subtle">
+            <span className="text-xs text-ink-muted">
               Every design in this row is already paired.
             </span>
           ) : (
-            <span className="text-[11px] text-ink-subtle">
+            <span className="text-xs text-ink-muted">
               Pick two with the card checkboxes, then press &ldquo;Pair for one listing&rdquo;.
             </span>
           )}
@@ -250,8 +250,8 @@ export function DesignGallery({
 
       {designs.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border-subtle bg-surface-muted/40 px-4 py-3">
-          <p className="text-[12px] font-medium text-ink">{DESIGN_ROW_EMPTY[row].title}</p>
-          <p className="mt-0.5 text-[11px] text-ink-muted">{DESIGN_ROW_EMPTY[row].hint}</p>
+          <p className="text-xs font-medium text-ink">{DESIGN_ROW_EMPTY[row].title}</p>
+          <p className="mt-0.5 text-xs text-ink-muted">{DESIGN_ROW_EMPTY[row].hint}</p>
         </div>
       ) : (
         <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -418,10 +418,10 @@ export function DesignAdjustmentPanel({
         </DialogHeader>
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-muted/60 px-3 py-2">
-          <span className="text-[12px] text-ink">
+          <span className="text-xs text-ink">
             This placement belongs to “{design.name}”
           </span>
-          <span className="text-[11px] text-ink-subtle">
+          <span className="text-xs text-ink-muted">
             Every mockup with a print area uses it. Other designs keep their own placement.
           </span>
         </div>
@@ -437,14 +437,14 @@ export function DesignAdjustmentPanel({
                     size="sm"
                     variant={editing.position === a.position ? "default" : "outline"}
                     onClick={() => setPlacement({ position: a.position })}
-                    className="h-7 text-[12px]"
+                    className="h-7 text-xs"
                   >
                     {a.position}
                   </Button>
                 ))}
               </div>
               {area && (
-                <p className="text-[11px] text-ink-subtle">
+                <p className="text-xs text-ink-muted">
                   {area.width} × {area.height} px
                 </p>
               )}
@@ -492,7 +492,7 @@ export function DesignAdjustmentPanel({
                   max={1}
                   value={editing.x}
                   onChange={(e) => setPlacement({ x: Number(e.target.value) })}
-                  className="h-8 text-[12px]"
+                  className="h-8 text-xs"
                 />
               </div>
               <div className="w-1/2 space-y-1.5">
@@ -505,7 +505,7 @@ export function DesignAdjustmentPanel({
                   max={1}
                   value={editing.y}
                   onChange={(e) => setPlacement({ y: Number(e.target.value) })}
-                  className="h-8 text-[12px]"
+                  className="h-8 text-xs"
                 />
               </div>
             </div>
@@ -522,7 +522,7 @@ export function DesignAdjustmentPanel({
               onChange={setPlacement}
               className="mx-auto max-w-[320px]"
             />
-            <p className="text-[11px] leading-relaxed text-ink-subtle">
+            <p className="text-xs leading-relaxed text-ink-muted">
               Dashed frame = print area. Printify crops outside it. Placement on the garment is approximate.
             </p>
           </div>
@@ -530,7 +530,7 @@ export function DesignAdjustmentPanel({
 
         <DialogFooter className="flex-wrap justify-between">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-ink-subtle">
+            <span className="text-xs text-ink-muted">
               Saved for “{design.name}” · every mockup uses it
             </span>
             <Button size="sm" variant="outline" onClick={applyToEveryDesign}>

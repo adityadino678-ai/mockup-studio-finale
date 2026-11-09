@@ -114,7 +114,7 @@ export function Composer({
   return (
     <div className="border-t border-border-subtle bg-surface px-4 py-3">
       <div className="mx-auto max-w-3xl">
-        {error && <div className="mb-2 text-[11px] text-danger">{error}</div>}
+        {error && <div className="mb-2 text-xs text-danger">{error}</div>}
         <div
           onDragOver={(e) => {
             if (canAttach) {
@@ -144,10 +144,10 @@ export function Composer({
                     c.run();
                     onChange("");
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-surface-muted"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-muted"
                 >
                   <span className="font-medium text-forest">/{c.name}</span>
-                  <span className="min-w-0 flex-1 truncate text-ink-subtle">{c.description}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink-muted">{c.description}</span>
                 </button>
               ))}
             </div>
@@ -186,7 +186,7 @@ export function Composer({
             }
             disabled={disabled}
             rows={1}
-            className="scroll-thin max-h-[220px] w-full resize-none bg-transparent px-3.5 py-2.5 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed"
+            className="scroll-thin max-h-[220px] w-full resize-none bg-transparent px-3.5 py-2.5 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:cursor-not-allowed"
           />
 
           <div className="flex items-center gap-1.5 px-2 pb-2 pt-0.5">
@@ -203,7 +203,7 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle hover:bg-surface-muted hover:text-ink"
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-muted hover:text-ink"
                   title="Attach image"
                 >
                   <ImagePlus className="h-4 w-4" />
@@ -217,7 +217,7 @@ export function Composer({
                   onClick={onToggleSpeak}
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted",
-                    speakReplies ? "text-forest" : "text-ink-subtle hover:text-ink",
+                    speakReplies ? "text-forest" : "text-ink-muted hover:text-ink",
                   )}
                   title={speakReplies ? "Stop reading replies aloud" : "Read replies aloud"}
                   aria-pressed={!!speakReplies}
@@ -231,7 +231,7 @@ export function Composer({
                   onClick={onToggleVoice}
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-muted",
-                    listening ? "animate-pulse bg-danger-soft text-danger" : "text-ink-subtle hover:text-ink",
+                    listening ? "animate-pulse bg-danger-soft text-danger" : "text-ink-muted hover:text-ink",
                   )}
                   title={listening ? "Stop dictation" : "Dictate"}
                   aria-pressed={!!listening}
@@ -263,11 +263,11 @@ export function Composer({
           </div>
         </div>
         {queuedCount > 0 && (
-          <div className="mt-1.5 px-1 text-[10px] text-ink-subtle">
+          <div className="mt-1.5 px-1 text-xs text-ink-muted">
             {queuedCount} message{queuedCount === 1 ? "" : "s"} queued — will send when the current reply finishes.
           </div>
         )}
-        <div className="mt-1.5 px-1 text-[10px] text-ink-subtle">
+        <div className="mt-1.5 px-1 text-xs text-ink-muted">
           Enter to send · Shift+Enter for a new line · responses may be inaccurate; verify before publishing.
         </div>
       </div>

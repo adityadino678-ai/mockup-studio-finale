@@ -104,7 +104,7 @@ class PrintAreaCanvasBoundary extends React.Component<
         <Card className="grid min-h-[420px] place-items-center p-6 text-center">
           <div>
             <p className="text-[15px] font-bold text-ink">The print-area canvas could not load.</p>
-            <p className="mt-1 text-[13px] text-ink-muted">
+            <p className="mt-1 text-sm text-ink-muted">
               Reload the page. If it still does not open, your mockup or design image may be missing from this browser.
             </p>
           </div>
@@ -1082,8 +1082,8 @@ export function PrintAreasTab({
       {/* --- the mockup rail --- */}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
-          <span className="text-[13px] font-semibold">Mockups</span>
-          <span className="text-[11px] text-ink-subtle">{mockups?.length ?? 0}</span>
+          <span className="text-sm font-semibold">Mockups</span>
+          <span className="text-xs text-ink-muted">{mockups?.length ?? 0}</span>
         </div>
         <div className="max-h-[640px] overflow-auto p-2">
           {(mockups ?? []).map((m) => {
@@ -1110,23 +1110,23 @@ export function PrintAreasTab({
                   className="mt-1"
                 />
                 <button type="button" onClick={() => setSelectedId(m.id)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-[13px] font-medium">{m.name}</div>
-                  <div className="text-[11px] text-ink-subtle">
+                  <div className="truncate text-sm font-medium">{m.name}</div>
+                  <div className="text-xs text-ink-muted">
                     {m.width}×{m.height} · {CATEGORY_SINGULAR[m.category]}
                   </div>
                   {mArea ? (
                     <div className="mt-1 flex flex-wrap gap-1">
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-xs">
                         {mArea.areaWidth}×{mArea.areaHeight}
                       </Badge>
                       {mArea.reference ? (
-                        <Badge variant="muted" className="text-[10px]">
+                        <Badge variant="muted" className="text-xs">
                           ref {mArea.reference.inches} in
                         </Badge>
                       ) : null}
                     </div>
                   ) : (
-                    <div className="mt-1 text-[10.5px] text-ink-subtle">no area yet</div>
+                    <div className="mt-1 text-[10.5px] text-ink-muted">no area yet</div>
                   )}
                 </button>
               </div>
@@ -1147,7 +1147,7 @@ export function PrintAreasTab({
             mockup, move to the next tab. */}
         {tabDesigns.length === 0 ? (
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-ink-muted">
+            <span className="text-xs text-ink-muted">
               Upload a design in the Printify Studio to place it on a mockup.
             </span>
           </div>
@@ -1167,7 +1167,7 @@ export function PrintAreasTab({
                     onClick={() => setDesignId(d.id)}
                     title={d.name}
                     aria-label={d.name}
-                    className={`border-b-2 px-2.5 py-1 text-[12px] font-semibold transition-colors ${
+                    className={`border-b-2 px-2.5 py-1 text-xs font-semibold transition-colors ${
                       active
                         ? "border-forest text-forest"
                         : "border-transparent text-ink-muted hover:text-ink"
@@ -1188,7 +1188,7 @@ export function PrintAreasTab({
               design's name is on screen - it names what the canvas below is
               editing. */}
           {design ? (
-            <span className="text-[12px] text-ink-subtle">
+            <span className="text-xs text-ink-muted">
               {design.name} · its placement is used on every mockup, and by the Studio
             </span>
           ) : null}
@@ -1237,7 +1237,7 @@ export function PrintAreasTab({
                 }}
               />
             ) : (
-              <Card className="p-8 text-center text-[13px] text-ink-muted">
+              <Card className="p-8 text-center text-sm text-ink-muted">
                 Upload a mockup to set a print area on it.
               </Card>
             )}
@@ -1254,7 +1254,7 @@ export function PrintAreasTab({
                     <span className="flex items-center gap-1 text-[11.5px] font-medium">
                       <Crop className="h-3 w-3" /> Visible window
                     </span>
-                    <span className="text-[11px] text-ink-subtle">{describeCrop(crop)}</span>
+                    <span className="text-xs text-ink-muted">{describeCrop(crop)}</span>
                   </div>
                   <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                     <Button
@@ -1292,7 +1292,7 @@ export function PrintAreasTab({
                       </Button>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-[10.5px] leading-snug text-ink-subtle">
+                  <p className="mt-1.5 text-[10.5px] leading-snug text-ink-muted">
                     A window into the area for folded garments: the design is cut at the fold. The
                     area and the print file are not changed.
                   </p>
@@ -1347,7 +1347,7 @@ export function PrintAreasTab({
                   Render on every mockup
                 </Button>
               </div>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-subtle">
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-muted">
                 A template carries the area and the frame as a fraction of the photo. Tick mockups on
                 the left to apply it to them. <strong className="font-medium text-ink-muted">Save on
                 this mockup</strong> saves the composed mockup and uses it in Listing images, and{" "}
@@ -1435,7 +1435,7 @@ function MockupStage({
       <Card className="grid min-h-[420px] place-items-center p-6 text-center">
         <div>
           <p className="text-[15px] font-bold text-ink">This mockup image is missing.</p>
-          <p className="mt-1 text-[13px] text-ink-muted">
+          <p className="mt-1 text-sm text-ink-muted">
             Re-upload it on the Mockups tab; the print area opens after the image is back.
           </p>
         </div>
@@ -1445,7 +1445,7 @@ function MockupStage({
 
   if (!mockupUrl) {
     return (
-      <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
+      <Card className="grid min-h-[420px] place-items-center text-sm text-ink-muted">
         Loading the mockup…
       </Card>
     );
@@ -1455,7 +1455,7 @@ function MockupStage({
     <PrintAreaCanvasBoundary>
       <React.Suspense
         fallback={
-          <Card className="grid min-h-[420px] place-items-center text-[13px] text-ink-muted">
+          <Card className="grid min-h-[420px] place-items-center text-sm text-ink-muted">
             Loading the canvas…
           </Card>
         }

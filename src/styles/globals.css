@@ -60,6 +60,11 @@
     system-ui, sans-serif;
   --font-body: var(--font-display);
   --font-hand: "Caveat Variable", Caveat, "Segoe Print", "Bradley Hand", cursive;
+
+  /* 13px is the minimum anywhere; nothing renders below it. */
+  --text-xs: 0.8125rem;
+  --text-sm: 0.9375rem;
+  --text-base: 1rem;
 }
 
 /*
@@ -79,13 +84,14 @@
   html {
     background: var(--color-background);
     scrollbar-color: var(--color-border-strong) transparent;
+    font-size: 100%;
   }
 
   body {
     background: var(--color-background);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 15px;
+    font-size: 1rem;
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
@@ -128,6 +134,13 @@
   select,
   button {
     font-family: inherit;
+  }
+
+  /* iPhone zoom guard: form controls are never below 16px. */
+  input,
+  textarea,
+  select {
+    font-size: 1rem;
   }
 
   input[type="range"] {

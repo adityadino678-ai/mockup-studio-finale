@@ -52,7 +52,7 @@ function DialogDescription({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Description>) {
   return (
-    <DialogPrimitive.Description className={cn("text-[13px] leading-relaxed text-ink-muted", className)} {...props} />
+    <DialogPrimitive.Description className={cn("text-sm leading-relaxed text-ink-muted", className)} {...props} />
   );
 }
 

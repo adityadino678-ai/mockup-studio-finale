@@ -458,7 +458,7 @@ const counts = useLiveQuery(async () => {
           <Separator className="my-4" />
           {storage ? (
             <div>
-              <div className="mb-1.5 flex items-center justify-between text-[13px]">
+              <div className="mb-1.5 flex items-center justify-between text-sm">
                 <span className="text-ink-muted">Browser storage used</span>
                 <span className="text-ink">
                   {formatBytes(storage.usage)} {storage.quota ? `of ~${formatBytes(storage.quota)}` : ""}
@@ -472,7 +472,7 @@ const counts = useLiveQuery(async () => {
               </div>
             </div>
           ) : (
-            <p className="text-[13px] text-ink-muted">Storage estimate unavailable in this browser.</p>
+            <p className="text-sm text-ink-muted">Storage estimate unavailable in this browser.</p>
           )}
         </CardContent>
       </Card>
@@ -494,7 +494,7 @@ const counts = useLiveQuery(async () => {
           </CardHeader>
           <CardContent className="space-y-4">
             {!supabaseConfigured && (
-              <div className="rounded-md border border-border-subtle bg-surface-muted p-3 text-[13px] text-ink-muted">
+              <div className="rounded-md border border-border-subtle bg-surface-muted p-3 text-sm text-ink-muted">
                 Supabase is not configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY to the
                 server environment to enable accounts.
               </div>
@@ -550,7 +550,7 @@ const counts = useLiveQuery(async () => {
                     </div>
                   )}
                   {authError && (
-                    <p className="text-[12px] text-danger">{authError}</p>
+                    <p className="text-xs text-danger">{authError}</p>
                   )}
                   <Button type="submit" disabled={authLoading} className="w-full">
                     {authLoading ? (
@@ -569,7 +569,7 @@ const counts = useLiveQuery(async () => {
                   <User className="h-4 w-4 text-forest" />
                   <div>
                     <div className="text-sm font-medium text-ink">{authUser.email}</div>
-                    <div className="text-[12px] text-ink-muted">Signed in to Supabase</div>
+                    <div className="text-xs text-ink-muted">Signed in to Supabase</div>
                   </div>
                 </div>
                 <Button variant="outline" onClick={handleSignOut} disabled={authLoading} size="sm">
@@ -603,8 +603,8 @@ const counts = useLiveQuery(async () => {
               {/* Printify */}
               <section className="space-y-2 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    <ProviderLogo id="printify" className="h-4 w-4 text-ink-subtle" /> Printify
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                    <ProviderLogo id="printify" className="h-4 w-4 text-ink-muted" /> Printify
                   </div>
                   <StatusBadge status={printifyStatus} />
                 </div>
@@ -618,7 +618,7 @@ const counts = useLiveQuery(async () => {
                     onChange={(v) => patchConfig({ printifyKey: v })}
                     placeholder="Paste your Printify personal access token"
                   />
-                  <p className="text-[11px] text-ink-subtle">
+                  <p className="text-xs text-ink-muted">
                     {"Create one at "}<a
                       href="https://developers.printify.com/"
                       target="_blank"
@@ -684,13 +684,13 @@ const counts = useLiveQuery(async () => {
                       Refresh shops
                     </Button>
                   </div>
-                  <p className="text-[11px] text-ink-subtle">
+                  <p className="text-xs text-ink-muted">
                     {selectedShop && !selectedShop.connected
                       ? "This shop is not connected to a sales channel (Etsy), so publishing to it will fail — connect it in Printify or pick a connected shop."
                       : ""}
                   </p>
-                  {shopNotice && <p className="text-[11px] text-warning">{shopNotice}</p>}
-                  {shopsError && <p className="text-[11px] text-danger">{shopsError}</p>}
+                  {shopNotice && <p className="text-xs text-warning">{shopNotice}</p>}
+                  {shopsError && <p className="text-xs text-danger">{shopsError}</p>}
                 </div>
 
                 <div className="flex items-center gap-2 pt-0.5">
@@ -714,8 +714,8 @@ const counts = useLiveQuery(async () => {
               {/* Etsy research - read-only Open API v3. */}
               <section className="space-y-2 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    <ProviderLogo id="etsy" className="h-4 w-4 text-ink-subtle" /> Etsy research
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                    <ProviderLogo id="etsy" className="h-4 w-4 text-ink-muted" /> Etsy research
                   </div>
                   <Badge variant="outline" className="shrink-0">
                     Read-only
@@ -733,7 +733,7 @@ const counts = useLiveQuery(async () => {
                     onChange={(v) => patchConfig({ etsyKeystring: v })}
                     placeholder="Paste your Etsy developer keystring"
                   />
-                  <p id="etsy-keystring-note" className="text-[11px] text-ink-subtle">
+                  <p id="etsy-keystring-note" className="text-xs text-ink-muted">
                     From{" "}
                     <a
                       href="https://www.etsy.com/developers/"
@@ -756,7 +756,7 @@ const counts = useLiveQuery(async () => {
                       value={etsyQuery}
                       onChange={(e) => setEtsyQuery(e.target.value)}
                       placeholder="personalized t-shirt"
-                      className="text-[12px]"
+                      className="text-xs"
                       autoComplete="off"
                     />
                   </div>
@@ -782,8 +782,8 @@ const counts = useLiveQuery(async () => {
               {/* AI provider */}
               <section className="space-y-3 rounded-md border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    <ProviderLogo id={config.activeProvider} className="h-4 w-4 text-ink-subtle" /> AI model
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink">
+                    <ProviderLogo id={config.activeProvider} className="h-4 w-4 text-ink-muted" /> AI model
                   </div>
                   <StatusBadge status={aiStatus} />
                 </div>
@@ -804,7 +804,7 @@ const counts = useLiveQuery(async () => {
                     ))}
                   </select>
                   {def && (
-                    <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[11px] text-ink-subtle">
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5 text-xs text-ink-muted">
                       <span>{def.blurb}</span>
                       {def.freeTier && (
                         <Badge variant="default" className="shrink-0">
@@ -826,7 +826,7 @@ const counts = useLiveQuery(async () => {
                     placeholder={def?.keyHint ?? "Paste any OpenAI-compatible API key"}
                   />
                   {def && (
-                    <p className="text-[11px] text-ink-subtle">
+                    <p className="text-xs text-ink-muted">
                       {def.keyOptional ? "No key needed. " : "Get a key at "}
                       {!def.keyOptional && (
                         <a href={def.docsUrl} target="_blank" rel="noreferrer" className="text-forest underline">
@@ -848,7 +848,7 @@ const counts = useLiveQuery(async () => {
                           patchConfig(patchProvider(config, "custom", { baseUrl: e.target.value }))
                         }
                         placeholder="https://api.openai.com/v1"
-                        className="font-mono text-[12px]"
+                        className="font-mono text-xs"
                         autoComplete="off"
                         spellCheck={false}
                       />
@@ -860,7 +860,7 @@ const counts = useLiveQuery(async () => {
                         value={providerConf.model ?? ""}
                         onChange={(e) => patchConfig(patchProvider(config, "custom", { model: e.target.value }))}
                         placeholder="gpt-4o-mini"
-                        className="font-mono text-[12px]"
+                        className="font-mono text-xs"
                         autoComplete="off"
                         spellCheck={false}
                       />
@@ -896,7 +896,7 @@ const counts = useLiveQuery(async () => {
                     Test connection
                   </Button>
                   {currentModel && (
-                    <span className="text-[11px] text-ink-muted">
+                    <span className="text-xs text-ink-muted">
                       Active: <span className="font-mono text-ink">{currentModel}</span>
                     </span>
                   )}
@@ -905,19 +905,19 @@ const counts = useLiveQuery(async () => {
                 {models && (
                   <div className="space-y-1.5 border-t border-border-subtle pt-3">
                     <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
+                      <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
                       <Input
                         value={modelQuery}
                         onChange={(e) => setModelQuery(e.target.value)}
                         placeholder={`Search ${models.length} models…`}
-                        className="pl-8 text-[12px]"
+                        className="pl-8 text-xs"
                         autoComplete="off"
                         spellCheck={false}
                       />
                     </div>
                     <div className="scroll-thin max-h-64 overflow-y-auto rounded-md border border-border-subtle">
                       {filteredModels.length === 0 ? (
-                        <p className="p-3 text-[12px] text-ink-muted">No models match “{modelQuery}”.</p>
+                        <p className="p-3 text-xs text-ink-muted">No models match “{modelQuery}”.</p>
                       ) : (
                         filteredModels.map((m) => {
                           const active = m.id === currentModel;
@@ -933,20 +933,20 @@ const counts = useLiveQuery(async () => {
                             >
                               <span className="min-w-0">
                                 <span className="flex items-center gap-1.5">
-                                  <span className="truncate text-[12px] font-medium text-ink">{m.name}</span>
+                                  <span className="truncate text-xs font-medium text-ink">{m.name}</span>
                                   {m.free && (
-                                    <Badge variant="default" className="shrink-0 px-1.5 py-0 text-[10px]">
+                                    <Badge variant="default" className="shrink-0 px-1.5 py-0 text-xs">
                                       free
                                     </Badge>
                                   )}
                                 </span>
-                                <span className="block truncate font-mono text-[10px] text-ink-subtle">
+                                <span className="block truncate font-mono text-xs text-ink-muted">
                                   {m.id}
                                 </span>
                               </span>
                               <span className="flex shrink-0 items-center gap-2">
                                 {m.contextLength && (
-                                  <span className="text-[10px] text-ink-subtle">{formatContext(m.contextLength)}</span>
+                                  <span className="text-xs text-ink-muted">{formatContext(m.contextLength)}</span>
                                 )}
                                 {active && <Check className="h-3.5 w-3.5 text-forest" />}
                               </span>
@@ -955,7 +955,7 @@ const counts = useLiveQuery(async () => {
                         })
                       )}
                     </div>
-                    <p className="text-[10px] text-ink-subtle">
+                    <p className="text-xs text-ink-muted">
                       Free models are tagged where available.
                     </p>
                   </div>
@@ -1018,14 +1018,14 @@ function StatusBadge({ status }: { status?: IntegrationStatus }) {
 function ResultLine({ result, testing }: { result?: TestResult; testing: boolean }) {
   if (testing) {
     return (
-      <p className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+      <p className="flex items-center gap-1.5 text-xs text-ink-muted">
         <Loader2 className="h-3.5 w-3.5 animate-spin" /> Testing connection…
       </p>
     );
   }
   if (!result) return null;
   return (
-    <p className={cn("flex items-start gap-1.5 text-[12px]", result.ok ? "text-forest" : "text-danger")}>
+    <p className={cn("flex items-start gap-1.5 text-xs", result.ok ? "text-forest" : "text-danger")}>
       {result.ok ? (
         <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       ) : (
@@ -1059,7 +1059,7 @@ function SecretInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="pr-10 font-mono text-[12px]"
+        className="pr-10 font-mono text-xs"
         autoComplete="off"
         spellCheck={false}
       />
@@ -1067,7 +1067,7 @@ function SecretInput({
         type="button"
         onClick={onToggleReveal}
         title={reveal ? "Hide" : "Show"}
-        className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1.5 text-ink-subtle transition-colors hover:text-ink"
+        className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1.5 text-ink-muted transition-colors hover:text-ink"
       >
         {reveal ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
       </button>
@@ -1079,7 +1079,7 @@ function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-md bg-surface-muted px-3 py-2">
       <div className="text-lg font-semibold leading-none text-ink">{value}</div>
-      <div className="mt-1 text-[11px] text-ink-muted">{label}</div>
+      <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>
   );
 }

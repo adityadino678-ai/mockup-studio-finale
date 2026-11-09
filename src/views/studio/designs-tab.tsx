@@ -606,17 +606,17 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           className="rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card"
           data-bg-progress=""
         >
-          <div className="flex items-center gap-2 text-[13px] text-ink">
+          <div className="flex items-center gap-2 text-sm text-ink">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             <span className="truncate">
               {busy.current ? `Removing background from "${busy.current}"` : "Working…"}
             </span>
-            <span className="ml-auto shrink-0 text-ink-subtle">
+            <span className="ml-auto shrink-0 text-ink-muted">
               {busy.done} / {busy.total}
             </span>
           </div>
           {stage && (
-            <p className="mt-1 pl-[22px] text-[11px] text-ink-muted" data-bg-stage="">
+            <p className="mt-1 pl-[22px] text-xs text-ink-muted" data-bg-stage="">
               {stage}
             </p>
           )}
@@ -631,7 +631,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
 
       {selected.length > 0 && (
         <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-forest/25 bg-sage-soft px-4 py-3 shadow-card">
-          <span className="text-[13px] font-medium text-ink">
+          <span className="text-sm font-medium text-ink">
             {selected.length} design{selected.length > 1 ? "s" : ""} selected
           </span>
           <div className="flex flex-wrap items-center gap-2">
@@ -664,7 +664,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       {(designs ?? []).length > 0 && (
         <div className="flex flex-wrap items-center gap-2" data-design-search="">
           <div className="relative w-64">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -679,7 +679,7 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
               type="button"
               onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
               className={cn(
-                "cursor-pointer rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
+                "cursor-pointer rounded-full border px-2.5 py-0.5 text-xs transition-colors",
                 tagFilter === tag
                   ? "border-forest bg-forest text-white"
                   : "border-border-strong text-ink-muted hover:bg-surface-muted",
@@ -695,8 +695,8 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
         // A filter that matches nothing says so. The two rows would both read
         // "no designs yet", which is not what happened.
         <div className="rounded-lg border border-dashed border-border-subtle bg-surface-muted/40 px-4 py-3">
-          <p className="text-[12px] font-medium text-ink">No designs match</p>
-          <p className="mt-0.5 text-[11px] text-ink-muted">
+          <p className="text-xs font-medium text-ink">No designs match</p>
+          <p className="mt-0.5 text-xs text-ink-muted">
             Try a different search or clear the tag filter.
           </p>
           <Button

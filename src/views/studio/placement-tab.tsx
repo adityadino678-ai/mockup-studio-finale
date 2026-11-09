@@ -539,9 +539,9 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-[14px] font-semibold text-ink">
+            <h2 className="text-sm font-semibold text-ink">
               Ready to create{" "}
-              <span className="font-normal text-ink-subtle">
+              <span className="font-normal text-ink-muted">
                 ({toCreate.length} product{toCreate.length === 1 ? "" : "s"})
               </span>
             </h2>
@@ -551,7 +551,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           </div>
 
           {scope.length === 0 && (
-            <p className="text-[12px] text-ink-muted">
+            <p className="text-xs text-ink-muted">
               No designs are ticked, so there is nothing to create. Tick the designs you want in the
               Designs tab.
             </p>
@@ -564,7 +564,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                   <p
                     key={`${p.designId}-${p.ink}`}
                     data-ink-problem=""
-                    className="text-[12px] text-danger"
+                    className="text-xs text-danger"
                   >
                     {p.designName}: {describeMissingInk(p)}
                   </p>
@@ -579,17 +579,17 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                 }`}
               >
                 {partitionProblems.slice(0, 5).map((p) => (
-                  <p key={p} className="text-[12px] text-danger">
+                  <p key={p} className="text-xs text-danger">
                     {p}
                   </p>
                 ))}
                 {partitionProblems.length > 5 && (
-                  <p className="text-[12px] text-danger">…and {partitionProblems.length - 5} more.</p>
+                  <p className="text-xs text-danger">…and {partitionProblems.length - 5} more.</p>
                 )}
               </div>
             )}
             {affectedDesigns > 0 && (
-              <p className="mt-2 text-[12px] text-danger">
+              <p className="mt-2 text-xs text-danger">
                 {affectedDesigns} of {scope.length} design{scope.length === 1 ? "" : "s"} cannot
                 print every colour of this product with the ink artwork they have.
               </p>
@@ -597,7 +597,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
             {invisible.length > 0 && (
               <div
                 role="status"
-                className="mt-2 flex items-start gap-1.5 rounded-md bg-warning-soft px-3 py-2 text-[12px] text-warning"
+                className="mt-2 flex items-start gap-1.5 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning"
               >
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
@@ -619,10 +619,10 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                     className="rounded-md bg-surface-muted/60 px-3 py-1.5"
                   >
                     <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-ink">
+                      <span className="min-w-0 flex-1 truncate text-xs text-ink">
                         {item.designName}
                       </span>
-                      <span className="text-[11px] text-ink-subtle">
+                      <span className="text-xs text-ink-muted">
                         {item.groups
                           .filter((g) => g.colors.length > 0)
                           .map((g) => g.label)
@@ -637,7 +637,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                         prints - its own panel's colours, split by ink - and
                         the variant count is the enabled set with the chosen
                         sizes applied. */}
-                    <p className="mt-0.5 text-[11px] text-ink-subtle" data-colour-summary="">
+                    <p className="mt-0.5 text-xs text-ink-muted" data-colour-summary="">
                       {item.groups.filter((g) => g.colors.length > 0).length === 0
                         ? "no colours selected"
                         : item.groups
@@ -654,7 +654,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           )}
 
           {plan && colourSummary.overlap.length > 0 && (
-            <p className="text-[11px] text-ink-muted" data-colour-overlap="">
+            <p className="text-xs text-ink-muted" data-colour-overlap="">
               {colourSummary.overlap.length} colour
               {colourSummary.overlap.length === 1 ? "" : "s"}{" "}
               {colourSummary.overlap.length === 1
@@ -666,7 +666,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           <Separator />
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[12px] text-ink-muted">
+            <p className="text-xs text-ink-muted">
               Products are created as <strong>drafts</strong>. Review them in Printify, then publish.
             </p>
             <div className="flex items-center gap-3">
@@ -678,7 +678,7 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                     aria-label="Create again even for designs that already have a product"
                     id="studio-recreate"
                   />
-                  <span className="text-[12px] text-ink">Recreate the {alreadyCreated.size} done</span>
+                  <span className="text-xs text-ink">Recreate the {alreadyCreated.size} done</span>
                 </label>
               )}
               <Button
@@ -701,14 +701,14 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
       {results.length > 0 && (
         <Card>
           <CardContent className="space-y-2 p-4">
-            <h2 className="text-[14px] font-semibold text-ink">Results</h2>
+            <h2 className="text-sm font-semibold text-ink">Results</h2>
             <div className="space-y-1">
               {results
                 .slice()
                 .reverse()
                 .slice(0, 50)
                 .map((r, i) => (
-                  <div key={`${r.designId}-${r.createdAt}-${i}`} className="flex items-center gap-2 text-[12px]">
+                  <div key={`${r.designId}-${r.createdAt}-${i}`} className="flex items-center gap-2 text-xs">
                     <Badge
                       variant={r.status === "created" ? "forest" : r.status === "failed" ? "danger" : "muted"}
                     >
@@ -722,12 +722,12 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
                         href={`https://printify.com/app/products/${r.remoteProductId}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="font-mono text-[11px] text-forest underline"
+                        className="font-mono text-xs text-forest underline"
                       >
                         {r.remoteProductId}
                       </a>
                     )}
-                    {r.error && <span className="text-[11px] text-danger">{r.error}</span>}
+                    {r.error && <span className="text-xs text-danger">{r.error}</span>}
                   </div>
                 ))}
             </div>

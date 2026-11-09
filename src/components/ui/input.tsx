@@ -7,8 +7,8 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
     <input
       type={type}
       className={cn(
-        "flex h-10 w-full rounded-none border-2 border-ink bg-paper px-3 py-1 text-[14px] text-ink transition-colors",
-        "placeholder:text-ink-subtle",
+        "flex h-10 w-full rounded-none border-2 border-ink bg-paper px-3 py-1 text-base text-ink transition-colors",
+        "placeholder:text-ink-muted",
         "focus-visible:border-blue",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
@@ -22,8 +22,8 @@ function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
-        "flex min-h-[80px] w-full rounded-none border-2 border-ink bg-paper px-3 py-2 text-[14px] text-ink transition-colors",
-        "placeholder:text-ink-subtle",
+        "flex min-h-[80px] w-full rounded-none border-2 border-ink bg-paper px-3 py-2 text-base text-ink transition-colors",
+        "placeholder:text-ink-muted",
         "focus-visible:border-blue",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
@@ -37,7 +37,7 @@ function Label({ className, ...props }: React.ComponentProps<typeof LabelPrimiti
   return (
     <LabelPrimitive.Root
       className={cn(
-        "select-none text-[10px] font-bold uppercase leading-none tracking-[0.14em] text-ink",
+        "select-none text-xs font-bold uppercase leading-none tracking-wide text-ink",
         className,
       )}
       {...props}
@@ -66,7 +66,7 @@ function FieldLabel({
     <LabelPrimitive.Root
       htmlFor={htmlFor}
       className={cn(
-        "text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted",
+        "text-xs font-bold uppercase tracking-wide text-ink-muted",
         className,
       )}
     >

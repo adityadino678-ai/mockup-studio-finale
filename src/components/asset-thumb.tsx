@@ -39,8 +39,8 @@ export function AssetThumb({ assetId, className, checkerboard, alt, style }: Ass
 
   if (failed) {
     return (
-      <div className={cn("flex items-center justify-center bg-surface-muted text-ink-subtle", className)}>
-        <span className="text-[11px]">unavailable</span>
+      <div className={cn("flex items-center justify-center bg-surface-muted text-ink-muted", className)}>
+        <span className="text-xs">unavailable</span>
       </div>
     );
   }

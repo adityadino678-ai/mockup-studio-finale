@@ -221,9 +221,9 @@ function SendStep({
           : "border-border-subtle bg-surface-muted/40"
       }`}
     >
-      <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-ink">
         <span
-          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] text-white ${
+          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-xs text-white ${
             done ? "bg-forest" : "bg-ink-subtle"
           }`}
         >
@@ -231,7 +231,7 @@ function SendStep({
         </span>
         {title}
       </p>
-      <p className="mt-0.5 pl-[22px] text-[10px] text-ink-muted">{detail}</p>
+      <p className="mt-0.5 pl-[22px] text-xs text-ink-muted">{detail}</p>
     </li>
   );
 }
@@ -268,7 +268,7 @@ function DraggableTile({
         event.stopPropagation();
         controls.start(event);
       }}
-      className="flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink active:cursor-grabbing disabled:opacity-40"
+      className="flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink active:cursor-grabbing disabled:opacity-40"
     >
       <GripVertical className="h-3.5 w-3.5" />
     </button>
@@ -1651,14 +1651,14 @@ export function ListingImagesView() {
         <CardContent className="space-y-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-forest px-1.5 text-[11px] font-semibold text-white">
+              <span className="flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-forest px-1.5 text-xs font-semibold text-white">
                 {listingNumber(listing)}
               </span>
               <div className="min-w-0">
-                <h3 className="truncate text-[14px] font-semibold text-ink">
+                <h3 className="truncate text-sm font-semibold text-ink">
                   {listing.designName}
                 </h3>
-                <p className="text-[11px] text-ink-muted">
+                <p className="text-xs text-ink-muted">
                   {listing.partnerName
                     ? `One listing with ${listing.partnerName} · the first included tile is the main image`
                     : "The first included tile is the main image"}
@@ -1680,7 +1680,7 @@ export function ListingImagesView() {
                   href={`https://printify.com/app/products/${result.remoteProductId}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-2 py-1 text-[11px] text-forest hover:bg-surface-muted"
+                  className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-2 py-1 text-xs text-forest hover:bg-surface-muted"
                 >
                   <ExternalLink className="h-3 w-3" /> Product
                 </a>
@@ -1757,7 +1757,7 @@ export function ListingImagesView() {
           </div>
 
           {removing && (
-            <div className="flex flex-wrap items-center gap-2 rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
+            <div className="flex flex-wrap items-center gap-2 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
               <span className="mr-auto">
                 Removal set: <strong>{markedCount}</strong> marked. Click more tiles to add or
                 remove them from the set.
@@ -1777,7 +1777,7 @@ export function ListingImagesView() {
           )}
 
           {orderedMockupIds.length === 0 ? (
-            <p className="rounded-md bg-surface-muted px-3 py-2 text-[12px] text-ink-muted">
+            <p className="rounded-md bg-surface-muted px-3 py-2 text-xs text-ink-muted">
               No mockups in the library yet. Add some on the{" "}
               <a className="text-forest underline" href="/mockups">
                 Mockups page
@@ -1853,18 +1853,18 @@ export function ListingImagesView() {
                                 alt={mockup.name}
                               />
                               {order > 0 && (
-                                <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-forest px-1.5 text-[11px] font-semibold text-white shadow-subtle">
+                                <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-forest px-1.5 text-xs font-semibold text-white shadow-subtle">
                                   {order}
                                 </span>
                               )}
                               {order === 1 && (
-                                <span className="absolute right-2 top-2 rounded bg-forest px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                <span className="absolute right-2 top-2 rounded bg-forest px-1.5 py-0.5 text-xs font-medium text-white">
                                   main
                                 </span>
                               )}
                               <span
                                 className={
-                                  `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                  `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-xs font-medium ${
                                     !image
                                       ? "bg-ink-subtle text-white"
                                       : image.overridden
@@ -1894,12 +1894,12 @@ export function ListingImagesView() {
                           <div className="flex items-center gap-1 p-2">
                             <div className="min-w-0 flex-1 space-y-0.5">
                               <p
-                                className="truncate text-[12px] font-medium text-ink"
+                                className="truncate text-xs font-medium text-ink"
                                 title={mockup.name}
                               >
                                 {mockup.name}
                               </p>
-                              <p className="text-[10px] text-ink-subtle">
+                              <p className="text-xs text-ink-muted">
                                 {area ? "Print area mapped" : "No print area"}
                               </p>
                             </div>
@@ -1912,7 +1912,7 @@ export function ListingImagesView() {
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => clearTileOverride(listing, mockup.id)}
-                                  className="text-[10px] text-amber hover:bg-amber-soft"
+                                  className="text-xs text-amber hover:bg-amber-soft"
                                 >
                                   Clear override
                                 </Button>
@@ -1928,12 +1928,12 @@ export function ListingImagesView() {
                                         })
                                       : forceTileOverride(listing, mockup.id)
                                   }
-                                  className="text-[10px] text-amber hover:bg-amber-soft"
+                                  className="text-xs text-amber hover:bg-amber-soft"
                                 >
                                   Use Mockups render
                                 </Button>
                               )}
-                              <span className="text-[10px] text-ink-subtle">
+                              <span className="text-xs text-ink-muted">
                                 {image.overridden
                                   ? "using saved render"
                                   : "saved render is out of date"}
@@ -1949,7 +1949,7 @@ export function ListingImagesView() {
 
               {cards.length > 0 && (
                 <div className="space-y-1.5 border-t border-border-subtle pt-2">
-                  <p className="text-[11px] text-ink-subtle">
+                  <p className="text-xs text-ink-muted">
                     Info cards attach automatically - the categories of the mockups used in
                     this listing. They are uploaded to Printify after the mockups, in this
                     order. Drag to reorder.
@@ -1984,22 +1984,22 @@ export function ListingImagesView() {
                                 className="h-full w-full"
                                 alt={card.name}
                               />
-                              <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-ink px-1.5 text-[11px] font-semibold text-white shadow-subtle">
+                              <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-ink px-1.5 text-xs font-semibold text-white shadow-subtle">
                                 {selected.length + index + 1}
                               </span>
-                              <span className="absolute bottom-2 left-2 rounded bg-ink-subtle px-1.5 py-0.5 text-[10px] font-medium text-white">
+                              <span className="absolute bottom-2 left-2 rounded bg-ink-subtle px-1.5 py-0.5 text-xs font-medium text-white">
                                 Info card
                               </span>
                             </div>
                             <div className="flex items-center gap-1 p-2">
                               <div className="min-w-0 flex-1 space-y-0.5">
                                 <p
-                                  className="truncate text-[12px] font-medium text-ink"
+                                  className="truncate text-xs font-medium text-ink"
                                   title={card.name}
                                 >
                                   {card.name}
                                 </p>
-                                <p className="text-[10px] text-ink-subtle">
+                                <p className="text-xs text-ink-muted">
                                   after the mockups
                                 </p>
                               </div>
@@ -2030,7 +2030,7 @@ export function ListingImagesView() {
             {ROW_LABELS[row]}
             <Badge variant="muted">{rowListings.length}</Badge>
           </h2>
-          <p className="text-[12px] text-ink-muted">{ROW_HINTS[row]}</p>
+          <p className="text-xs text-ink-muted">{ROW_HINTS[row]}</p>
         </div>
 
         <div className="space-y-4">{rowListings.map(renderListingRow)}</div>
@@ -2047,7 +2047,7 @@ export function ListingImagesView() {
               <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
                 <Images className="h-4 w-4 text-forest" /> Listing images
               </h2>
-              <p className="text-[12px] text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 One row per design; every product mockup is a tile. First tile = main image. Drag to reorder (shared across listings). Long-press to remove. Tiles use saved renders only when current.
               </p>
             </div>
@@ -2099,7 +2099,7 @@ export function ListingImagesView() {
                       : 0
                 }
               />
-              <p className="text-[11px] text-ink-muted" aria-live="polite">
+              <p className="text-xs text-ink-muted" aria-live="polite">
                 {rendering
                   ? `${progress.done}/${progress.total} · ${progress.label}`
                   : `${sendProgress.done}/${sendProgress.total} · ${sendProgress.label}`}
@@ -2113,11 +2113,11 @@ export function ListingImagesView() {
               role="status"
             >
               <div className="min-w-0">
-                <p className="text-[12px] font-medium text-ink">
+                <p className="text-xs font-medium text-ink">
                   {linkableCount} saved render{linkableCount === 1 ? "" : "s"} from Mockups can be
                   linked
                 </p>
-                <p className="text-[11px] text-ink-muted">
+                <p className="text-xs text-ink-muted">
                   Linking pins the newest saved pixels to these tiles and assumes the design and
                   print area have not changed since you saved them - check the tiles after.
                 </p>
@@ -2134,7 +2134,7 @@ export function ListingImagesView() {
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface-muted/60 px-3 py-2">
-            <p className="text-[12px] text-ink-muted">
+            <p className="text-xs text-ink-muted">
               <strong>{totalSelected}</strong> image{totalSelected === 1 ? "" : "s"} selected across{" "}
               <strong>{listings.length}</strong> listing{listings.length === 1 ? "" : "s"} ·{" "}
               {freshSelected} current render{freshSelected === 1 ? "" : "s"}
@@ -2166,7 +2166,7 @@ export function ListingImagesView() {
         <Card>
           <CardContent className="space-y-2 p-4">
             <h2 className="text-[15px] font-semibold text-ink">Not in this batch</h2>
-            <p className="text-[12px] text-ink-muted">
+            <p className="text-xs text-ink-muted">
               These designs are in the library but are not ticked for the batch, so they have no
               listing here. Add one only when you mean it - nothing is created automatically.
             </p>
@@ -2181,7 +2181,7 @@ export function ListingImagesView() {
                     className="h-6 w-6 rounded"
                     alt={design.name}
                   />
-                  <span className="max-w-[180px] truncate text-[12px] text-ink" title={design.name}>
+                  <span className="max-w-[180px] truncate text-xs text-ink" title={design.name}>
                     {design.name}
                   </span>
                   <Button
@@ -2220,7 +2220,7 @@ export function ListingImagesView() {
 
           <div className="space-y-3">
             {(bridgeSummary?.failures.length ?? 0) + (bridgeSummary?.skipped.length ?? 0) > 0 && (
-              <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-3 py-2 text-[11px] text-warning">
+              <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
                 {bridgeSummary?.failures.map((line) => <p key={line}>{line}</p>)}
                 {bridgeSummary?.skipped.map((line) => <p key={line}>{line}</p>)}
               </div>
@@ -2267,25 +2267,25 @@ export function ListingImagesView() {
 
             {extensionReady && (
               <div className="space-y-1.5 rounded-md border border-forest/40 bg-forest-soft/20 px-3 py-2">
-                <p className="text-[12px] font-medium text-ink">
+                <p className="text-xs font-medium text-ink">
                   {bridgeApplied ? "Mockups applied" : "Apply in Printify - one click"}
                 </p>
                 {bridgeApplied ? (
-                  <p className="text-[11px] text-ink-muted">
+                  <p className="text-xs text-ink-muted">
                     Applied {bridgeApplied.done} of {bridgeApplied.total} product
                     {bridgeApplied.total === 1 ? "" : "s"}. The extension ran inside
                     your own signed-in Printify session and closed the tab. Check the
                     product if you want to reorder the images.
                   </p>
                 ) : (
-                  <p className="text-[11px] text-ink-muted">
+                  <p className="text-xs text-ink-muted">
                     The Printify bridge extension opens the product in a background tab,
                     selects these mockups with your own sign-in, and closes it. Nothing
                     leaves printify.com.
                   </p>
                 )}
                 {bridgeApplied && bridgeApplied.failures.length > 0 && (
-                  <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+                  <div className="max-h-24 space-y-1 overflow-y-auto rounded-md bg-warning-soft px-2 py-1 text-xs text-warning">
                     {bridgeApplied.failures.map((line) => (
                       <p key={line}>{line}</p>
                     ))}
@@ -2322,15 +2322,15 @@ export function ListingImagesView() {
             )}
 
             {extensionOld && (
-              <p className="rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
+              <p className="rounded-md bg-warning-soft px-2 py-1 text-xs text-warning">
                 {extensionReloadMessage()}
               </p>
             )}
             <div className="space-y-1.5 rounded-md border border-border-subtle px-3 py-2">
-              <p className="text-[12px] font-medium text-ink">
+              <p className="text-xs font-medium text-ink">
                 {extensionReady ? "Or use the bookmarklet" : "2. Copy the payload"}
               </p>
-              <p className="text-[11px] text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 Already done when step 2 is ticked. Copy it again if you have copied something
                 else since, or open the raw text.
               </p>
@@ -2352,22 +2352,22 @@ export function ListingImagesView() {
                   Install guide & copy bookmarklet
                 </Button>
               </div>
-              <details className="text-[11px] text-ink-muted">
+              <details className="text-xs text-ink-muted">
                 <summary className="cursor-pointer select-none">Show the payload text</summary>
                 <Textarea
                   readOnly
                   value={bridgePayload}
-                  className="mt-1.5 h-24 font-mono text-[10px]"
+                  className="mt-1.5 h-24 font-mono text-xs"
                   onFocus={(event) => event.currentTarget.select()}
                 />
               </details>
             </div>
 
             <div className="space-y-1.5 rounded-md border border-border-subtle px-3 py-2">
-              <p className="text-[12px] font-medium text-ink">
+              <p className="text-xs font-medium text-ink">
                 3. Run the bookmarklet on the Printify product
               </p>
-              <p className="text-[11px] text-ink-muted">
+              <p className="text-xs text-ink-muted">
                 Save the bookmarklet once, open the product in Printify, then click it. It reads
                 this payload from the clipboard and uses your own signed-in session, so the images
                 become that product&apos;s mockups and the first one is the main image. No token

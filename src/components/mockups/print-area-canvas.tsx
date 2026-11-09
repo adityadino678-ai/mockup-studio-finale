@@ -567,7 +567,7 @@ export function PrintAreaCanvas({
         ref={containerRef}
         className="grid min-h-[420px] w-full place-items-center rounded-lg border border-border-subtle bg-surface-muted/50"
       >
-        <span className="text-[13px] text-ink-muted">Loading images…</span>
+        <span className="text-sm text-ink-muted">Loading images…</span>
       </div>
     );
   }
@@ -808,7 +808,7 @@ export function PrintAreaCanvas({
 
       {/* The live readout. It lives here, so a drag only re-renders the
           canvas and not the whole panel. */}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-subtle">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-muted">
         {live && placement ? (
           <>
             <span>
