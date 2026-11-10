@@ -57,9 +57,9 @@ import {
 } from "@/lib/mockups/print-area";
 import {
   applyPrintAreaToMockups,
+  printAreaScopeTargets,
   type PrintAreaScope,
 } from "@/lib/mockups/propagate";
-import { savePrintAreaDraft } from "@/lib/mockups/print-area-draft";
 import { resolveRenderPlanWithFingerprint } from "@/lib/printify/listing-render";
 import { linkSavedRender } from "@/lib/printify/render-link";
 import { buildStudioListings, catalogProductName } from "@/lib/printify/listing-plan";
@@ -164,6 +164,12 @@ export function PrintAreasTab({
   const [rendering, setRendering] = React.useState(false);
   /** True while the design is being rendered onto every mockup with an area. */
   const [bulkRendering, setBulkRendering] = React.useState(false);
+  /**
+   * How far a frame save travels. Inside a per-design tab the workflow is
+   * "place it on one photo, save, next design", so the default is every
+   * mockup of the same product type; narrower or wider scopes are explicit.
+   */
+  const [areaScope, _setAreaScope] = React.useState<PrintAreaScope>("category");
   const lastMockupId = React.useRef<string | null>(null);
   /** The design the draft in `area` belongs to, so a tab switch reloads it. */
   const lastDesignId = React.useRef<string | null>(null);
@@ -174,6 +180,7 @@ export function PrintAreasTab({
     mockupId: string;
     designId: string | null;
     area: MockupPrintArea;
+    scope: PrintAreaScope;
   } | null>(null);
   /**
    * The mockup+design the user made the current draft on.
@@ -291,8 +298,8 @@ export function PrintAreasTab({
   // mockup: a design with no override falls back to the shared default, so a
   // fresh tab starts where every never-edited design starts. A photo with no
   // area starts blank: a re-save on any sibling of its type is all it takes to
-  // bring it in line. The draft is auto-saved by the effect below, and every
-  // normal save - autosave included - writes THIS mockup only.
+  // bring it in line. The draft is auto-saved by the effect below, for the
+  // scope the user chose (same type by default).
   React.useEffect(() => {
     if (!mockup) {
       untouchedSeedRef.current = null;
@@ -309,7 +316,6 @@ export function PrintAreasTab({
       // Switching away from a draft that has not hit its debounce yet: write
       // it against the OLD mockup AND the old design before the new tab
       // replaces it, so a delayed flush can never land on the wrong tab.
-      // This is a normal save: it stays on the mockup it was staged on.
       const pending = pendingDraft.current;
       if (
         pending &&
@@ -317,10 +323,11 @@ export function PrintAreasTab({
       ) {
         pendingDraft.current = null;
         justFlushed = true;
-        void savePrintAreaDraft({
+        void applyPrintAreaToMockups({
           sourceMockupId: pending.mockupId,
           designId: pending.designId ?? undefined,
           area: pending.area,
+          scope: pending.scope,
         });
       }
       if (mockupChanged) {
@@ -480,16 +487,16 @@ export function PrintAreasTab({
   };
 
   /**
-   * Writes the draft as the ACTIVE DESIGN's area on one mockup by default, or
-   * on an explicitly chosen scope (only "Render on every mockup" asks for a
-   * wider one), in one transaction.
+   * Writes the draft as the ACTIVE DESIGN's area on every mockup in the chosen
+   * scope, in one transaction.
    *
-   * The frame is stored as fractions of the photo, so copying it is an
-   * explicit decision, never a side effect of a drag or a save. The crop
-   * travels with the frame, the inches reference is deliberately kept per
-   * photo: a folded shirt and a flat-lay are measured differently even when
-   * the design sits in the same place. Only this design's overrides are
-   * written: the shared default and the other designs' frames are left alone.
+   * The frame is stored as fractions of the photo, so the same numbers are the
+   * same relative spot on every mockup of the product type, and the crop
+   * travels with the frame - the visible window is part of the staged pose.
+   * The inches reference is deliberately kept per photo: a folded shirt and a
+   * flat-lay are measured differently even when the design sits in the same
+   * place. Only this design's overrides are written: the shared default and
+   * the other designs' frames are left alone.
    */
   const persistArea = React.useCallback(
     async (
@@ -497,9 +504,7 @@ export function PrintAreasTab({
       opts: { notify?: boolean; scope?: PrintAreaScope } = {},
     ): Promise<{ updated: number; mockupIds: string[] }> => {
       if (!mockup) return { updated: 0, mockupIds: [] };
-      // Absent scope = a normal save: this mockup only. A propagating scope
-      // always comes from an explicit call site ("Render on every mockup").
-      const scope = opts.scope ?? "this";
+      const scope = opts.scope ?? areaScope;
       const version = draftVersion.current;
       try {
         const result = await applyPrintAreaToMockups({
@@ -513,8 +518,8 @@ export function PrintAreasTab({
         if (draftVersion.current === version) setDirty(false);
         if (opts.notify) {
           toast.success(
-            scope === "this"
-              ? `Print area saved on this mockup ("${mockup.name}")`
+            result.updated <= 1
+              ? `Print area saved on "${mockup.name}"`
               : `Print area saved on ${result.updated} mockups`,
             // One toast, not a stack: repeated saves are the same event and
             // used to leave two identical notifications on screen.
@@ -529,12 +534,12 @@ export function PrintAreasTab({
         return { updated: 0, mockupIds: [] };
       }
     },
-    [mockup, designId],
+    [mockup, areaScope, designId],
   );
 
-  // Auto-save the draft. It is debounced (a drag writes once) and stays on
-  // THIS mockup: dragging a frame stops the moment the tab changes, so the
-  // auto-save must never paper the whole type with a half-finished draft.
+  // Auto-save the draft. It is debounced (a drag writes once) and uses the
+  // chosen scope: every mockup of this type by default, so one save per
+  // design is enough before moving to the next tab.
   React.useEffect(() => {
     if (!dirty || !mockup || !area) return;
     // Only a draft the user actually made on THIS tab may be saved. On the
@@ -545,6 +550,7 @@ export function PrintAreasTab({
       mockupId: mockup.id,
       designId,
       area,
+      scope: areaScope,
     };
     const handle = setTimeout(() => {
       pendingDraft.current = null;
@@ -556,33 +562,43 @@ export function PrintAreasTab({
       clearTimeout(handle);
       if (autoSaveTimer.current === handle) autoSaveTimer.current = null;
     };
-  }, [dirty, area, mockup, persistArea, designId]);
+  }, [dirty, area, mockup, areaScope, persistArea, designId]);
 
   // A full navigation can unmount the panel before the debounce fires. Kick
-  // the pending write so leaving the page does not discard the last drag. It
-  // is a normal save: it stays on the mockup the draft was staged on.
+  // the pending write so leaving the page does not discard the last drag.
   React.useEffect(
     () => () => {
       const pending = pendingDraft.current;
       if (!pending) return;
       pendingDraft.current = null;
-      void savePrintAreaDraft({
+      void applyPrintAreaToMockups({
         sourceMockupId: pending.mockupId,
         designId: pending.designId ?? undefined,
         area: pending.area,
+        scope: pending.scope,
       });
     },
     [],
   );
 
   /**
+   * Writes the pending draft for the ACTIVE design before a render.
+   *
+   * A render is fingerprinted from the area that is actually SAVED: hashing an
+   * unsaved draft would record a fingerprint the stored area does not produce,
+   * and the Listing images page would then adopt the wrong pixels. Returns
+   * false when the write failed, so the caller stops instead of rendering from
+   * a half-applied state.
+   */
+  /**
    * Persists the current draft for an explicit user action.
    *
    * The scope is ALWAYS explicit at the call site: "Save on this mockup"
    * stores this design's area on this mockup only, while "Render on every
    * mockup" applies the draft to every mockup of this type first (so the
-   * renders exist) and then renders them. Normal saves never take the wide
-   * scope: propagating a frame is "Render on every mockup" alone.
+   * renders exist) and then renders them. Neither goes through the broad
+   * `areaScope` default, which stays for the tab-switch and debounce writes
+   * of the staged workflow.
    */
   const flushDraft = React.useCallback(async (scope: PrintAreaScope): Promise<boolean> => {
     if (!dirty) {
@@ -1041,6 +1057,8 @@ export function PrintAreasTab({
 
   // --- readouts --------------------------------------------------------------
   const _physical = area ? areaInches(area, mockupW, mockupH) : null;
+  const _scopeCount =
+    mockup && mockups ? printAreaScopeTargets(mockups, mockup, areaScope).length : 0;
   const _designSize =
     area && placement && designMeta.w > 0
       ? designInches(placement.scale, designMeta.h / designMeta.w, area, mockupW, mockupH)
@@ -1335,12 +1353,6 @@ export function PrintAreasTab({
                 this mockup</strong> saves the composed mockup and uses it in Listing images, and{" "}
                 <strong className="font-medium text-ink-muted">Render on every mockup</strong> does
                 the whole set for this design in one pass.
-              </p>
-              <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-muted">
-                Dragging or saving a print area changes <strong className="font-medium text-ink-muted">this
-                mockup only</strong>; <strong className="font-medium text-ink-muted">Render on every
-                mockup</strong> is the one action that also puts the frame on the other mockups of
-                this type.
               </p>
             </Card>
           </div>
