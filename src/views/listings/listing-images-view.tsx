@@ -1087,13 +1087,23 @@ export function ListingImagesView() {
     return listingImages;
   }, [explicitSelection, session, listings, update]);
 
-  const renderSelected = async () => {
+  /**
+   * Renders every included mockup of every listing that has no current render.
+   *
+   * With `{ auto: true }` this is the page's own background pass: the debounced
+   * effect calls it whenever the tiles' signature changes, so success is
+   * silent — the progress bar and a changed strip are the only surface — and
+   * an empty batch is a quiet no-op rather than an error toast. Failures warn
+   * in both modes; only failures speak up.
+   */
+  const renderSelected = async (opts?: { auto?: boolean }) => {
+    const auto = opts?.auto === true;
     if (rendering || sending) return;
     const targets = listings.flatMap((listing) =>
       selectionFor(listing).map((image) => ({ listing, image })),
     );
     if (targets.length === 0) {
-      toast.error("No mockups are included in this batch yet.");
+      if (!auto) toast.error("No mockups are included in this batch yet.");
       return;
     }
 
@@ -1223,7 +1233,7 @@ export function ListingImagesView() {
       ].filter(Boolean);
       if (failures.length > 0) {
         toast.warning(`${parts.join(" · ")}. ${failures.length} failed.`);
-      } else {
+      } else if (!auto) {
         toast.success(parts.join(" · "));
       }
       if (failures.length > 0) {
@@ -1236,6 +1246,45 @@ export function ListingImagesView() {
       setProgress({ done: 0, total: 0, label: "" });
     }
   };
+
+  /**
+   * The tiles' signature: one token per included mockup carrying WHICH pixels
+   * it shows and whether they are current. The background pass is triggered
+   * by this signature changing — a new batch, an included tile with no render,
+   * a render going stale — and is silent, so a covered strip stays quiet.
+   */
+  const renderSignature = React.useMemo(() => {
+    return listings
+      .flatMap((listing) =>
+        selectionFor(listing).map(
+          (image) =>
+            `${listing.listingId}:${image.mockup.id}:${
+              currentEntry(image)?.assetId ?? "-"
+            }:${image.fresh ? 1 : 0}`,
+        ),
+      )
+      .join("|");
+    // currentEntry is a stable lookup; selectionFor already carries its inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings, selectionFor]);
+
+  // Triggers always reach the latest pass: the effect below closes over this
+  // ref, so a signature change never runs a stale closure.
+  const renderSelectedRef = React.useRef(renderSelected);
+  renderSelectedRef.current = renderSelected;
+
+  // Rendering is not a button any more: whenever the tiles' signature settles
+  // for 800 ms, the pass runs on its own. A pass in flight when the signature
+  // changes simply finishes; the settled signature re-triggers it once more,
+  // and because every trigger re-reads the CURRENT tiles, it reuses everything
+  // that pass just made — so the loop converges in at most two runs and then
+  // stops (an unchanged signature never re-arms the timer).
+  React.useEffect(() => {
+    const handle = setTimeout(() => {
+      void renderSelectedRef.current({ auto: true });
+    }, 800);
+    return () => clearTimeout(handle);
+  }, [renderSignature]);
 
   const downloadListings = async (targets: StudioListing[], label: string) => {
     const files: Zippable = {};
@@ -1266,7 +1315,7 @@ export function ListingImagesView() {
       }
     }
     if (included === 0) {
-      toast.error("None of the selected images has a current render. Use Save & render first.");
+      toast.error("None of the selected images has a current render yet.");
       return;
     }
     try {
@@ -2092,18 +2141,6 @@ export function ListingImagesView() {
                   <Send className="h-3.5 w-3.5" />
                 )}
                 Send to Printify
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => void renderSelected()}
-                disabled={rendering || sending || totalSelected === 0}
-              >
-                {rendering ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" />
-                )}
-                Save & render {totalSelected > 0 ? `(${totalSelected})` : ""}
               </Button>
             </div>
           </div>

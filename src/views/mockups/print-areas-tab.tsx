@@ -36,6 +36,7 @@ import {
   uid,
 } from "@/lib/db/repo";
 import { emptySession, loadSession, saveSession } from "@/lib/printify/studio-session";
+import { findAdoptableRender } from "@/views/listings/render-adoption";
 import { fetchVariants } from "@/lib/printify/catalog-client";
 import { presetsForCategory } from "@/lib/printify/presets";
 import { CATEGORY_SINGULAR } from "@/lib/mockups/categories";
@@ -79,7 +80,7 @@ import type {
   StudioSession,
   Template,
 } from "@/types/domain";
-import { Crop, Download, ImagePlus, Layers, Loader2 } from "lucide-react";
+import { Crop, Download, Loader2 } from "lucide-react";
 
 /** The crop windows offered as one-click presets. */
 const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
@@ -159,9 +160,11 @@ export function PrintAreasTab({
   const [_customHeight, _setCustomHeight] = React.useState("");
   /** The exact print area of the product selected in the Printify Studio. */
   const [studioArea, setStudioArea] = React.useState<PrintAreaOption | null>(null);
-  /** True while the composed mockup is being written to storage. */
-  const [rendering, setRendering] = React.useState(false);
-  /** True while the design is being rendered onto every mockup with an area. */
+  /**
+   * True while the background render pass for the active design is running.
+   * The saves and the renders both happen on their own now - there is no
+   * render button to click.
+   */
   const [bulkRendering, setBulkRendering] = React.useState(false);
   /**
    * How far a frame save travels. Inside a per-design tab the workflow is
@@ -200,6 +203,17 @@ export function PrintAreasTab({
   const untouchedSeedRef = React.useRef<string | null>(null);
   /** The live debounce handle, so an explicit remove can cancel it. */
   const autoSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The background render pass. Timer and effect triggers call through the
+   * ref, so they always run the latest version instead of a stale closure.
+   */
+  const autoRenderAllRef = React.useRef<(designId: string | null) => Promise<void>>(
+    async () => {},
+  );
+  /** A render pass is already running in the background. */
+  const autoRenderBusy = React.useRef(false);
+  /** The design an arriving trigger wants rendered once the pass ends. */
+  const autoRenderRerun = React.useRef<string | null>(null);
 
   // --- session ---------------------------------------------------------------
   // Live, not one-shot: the Studio page and the Agent write the same blob, and
@@ -327,6 +341,10 @@ export function PrintAreasTab({
           designId: pending.designId ?? undefined,
           area: pending.area,
           scope: pending.scope,
+        }).then(() => {
+          // The switch was also a save, and saves render on their own now:
+          // the design that just left the screen still gets its pixels.
+          void autoRenderAllRef.current(pending.designId);
         });
       }
       if (mockupChanged) {
@@ -400,6 +418,32 @@ export function PrintAreasTab({
     if (!designId) return null;
     return session.placements[designId] ?? session.universalPlacement;
   }, [designId, session.universalPlacement, session.placements]);
+
+  /**
+   * Rendering needs no click now: when the tab loads, when the active design
+   * or its artwork changes, or when its placement moves, the background pass
+   * backfills every mockup that has no render at the CURRENT fingerprint.
+   * Anything already rendered is skipped, so a repeat trigger costs a
+   * fingerprint computation, not a re-render.
+   */
+  React.useEffect(() => {
+    const handle = setTimeout(() => {
+      void autoRenderAllRef.current(designId);
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [
+    designId,
+    tabDesigns.length,
+    designMeta.assetId,
+    placement?.scale,
+    placement?.x,
+    placement?.y,
+    placement?.angle,
+    session.universalPlacement.scale,
+    session.universalPlacement.x,
+    session.universalPlacement.y,
+    session.universalPlacement.angle,
+  ]);
 
   // The artwork's pixel size, needed for the fit maths and the physical size.
   React.useEffect(() => {
@@ -554,7 +598,12 @@ export function PrintAreasTab({
     const handle = setTimeout(() => {
       pendingDraft.current = null;
       autoSaveTimer.current = null;
-      void persistArea(area);
+      // The save renders on its own now: once the frame is stored, the
+      // active design's render pass runs in the background, from the SAVED
+      // areas, exactly as the old buttons would have.
+      void persistArea(area).then((result) => {
+        if (result.updated > 0) void autoRenderAllRef.current(designId);
+      });
     }, 700);
     autoSaveTimer.current = handle;
     return () => {
@@ -579,45 +628,6 @@ export function PrintAreasTab({
     },
     [],
   );
-
-  /**
-   * Writes the pending draft for the ACTIVE design before a render.
-   *
-   * A render is fingerprinted from the area that is actually SAVED: hashing an
-   * unsaved draft would record a fingerprint the stored area does not produce,
-   * and the Listing images page would then adopt the wrong pixels. Returns
-   * false when the write failed, so the caller stops instead of rendering from
-   * a half-applied state.
-   */
-  /**
-   * Persists the current draft for an explicit user action.
-   *
-   * The scope is ALWAYS explicit at the call site: "Save on this mockup"
-   * stores this design's area on this mockup only, while "Render on every
-   * mockup" applies the draft to every mockup of this type first (so the
-   * renders exist) and then renders them. Neither goes through the broad
-   * `areaScope` default, which stays for the tab-switch and debounce writes
-   * of the staged workflow.
-   */
-  const flushDraft = React.useCallback(async (scope: PrintAreaScope): Promise<boolean> => {
-    if (!dirty) {
-      if (area) {
-        const key = `${mockup?.id ?? ""}:${designId ?? ""}`;
-        if (untouchedSeedRef.current === key) {
-          // An explicit action the user asked for (Save/Render) persists the
-          // auto-seeded area exactly as shown, so the stored pixels match the
-          // preview. The seed itself never arms the autosave.
-          const result = await persistArea(area, { scope });
-          if (result.updated > 0) untouchedSeedRef.current = null;
-          return result.updated > 0;
-        }
-      }
-      return true;
-    }
-    if (!area) return true;
-    const result = await persistArea(area, { scope });
-    return result.updated > 0;
-  }, [dirty, area, persistArea, mockup, designId]);
 
   /** The exact print area of the product selected in the Printify Studio. */
   const _useStudioArea = () => {
@@ -796,159 +806,52 @@ export function PrintAreasTab({
     }
   };
 
-  // --- the mockup render -----------------------------------------------------
+  // --- the background render pass -------------------------------------------
+  /** Live design list and catalogue for the pass, read through refs so the
+      timer-triggered calls never see a stale snapshot. */
+  const designsRef = React.useRef<Design[]>([]);
+  designsRef.current = (designs ?? []) as Design[];
+  const catalogRef = React.useRef(catalog);
+  catalogRef.current = catalog;
   /**
-   * Composes the design onto the mockup and stores the result as a generated
-   * image.
+   * Renders the given design onto every mockup that has a print area for it,
+   * IN THE BACKGROUND — no button anywhere.
    *
-   * This is where the Export Center gets its `mockup-render` assets now that
-   * the editor and the batch screen are gone. It calls the SAME
-   * `renderComposition` the agent's `create_mockup_render` tool calls, so a
-   * render saved here and one generated by the agent are pixel-identical -
-   * and both are clipped to the print area, which is the part the product
-   * actually prints.
+   * Three events invite this pass: the debounced area save landing, a design
+   * tab switching (the flush is also a save, so the design that leaves the
+   * screen still gets its pixels), and the tab loading or its placement
+   * moving, which only BACKFILLS designs with no render at the current
+   * fingerprint. That fingerprint check is what keeps a repeat invite cheap:
+   * the pass re-reads the stored areas, resolves each target through the SAME
+   * `renderComposition` plan the preview uses (so the pixels stay identical
+   * to what Listing images adopts), and skips every target whose recorded
+   * fingerprint already matches.
+   *
+   * Success is silent — the busy chip in the header is the only surface. Only
+   * real failures reach a toast. A pair's white-ink half is a silent skip:
+   * the pair belongs to its black half, and saving there renders it.
    */
-  const saveRender = async () => {
-    if (!design || !mockup || !area || !placement) {
-      toast.info("Pick a design, a mockup and a print area first.");
+  const autoRenderAll = async (requestedDesignId: string | null): Promise<void> => {
+    if (!requestedDesignId) return;
+    if (autoRenderBusy.current) {
+      autoRenderRerun.current = requestedDesignId;
       return;
     }
-
-    // A pair is ONE listing owned by its black-ink half. Saving the white
-    // half's artwork would attach the wrong pixels to that listing, so stop
-    // before writing a render the listing can never use.
-    const before = await loadSession();
-    const pairListing = buildStudioListings((designs ?? []) as Design[], before).find(
-      (listing) => listing.partnerDesignId === design.id,
-    );
-    if (pairListing) {
-      toast.error(
-        `"${design.name}" is the white-ink half of "${pairListing.designName}". Switch to the black-ink tab (${pairListing.designName}) and save the render there - the pair uses that artwork for its listing images.`,
-      );
-      return;
-    }
-
-    setRendering(true);
-    try {
-      // Save the draft FIRST: the fingerprint and the pixels must come from
-      // the area that is actually stored, or an unsaved frame would record a
-      // fingerprint the saved area does not reproduce. This button means
-      // THIS mockup - the button for the whole type is "Render on every
-      // mockup" next to it.
-      if (!(await flushDraft("this"))) return;
-      const savedMockup = (await db.mockups.get(mockup.id)) ?? mockup;
-      // Resolve transform AND clip from the SAVED design-specific area.
-      // renderComposition receives both, so it cannot re-read a different
-      // area. No explicit behindMockup: the plan resolves it from the area's
-      // clipMode (the listing path's rule), and the fingerprint hashes the
-      // listing convention — so the Listing images page can ADOPT this render
-      // instead of re-rendering the same pixels.
-      const latest = await loadSession();
-      const { plan, fp } = await resolveRenderPlanWithFingerprint({
-        designId: design.id,
-        designAssetId: designMainAssetId(design),
-        mockup: savedMockup,
-        session: latest,
-      });
-      const assetId = await renderComposition({
-        designId: design.id,
-        mockupId: mockup.id,
-        designAssetId: designMainAssetId(design),
-        transform: plan.transform,
-        clip: plan.clip ?? null,
-        behindMockup: plan.behindMockup,
-        renderFp: fp,
-      });
-      await logActivity("batch.item", `Rendered "${design.name}" on "${mockup.name}"`);
-
-      // Save AND use. The session is the source Listing images, Listing
-      // preview, Send and the autopilot read, so writing the asset id there
-      // is what makes this render the listing's image immediately.
-      const link = linkSavedRender({
-        designId: design.id,
-        mockupId: mockup.id,
-        assetId,
-        fingerprint: fp,
-        session: latest,
-        designs: (designs ?? []) as Design[],
-      });
-      if (link.status === "linked") {
-        const next: StudioSession = {
-          ...latest,
-          ...link.patch,
-          updatedAt: Date.now(),
-        };
-        await saveSession(next);
-        setSession(next);
-        try {
-          await saveStudioListingDrafts({
-            session: next,
-            listings: buildStudioListings((designs ?? []) as Design[], next),
-            productName: catalogProductName(catalog.blueprints, next.blueprintId),
-            copyMode: "preserve",
-            lockSelection: true,
-          });
-        } catch {
-          // The pixels and the session entry are already safe. The Export
-          // Center can catch up on the next Save & render.
-        }
-        toast.success(
-          `Mockup render saved and used for "${link.listing.designName}" in Listing images.`,
-        );
-      } else if (link.status === "white-half") {
-        toast.warning(
-          `Mockup render saved, but "${link.listing.designName}" is a pair owned by its black-ink half. Save on that tab to use it as a listing image.`,
-        );
-      } else {
-        toast.success(
-          "Mockup render saved. This design is not in the Printify batch, so it is not attached to a listing.",
-        );
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "The mockup could not be rendered");
-    } finally {
-      setRendering(false);
-    }
-  };
-
-  /**
-   * Renders THIS design onto every mockup that has a print area for it.
-   *
-   * This is the payoff of the per-design tabs: place the design once, save,
-   * and one click produces the whole set. Mockups without an area for THIS
-   * design are skipped rather than failing the run — they simply have nothing
-   * to paint on yet. The draft is saved first, then every target is read back
-   * from storage and resolved through the SAME render plan as the preview, so
-   * these renders are pixel-identical to what the panel shows and the
-   * fingerprints describe the saved area.
-   */
-  const renderEverywhere = async () => {
+    const design = designsRef.current.find((d) => d.id === requestedDesignId);
     if (!design) return;
-    const before = await loadSession();
-    const pairListing = buildStudioListings((designs ?? []) as Design[], before).find(
-      (listing) => listing.partnerDesignId === design.id,
-    );
-    if (pairListing) {
-      toast.error(
-        `"${design.name}" is the white-ink half of "${pairListing.designName}". Switch to the black-ink tab (${pairListing.designName}) and render there - the pair uses that artwork for its listing images.`,
-      );
-      return;
-    }
+    autoRenderBusy.current = true;
     setBulkRendering(true);
     let done = 0;
     let failed = 0;
     try {
-      // Save the active design's draft first, so neither the target set nor a
-      // fingerprint can be derived from an unsaved frame. The draft goes to
-      // every mockup of this type, which is what makes them all renderable.
-      if (!(await flushDraft("category"))) return;
+      const listings = buildStudioListings(designsRef.current, await loadSession());
+      if (listings.some((listing) => listing.partnerDesignId === design.id)) return;
+
       const freshMockups = await db.mockups.toArray();
       const targets = freshMockups.filter((m) => isProductMockup(m) && printAreaOf(m, design.id));
-      if (targets.length === 0) {
-        toast.info("No mockup has a print area yet. Set one first.");
-        return;
-      }
+      if (targets.length === 0) return;
       const latest = await loadSession();
+      const artworkAssetId = designMainAssetId(design);
       const renderedTargets: Array<{
         mockupId: string;
         assetId: string;
@@ -958,14 +861,20 @@ export function PrintAreasTab({
         try {
           const { plan, fp } = await resolveRenderPlanWithFingerprint({
             designId: design.id,
-            designAssetId: designMainAssetId(design),
+            designAssetId: artworkAssetId,
             mockup: target,
             session: latest,
           });
+          const existing = await findAdoptableRender({
+            artworkAssetId,
+            mockupId: target.id,
+            fingerprint: fp,
+          });
+          if (existing) continue;
           const assetId = await renderComposition({
             designId: design.id,
             mockupId: target.id,
-            designAssetId: designMainAssetId(design),
+            designAssetId: artworkAssetId,
             transform: plan.transform,
             clip: plan.clip ?? null,
             behindMockup: plan.behindMockup,
@@ -977,7 +886,10 @@ export function PrintAreasTab({
           failed += 1;
         }
       }
-      // Save AND use the whole set, exactly like the single Save render.
+
+      // Save AND use whatever the pass produced, exactly as the render
+      // buttons did: the session entries are what Listing images, preview,
+      // Send and the drafts read.
       if (renderedTargets.length > 0) {
         let next = await loadSession();
         let linkedName: string | null = null;
@@ -988,7 +900,7 @@ export function PrintAreasTab({
             assetId: target.assetId,
             fingerprint: target.fingerprint,
             session: next,
-            designs: (designs ?? []) as Design[],
+            designs: designsRef.current,
           });
           if (link.status !== "linked") continue;
           next = { ...next, ...link.patch, updatedAt: Date.now() };
@@ -1000,8 +912,8 @@ export function PrintAreasTab({
           try {
             await saveStudioListingDrafts({
               session: next,
-              listings: buildStudioListings((designs ?? []) as Design[], next),
-              productName: catalogProductName(catalog.blueprints, next.blueprintId),
+              listings: buildStudioListings(designsRef.current, next),
+              productName: catalogProductName(catalogRef.current.blueprints, next.blueprintId),
               copyMode: "preserve",
               lockSelection: true,
             });
@@ -1017,21 +929,24 @@ export function PrintAreasTab({
           `Rendered "${design.name}" on ${done} mockup${done === 1 ? "" : "s"}`,
         );
       }
-      const skipped = freshMockups.length - targets.length;
-      if (skipped > 0) {
-        toast.success(
-          `Rendered on ${done} mockup${done === 1 ? "" : "s"} · skipped ${skipped} without a print area`,
-        );
-      } else if (done > 0) {
-        toast.success(`Rendered on ${done} mockup${done === 1 ? "" : "s"}`);
-      }
+      // A failure is never silent, even when the successes are.
       if (failed > 0) {
         toast.error(`${failed} render${failed === 1 ? "" : "s"} failed`);
       }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The mockups could not be rendered");
     } finally {
+      autoRenderBusy.current = false;
       setBulkRendering(false);
+      // A trigger that arrived mid-pass is honoured once, not dropped.
+      const rerun = autoRenderRerun.current;
+      autoRenderRerun.current = null;
+      if (rerun && rerun !== requestedDesignId) void autoRenderAll(rerun);
     }
   };
+  // The ref points at the pass only once it exists — the effects and timers
+  // above call through the ref, always reaching the newest closure.
+  autoRenderAllRef.current = autoRenderAll;
 
   // --- readouts --------------------------------------------------------------
   const _physical = area ? areaInches(area, mockupW, mockupH) : null;
@@ -1168,22 +1083,14 @@ export function PrintAreasTab({
           {design ? (
             <span className="text-xs text-ink-muted">{design.name}</span>
           ) : null}
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={saveRender}
-              disabled={!area || !design || rendering}
-              title="Save the composed mockup on this mockup and use it in Listing images"
-            >
-              {rendering ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <ImagePlus className="h-3.5 w-3.5" />
-              )}
-              Save on this mockup
-            </Button>
-          </div>
+          {/* The renders happen in the background now: the pass that saves and
+              renders runs on its own, so the only surface it has is this
+              quiet busy chip. */}
+          {bulkRendering ? (
+            <div className="ml-auto flex items-center gap-1.5 text-xs text-ink-muted">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Rendering…
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-[minmax(0,1fr)_300px] items-start gap-4">
@@ -1298,20 +1205,6 @@ export function PrintAreasTab({
                 </Button>
                 <Button size="sm" variant="outline" onClick={exportPrintFile} disabled={!area}>
                   <Download className="h-3.5 w-3.5" /> Export print file
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={renderEverywhere}
-                  disabled={!design || bulkRendering}
-                  title={`Render "${design?.name ?? "this design"}" on every mockup that has a print area`}
-                >
-                  {bulkRendering ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Layers className="h-3.5 w-3.5" />
-                  )}
-                  Render on every mockup
                 </Button>
               </div>
             </Card>
