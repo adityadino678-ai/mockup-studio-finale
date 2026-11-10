@@ -676,6 +676,18 @@ and the whole suite went green.
 - `npm run test:e2e` — **64/64 passed** (4.5 m).
 - `npm run build` — complete; `dist/.assetsignore` written.
 
+### The scope was reverted on the owner's instruction (Nov 2026, after deploy)
+
+`fix(mockups): a normal print-area save stays on this mockup only` was
+reverted in `49a1e99a` the same day: a normal print-area save (auto-save,
+tab-switch flush, unload flush, Save) is back to the **All
+&lt;category&gt; mockups** default, and `print-area-draft.ts` is deleted.
+"Render on every mockup" stays the explicit bulk action; only the button
+copy and the e2e helper fix (`d9bc227`) survive, and the helpers remain
+correct under either scope (they mirror `printAreaOf`). Gates after the
+revert: lint 0 errors, typecheck 0 errors, **719** unit tests, **64/64**
+e2e, build + redeploy to the live Worker.
+
 ### Manual follow-ups (not automatable here)
 
 - **Review `supabase/migrations/005_auth_only.sql` by hand and apply it**
