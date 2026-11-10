@@ -698,4 +698,42 @@ e2e, build + redeploy to the live Worker.
   `showDirectoryPicker` dialog) and a non-Chromium browser (Firefox/Safari)
   for the ZIP-parts downloads.
 
+## 2026-11-10 — ListBulkly text declutter + automatic background rendering
+
+Two owner-approved changes for the bulk tool's two busiest pages, shown at
+localhost before any deploy.
+
+### feat(ui): strip the guidance text from Listing images and Print areas (9da1fb4)
+
+- Listing images: the header explainer, the row sub-lines ("first included
+  tile is the main image..."), the included/rendered chips, tile filenames,
+  the "Print area mapped" meta row, the info-card paragraph ("...after the
+  mockups..."), the card filenames and the per-source badges ("From Mockups"/
+  "Rendered here") are gone. Only problems are labelled now: "Not rendered",
+  out-of-date, "Override: Mockups", "Will be removed", "Excluded".
+- Print areas: the context line shows just the design's name; the
+  folded-window explainer and the Reuse card's Save/Render paragraph are gone.
+
+### feat(render): save and render run on their own, in the background (94bcfad)
+
+- Print areas: "Save on this mockup" and "Render on every mockup" are gone.
+  One background pass (`autoRenderAll`) renders the active design onto every
+  mockup that has a print area and links the results as listing images —
+  same renderComposition plan, same linkSavedRender rule, same drafts write
+  as the buttons had. Triggers: a debounced area save landing, a design-tab
+  switch (the flush is also a save), and tab load / placement change, which
+  only backfills targets with no render at the current fingerprint
+  (`findAdoptableRender`), so repeat triggers are cheap no-ops. Success is
+  silent — a small "Rendering..." chip is the only surface; failures toast.
+  A pair's white-ink half is silently skipped.
+- Listing images: "Save & render" is gone. A signature over every included
+  tile (which pixels, whether current) is debounced 800 ms and then runs the
+  same render pass with `auto: true`. Converges in at most two runs; success
+  is silent (the progress bar remains), an empty batch is a quiet no-op.
+- Tests: the button-click + toast e2e steps became IndexedDB polling
+  (`storeRenderAssetCount`, `listingRenderCount`) with generous timeouts.
+
+Gates at each commit: lint 0 errors, typecheck 0 errors, 719 unit tests,
+64 e2e, build clean. NOT pushed and NOT deployed — awaiting owner approval.
+
 

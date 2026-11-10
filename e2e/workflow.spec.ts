@@ -335,10 +335,30 @@ test.describe("core workflow", () => {
       timeout: 30_000,
     });
 
-    // Save the composed mockup. This is the same renderComposition the
-    // agent's create_mockup_render tool calls.
-    await page.getByRole("button", { name: /Save on this mockup/ }).click();
-    await expect(page.getByText(/Mockup render saved/)).toBeVisible({ timeout: 60_000 });
+    // The render happens on its own now: the tab's background pass backfills
+    // the ACTIVE design onto every mockup with an area for it, so the asset
+    // simply shows up in storage. No save button exists to click.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const db: IDBDatabase = await new Promise((res) => {
+              const r = indexedDB.open("mockup-studio");
+              r.onsuccess = () => res(r.result);
+            });
+            const metas: Array<unknown> = await new Promise((res) => {
+              const rq = db
+                .transaction(["assets"], "readonly")
+                .objectStore("assets")
+                .index("kind")
+                .getAll("mockup-render");
+              rq.onsuccess = () => res(rq.result);
+            });
+            return metas.length;
+          }),
+        { timeout: 90_000 },
+      )
+      .toBeGreaterThan(0);
 
     const samples = await page.evaluate(async () => {
       const db: IDBDatabase = await new Promise((res) => {
@@ -352,11 +372,6 @@ test.describe("core workflow", () => {
           .index("kind")
           .getAll("mockup-render");
         rq.onsuccess = () => res(rq.result);
-      });
-      if (!metas.length) return { found: false as const };
-      const blob: Blob = await new Promise((res) => {
-        const rq = db.transaction(["blobs"], "readonly").objectStore("blobs").get(metas[0].id);
-        rq.onsuccess = () => res(rq.result.blob);
       });
       const mockups: Array<{
         id: string;
@@ -384,6 +399,17 @@ test.describe("core workflow", () => {
         rq.onsuccess = () => res(rq.result);
       });
       const designId = designs.find((d) => d.name === "design-a")!.id;
+      // The background pass now renders BOTH mockups (they share the area),
+      // so pick the render of the 1200x1200 photo the assertions below pin -
+      // sample the pair, not the first row that happens to come back.
+      const meta =
+        metas.find((m) => mockups.find((mu) => mu.id === m.sourceMockupId)?.width === 1200) ??
+        metas[0];
+      if (!meta) return { found: false as const };
+      const blob: Blob = await new Promise((res) => {
+        const rq = db.transaction(["blobs"], "readonly").objectStore("blobs").get(meta.id);
+        rq.onsuccess = () => res(rq.result.blob);
+      });
       const bmp = await createImageBitmap(blob);
       const c = document.createElement("canvas");
       c.width = bmp.width;
@@ -397,7 +423,7 @@ test.describe("core workflow", () => {
       // source mockup; use that, or the frame maths below samples the wrong
       // photo.
       const mockup =
-        mockups.find((m) => m.id === metas[0].sourceMockupId) ??
+        mockups.find((m) => m.id === meta.sourceMockupId) ??
         mockups.find((m) => m.designAreas?.[designId] != null) ??
         mockups.find((m) => m.printArea);
       const area = mockup?.designAreas?.[designId] ?? mockup?.printArea;
@@ -442,25 +468,16 @@ test.describe("core workflow", () => {
     // batch" contract the assertions below rely on.
     await seedPrintArea(page);
 
-    // One render on each mockup, from the Print areas tab.
+    // One render on each mockup, in the background: signing the shared base
+    // area means every mockup of the type is renderable, so the tab's pass
+    // backfills BOTH without any mockup being visited and without a click.
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
     // Tabs are numbered oldest first, so design-a (uploaded first) is tab 1
     // and the default. The renders and the export below are about design-a:
     // select its tab explicitly anyway.
     await page.getByRole("button", { name: "design-a", exact: true }).click();
-    await page.getByRole("button", { name: /Save on this mockup/ }).click();
-    await expect(page.getByText(/Mockup render saved/)).toBeVisible({ timeout: 60_000 });
-    // Wait for the toast to go before the next render, or its assertion would
-    // pass on the first one's toast and the export would run too early.
-    await expect(page.getByText(/Mockup render saved/)).toBeHidden({ timeout: 20_000 });
-
-    // A base area covers every mockup of the product type, so mockup-b
-    // already renders with the same area without being visited.
-    await page.getByRole("button", { name: /mockup-b/ }).click();
-
-    await page.getByRole("button", { name: /Save on this mockup/ }).click();
-    await expect(page.getByText(/Mockup render saved/)).toBeVisible({ timeout: 60_000 });
+    await expect.poll(() => storeRenderAssetCount(page), { timeout: 120_000 }).toBe(2);
 
     await gotoApp(page, "/export");
     await page.getByRole("checkbox", { name: /design-a/ }).click();
@@ -1548,6 +1565,14 @@ test.describe("core workflow", () => {
     await expect(page.locator('[data-tile][data-included="true"]')).toHaveCount(2);
     await expect(page.locator('[data-tile][data-included="false"]')).toHaveCount(2);
 
+    // The background pass renders while this page is open: both listings'
+    // included tiles carry their pixels soon after the strip settles, with no
+    // button pressed. Poll generously - two renders through canvas
+    // composition take a beat.
+    await expect(page.getByText("Not rendered", { exact: true })).toHaveCount(0, {
+      timeout: 120_000,
+    });
+
     // --- Listing details --------------------------------------------------
     await gotoApp(page, "/listing-details");
     // The same numbered tabs: visible text is the number, the design's name
@@ -1571,10 +1596,13 @@ test.describe("core workflow", () => {
     // gallery says that honestly instead of inventing an image.
     await expect(page.getByText("No images selected", { exact: true })).toBeVisible();
 
-    // Design-b still has both mockups, but nothing has been rendered yet - the
-    // tiles say so rather than showing a placeholder as if it were real.
+    // Design-b still has both mockups, and the renders the strip's background
+    // pass made are here: the gallery shows real pixels, not a placeholder
+    // that looks like progress.
     await page.getByRole("button", { name: "design-b", exact: true }).click();
-    await expect(page.getByText("Not rendered yet").first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByRole("button", { name: /Preview main image: mockup-/ }),
+    ).toBeVisible({ timeout: 30_000 });
 
     // Publish is present, and blocked rather than guessed at: there is no
     // description and no current render, and CI has no Printify key.
@@ -1728,10 +1756,9 @@ test.describe("core workflow", () => {
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
     await page.getByRole("button", { name: "design-a", exact: true }).click();
-    await page.getByRole("button", { name: /Render on every mockup/ }).click();
-    await expect(page.getByText(/Rendered on \d+ mockup/)).toBeVisible({
-      timeout: 60_000,
-    });
+    // Design A's background pass renders both mockups on its own and links
+    // them as the listing's images; no render button exists to click.
+    await expect.poll(() => storeRenderAssetCount(page), { timeout: 120_000 }).toBe(2);
 
     // Those renders are saved AND used: the Mockups panel writes the session
     // entry for the owning listing, so Listing images adopts them instead of
@@ -1746,9 +1773,7 @@ test.describe("core workflow", () => {
     await expect(page.getByText(/saved render.* can be linked/i)).toHaveCount(0);
   });
 
-  test("32. Save render is visible on the Mockups toolbar and offers the source badge", async ({
-    page,
-  }) => {
+  test("32. renders run in the background: no render buttons anywhere", async ({ page }) => {
     await seedLibrary(page);
     // Seeded, because the live panel only edits an existing area.
     await seedPrintArea(page);
@@ -1760,12 +1785,21 @@ test.describe("core workflow", () => {
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
     await page.getByRole("button", { name: "design-a", exact: true }).click();
-    // The toolbar keeps "Save on this mockup" as the render action.
-    const saveRender = page.getByRole("button", { name: /Save on this mockup/ });
-    await expect(saveRender).toBeVisible({ timeout: 30_000 });
-    await saveRender.click();
-    await expect(page.getByText(/Mockup render saved and used/)).toBeVisible({
-      timeout: 60_000,
+
+    // Opining nothing: the two render buttons are simply gone. Saving the
+    // area and rendering what it produces are the tab's own background work
+    // now - the busy chip is the only surface a pass shows.
+    await expect(
+      page.getByRole("button", { name: /Save on this mockup|Render on every mockup/ }),
+    ).toHaveCount(0, { timeout: 30_000 });
+
+    // And the work still happens: the pass backfills both mockups and links
+    // them as the listing's images with no click from anyone.
+    await expect.poll(() => storeRenderAssetCount(page), { timeout: 120_000 }).toBe(2);
+    await gotoApp(page, "/listing-images");
+    await expect(page.locator("[data-listing-id]")).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByText("Not rendered", { exact: true })).toHaveCount(0, {
+      timeout: 30_000,
     });
   });
 
@@ -1881,23 +1915,21 @@ test.describe("core workflow", () => {
     });
 
     await seedPrintArea(page, "designArea");
-    // A current render for every mockup, through the real render path.
+    // A current render for every mockup, from the background passes: visiting
+    // each design's tab backfills it on its own, no render button pressed.
     await gotoApp(page, "/mockups");
     await page.getByRole("button", { name: /^Print areas/ }).click();
     await page.getByRole("button", { name: "design-a", exact: true }).click();
-    await page.getByRole("button", { name: /Render on every mockup/ }).click();
-    // Poll the stored renders instead of the toast: the toast is shared by
-    // both designs, so it cannot prove which one finished.
+    // Poll the stored renders, not the UI: a pass is silent on success.
     await expect
-      .poll(() => listingRenderCount(page, designIds.a), { timeout: 60_000 })
+      .poll(() => listingRenderCount(page, designIds.a), { timeout: 120_000 })
       .toBe(2);
 
     // Design B needs its own area too, or the batch correctly refuses to send
     // a shorter selection for it. It was seeded alongside design A above.
     await page.getByRole("button", { name: "design-b", exact: true }).click();
-    await page.getByRole("button", { name: /Render on every mockup/ }).click();
     await expect
-      .poll(() => listingRenderCount(page, designIds.b), { timeout: 60_000 })
+      .poll(() => listingRenderCount(page, designIds.b), { timeout: 120_000 })
       .toBe(2);
 
     // Copy is what makes Send available; it is not what this test is about.
@@ -2284,6 +2316,31 @@ test.describe("core workflow", () => {
  * The render toast is shared by every design, so the test needs the store to
  * tell design A's renders from design B's.
  */
+/**
+ * Counts every stored `mockup-render` asset, whichever design made it.
+ *
+ * The background passes are silent on success, so the STORE is the only
+ * honest signal that the work happened: a poll on this count is what a test
+ * asserts on instead of a click and a toast.
+ */
+async function storeRenderAssetCount(page: Page) {
+  return page.evaluate(async () => {
+    const db: IDBDatabase = await new Promise((res) => {
+      const r = indexedDB.open("mockup-studio");
+      r.onsuccess = () => res(r.result);
+    });
+    const rows: Array<unknown> = await new Promise((res) => {
+      const rq = db
+        .transaction(["assets"], "readonly")
+        .objectStore("assets")
+        .index("kind")
+        .getAll("mockup-render");
+      rq.onsuccess = () => res(rq.result);
+    });
+    return rows.length;
+  });
+}
+
 async function listingRenderCount(page: Page, designId: string) {
   return page.evaluate(async (id) => {
     const db: IDBDatabase = await new Promise((res) => {
