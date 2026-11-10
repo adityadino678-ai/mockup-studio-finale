@@ -22,7 +22,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -411,20 +410,7 @@ export function DesignAdjustmentPanel({
           <DialogTitle>
             <Crosshair className="h-4 w-4" /> Adjust "{design.name}"
           </DialogTitle>
-          <DialogDescription>
-            Where the artwork sits in the print area. Drag it to move it, use the round handle to
-            rotate it, and it snaps to the centre and the edges.
-          </DialogDescription>
         </DialogHeader>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-muted/60 px-3 py-2">
-          <span className="text-xs text-ink">
-            This placement belongs to “{design.name}”
-          </span>
-          <span className="text-xs text-ink-muted">
-            Every mockup with a print area uses it. Other designs keep their own placement.
-          </span>
-        </div>
 
         <div className="grid gap-4 sm:grid-cols-[260px_minmax(0,1fr)]">
           <div className="min-w-0 space-y-3">
@@ -522,17 +508,11 @@ export function DesignAdjustmentPanel({
               onChange={setPlacement}
               className="mx-auto max-w-[320px]"
             />
-            <p className="text-xs leading-relaxed text-ink-muted">
-              Dashed frame = print area. Printify crops outside it. Placement on the garment is approximate.
-            </p>
           </div>
         </div>
 
         <DialogFooter className="flex-wrap justify-between">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-ink-muted">
-              Saved for “{design.name}” · every mockup uses it
-            </span>
             <Button size="sm" variant="outline" onClick={applyToEveryDesign}>
               Use for every design
             </Button>
