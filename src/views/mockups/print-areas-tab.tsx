@@ -29,7 +29,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { db } from "@/lib/db/schema";
 import {
-  clearPrintArea,
   designMainAssetId,
   getAssetBlob,
   logActivity,
@@ -80,7 +79,7 @@ import type {
   StudioSession,
   Template,
 } from "@/types/domain";
-import { Crop, Download, ImagePlus, Layers, Loader2, Trash2 } from "lucide-react";
+import { Crop, Download, ImagePlus, Layers, Loader2 } from "lucide-react";
 
 /** The crop windows offered as one-click presets. */
 const CROP_PRESETS: Array<{ id: string; label: string; crop: AreaCrop }> = [
@@ -673,27 +672,6 @@ export function PrintAreasTab({
     await persistArea(area, { notify: true });
   };
 
-  const removeArea = async () => {
-    if (!mockup) return;
-    // Cancel the pending debounce FIRST. Its closure still holds the area the
-    // user is removing, and firing after the clear would quietly write the
-    // override back (sometimes only on the next tab switch or page unload).
-    if (autoSaveTimer.current) {
-      clearTimeout(autoSaveTimer.current);
-      autoSaveTimer.current = null;
-    }
-    pendingDraft.current = null;
-    draftOwner.current = null;
-    draftVersion.current += 1;
-    // Clears THIS design's area on this mockup (a null override), so the
-    // shared default cannot quietly take over and the other designs keep
-    // their own frames.
-    await clearPrintArea(mockup.id, designId ?? undefined);
-    setArea(null);
-    setDirty(false);
-    toast.success("Print area removed");
-  };
-
   // --- the Studio's placement ------------------------------------------------
   // Placement is edited in the Printify Studio (the Design panel). This is
   // the only writer of placements. The auto-fit action was removed on
@@ -1193,11 +1171,6 @@ export function PrintAreasTab({
             </span>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
-            {area ? (
-              <Button size="sm" variant="ghost" onClick={removeArea} title="Remove the print area">
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            ) : null}
             <Button
               size="sm"
               variant="outline"
