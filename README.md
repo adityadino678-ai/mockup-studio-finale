@@ -103,8 +103,11 @@ Supabase key. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` to configure it;
 sends no mail. With only the anon key, Supabase sends its own confirmation mail
 and the account stays unusable until the link is opened at `/auth/confirm`.
 The project's built-in sender is rate-limited until a sending domain exists, so
-the API says `email rate limit exceeded` rather than claiming success. A
-signed-in client can push to `/api/sync/*`; the local tools never require it.
+the API says `email rate limit exceeded` rather than claiming success. The
+account is for sign-in only: there is no sync route, and Supabase holds just
+the profile row (migrations 001 (core auth) and 004 (delete cascade)); the
+unused design/listing tables were dropped by migration 005. All user data
+lives in the visitor's own IndexedDB.
 
 
 

@@ -8,8 +8,8 @@ How this app is built, deployed, and verified. For architecture reasoning see
 **https://mockup-studio.adityadino678.workers.dev**
 
 Public. No login required, and every visitor gets their own empty workspace,
-stored in their own browser. An account is optional and only used for the
-Phase 4+ sync/connect path.
+stored in their own browser. An account is optional and exists for signing in
+only — no workspace data leaves the browser to the server.
 
 ## Cloudflare accounts
 
@@ -201,6 +201,13 @@ curl.exe -s https://mockup-studio.adityadino678.workers.dev/api/auth/status
 
 Deleting a user cascades to `public.profiles` (`supabase/migrations/004_profile_cascade.sql`);
 without that constraint the delete fails with `23503 … profiles_id_fkey`.
+
+The database is auth-only: `profiles` (001, cascade 004) is the only table it
+is declared for, plus the two unused sync tables migrations 002/003 created.
+Those were dropped by `005_auth_only.sql`, which is **not applied by any
+script** — review it and run it by hand once against the project (SQL editor
+or `supabase db push`). After 005, Supabase keeps authentication and the
+profile row only; there is no design/listing/mockup table server-side.
 
 Locally, copy `.dev.vars.example` to `.dev.vars`.
 

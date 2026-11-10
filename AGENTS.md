@@ -33,9 +33,12 @@ Design panel. The removed screens and what absorbed them are listed under
 **Known gaps**.
 
 **The defining constraint: all user data lives in the visitor's own IndexedDB.**
-An account is optional and exists only for the Phase 4+ sync/connect path; the
-server stores a profile row and, when a signed-in client calls `/api/sync/*`,
-the rows that client explicitly pushes. Without an account nothing leaves the
+An account is optional and exists for signing in only; the server stores a
+profile row and nothing else — there is no sync route and no design, mockup or
+listing table in Supabase (the unused sync tables from migrations 002/003 were
+dropped by `supabase/migrations/005_auth_only.sql`, which is deliberately not
+applied by any script and sits in the repo for manual review; see
+DEPLOYMENT.md → Supabase Auth). Without an account nothing leaves the
 browser, and every page still prerenders because no page depends on request
 state (the account screens hydrate from `/api/auth/status` client-side).
 

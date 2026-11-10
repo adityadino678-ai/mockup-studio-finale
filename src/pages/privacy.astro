@@ -64,7 +64,7 @@ const description =
     <li><strong>Printify</strong> — creating and updating products, uploading artwork, mockups and the mockup selection, and publishing when you press Publish. Receives the artwork, mockup images, title, description, tags, price and variant data needed for that call.</li>
     <li><strong>Your chosen AI provider</strong> — the chat messages, prompts and images you send in the agent panel or save-listing tools. The provider is the one you pick; its own privacy terms apply.</li>
     <li><strong>Etsy</strong> — read-only keyword research. Receives the search query. It does not receive your library, your drafts or your Printify data.</li>
-    <li><strong>Supabase</strong> — sign-in and session handling when authentication is enabled. Receives the email address and session data used to sign you in.</li>
+    <li><strong>Supabase</strong> — sign-in and session handling when you use an account. It stores a profile row (the email you signed up with) and nothing else: no designs, mockups, renders, listing drafts or API keys ever reach it.</li>
     <li><strong>Resend</strong> — transactional email, once a verified sending domain exists. Until then Supabase Auth sends its own verification and reset mail.</li>
     <li><strong>Razorpay</strong> — payments, when billing is switched on. Payment details are entered with Razorpay; we never receive full card numbers.</li>
     <li><strong>Cloudflare</strong> — hosting, CDN and Worker runtime for this site.</li>
@@ -95,9 +95,11 @@ const description =
   <p>
     Depending on where you live, you may have the right to access, correct, export,
     delete or object to the processing of your personal data, and to complain to your
-    local data-protection authority. Most of your data is already on your device: the
-    Export Center produces a copy, and clearing site data deletes it. For anything
-    held by an account or a provider, contact
+    local data-protection authority. Most of your data is already on your device:
+    Settings → <strong>Export everything to a folder</strong> writes the whole
+    workspace (designs, mockups, renders, drafts, settings) straight from your
+    browser to a folder you choose — nothing is uploaded — and clearing site data
+    deletes it. For anything held by an account or a provider, contact
     <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a>. We do not sell
     personal information.
   </p>

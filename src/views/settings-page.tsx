@@ -682,7 +682,10 @@ const counts = useLiveQuery(async () => {
               )}
               Account
             </CardTitle>
-            <CardDescription>Optional.</CardDescription>
+            <CardDescription>
+              Optional — for signing in only. Nothing syncs: your workspace stays in
+              this browser.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {!supabaseConfigured && (
@@ -767,7 +770,9 @@ const counts = useLiveQuery(async () => {
                   <User className="h-4 w-4 text-forest" />
                   <div>
                     <div className="text-sm font-medium text-ink">{authUser.email}</div>
-                    <div className="text-xs text-ink-muted">Signed in to Supabase</div>
+                    <div className="text-xs text-ink-muted">
+                      Signed in — the account is for sign-in only; no workspace data syncs
+                    </div>
                   </div>
                 </div>
                 <Button variant="outline" onClick={handleSignOut} disabled={authLoading} size="sm">
