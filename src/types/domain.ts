@@ -629,6 +629,16 @@ export interface StudioSession {
    */
   placements: Record<string, StudioPlacement>;
   /**
+   * Per-POSITION placements, keyed by design id then print-area position.
+   *
+   * A design can keep separate FRONT and BACK values (width, rotation,
+   * centre) instead of one shared set: the Adjust dialog's position buttons
+   * switch between them, and product creation sends the side's own values.
+   * A (design, position) pair with no entry here falls back to `placements`
+   * above, so existing sessions load and behave unchanged.
+   */
+  placementsByPosition?: Record<string, Record<string, StudioPlacement>>;
+  /**
    * The design tab the Mockups → Print areas panel was last on.
    *
    * Pure UI memory: a reload resumes the same per-design tab, so a

@@ -55,6 +55,7 @@ export function emptySession(): StudioSession {
     inkReset: false,
     universalPlacement: { ...DEFAULT_PLACEMENT },
     placements: {},
+    placementsByPosition: {},
     priceCents: 1999,
     titleTemplate: "{design} — {product}",
     descriptionTemplate: "",
@@ -75,6 +76,20 @@ export function emptySession(): StudioSession {
 /** Only keeps values of the expected type, so a malformed store cannot crash. */
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/** Normalises one stored placement, or rejects it. */
+function placementValue(value: unknown): StudioPlacement | null {
+  if (!value || typeof value !== "object") return null;
+  const p = value as Partial<StudioPlacement>;
+  const fallback = DEFAULT_PLACEMENT;
+  return {
+    position: typeof p.position === "string" && p.position ? p.position : fallback.position,
+    x: finiteNumber(p.x) ?? fallback.x,
+    y: finiteNumber(p.y) ?? fallback.y,
+    scale: finiteNumber(p.scale) ?? fallback.scale,
+    angle: finiteNumber(p.angle) ?? fallback.angle,
+  };
 }
 
 function finiteNumber(value: unknown): number | undefined {
@@ -278,15 +293,22 @@ export async function loadSession(): Promise<StudioSession> {
   const rawPlacements = stored.placements;
   if (rawPlacements && typeof rawPlacements === "object") {
     for (const [designId, value] of Object.entries(rawPlacements)) {
-      if (!value || typeof value !== "object") continue;
-      const p = value as Partial<StudioPlacement>;
-      placements[designId] = {
-        position: typeof p.position === "string" ? p.position : base.universalPlacement.position,
-        x: finiteNumber(p.x) ?? base.universalPlacement.x,
-        y: finiteNumber(p.y) ?? base.universalPlacement.y,
-        scale: finiteNumber(p.scale) ?? base.universalPlacement.scale,
-        angle: finiteNumber(p.angle) ?? base.universalPlacement.angle,
-      };
+      const p = placementValue(value);
+      if (p) placements[designId] = p;
+    }
+  }
+
+  const placementsByPosition: Record<string, Record<string, StudioPlacement>> = {};
+  const rawByPosition = stored.placementsByPosition;
+  if (rawByPosition && typeof rawByPosition === "object") {
+    for (const [designId, record] of Object.entries(rawByPosition)) {
+      if (!record || typeof record !== "object") continue;
+      const perPosition: Record<string, StudioPlacement> = {};
+      for (const [position, value] of Object.entries(record)) {
+        const p = placementValue(value);
+        if (p) perPosition[position] = p;
+      }
+      if (Object.keys(perPosition).length > 0) placementsByPosition[designId] = perPosition;
     }
   }
 
@@ -320,6 +342,7 @@ export async function loadSession(): Promise<StudioSession> {
     inkReset: legacySplitCleared || stored.inkReset === true,
     universalPlacement,
     placements,
+    placementsByPosition,
     priceCents: positiveCents(stored.priceCents) ?? base.priceCents,
     titleTemplate: typeof stored.titleTemplate === "string" ? stored.titleTemplate : base.titleTemplate,
     descriptionTemplate:
@@ -384,6 +407,11 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
     delete placements[designId];
     changed = true;
   }
+  const placementsByPosition = { ...(session.placementsByPosition ?? {}) };
+  if (designId in placementsByPosition) {
+    delete placementsByPosition[designId];
+    changed = true;
+  }
   if (session.designIds.includes(designId)) {
     changed = true;
   }
@@ -437,6 +465,7 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
       inkPairIds: session.inkPairIds.filter((id) => id !== designId),
       inkPairs,
       placements,
+      placementsByPosition,
       listingImages,
       listingImageCleared,
       listingImageOrders,
@@ -456,14 +485,25 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
 /**
  * The placement for a design.
  *
- * A design owns ONE placement, and every mockup uses it: the print-area frame
+ * A design owns its placement, and every mockup uses it: the print-area frame
  * maps that placement onto each photo. There is no "all designs share this"
  * mode - editing one design can never move another.
+ *
+ * With a `position`, the design's PER-POSITION placement wins when it has one
+ * (`placementsByPosition[designId][position]`): the Adjust dialog keeps
+ * separate FRONT and BACK values, and product creation sends the side's own
+ * numbers. No per-position entry falls back to the shared placement, so
+ * sessions saved before this existed behave exactly as before.
  */
 export function placementFor(
   session: StudioSession,
   designId: string,
+  position?: string,
 ): StudioPlacement {
+  if (position) {
+    const perPosition = session.placementsByPosition?.[designId]?.[position];
+    if (perPosition) return perPosition;
+  }
   return session.placements[designId] ?? session.universalPlacement;
 }
 

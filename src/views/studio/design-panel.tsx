@@ -361,28 +361,55 @@ export function DesignAdjustmentPanel({
     };
   }, [assetId]);
 
-  /** The placement of THIS design. The shared default is only a starting point. */
-  const editing: StudioPlacement = React.useMemo(
-    () => session.placements[design.id] ?? session.universalPlacement,
-    [session.universalPlacement, session.placements, design.id],
+  /** The placement of THIS design, for the position being edited. */
+  const [position, setPosition] = React.useState<string>(
+    () => (session.placements[design.id] ?? session.universalPlacement).position,
   );
+  const editing: StudioPlacement = React.useMemo(() => {
+    // This position's own values when the user tuned them before; otherwise
+    // the design's shared values under this position's name, so switching
+    // FRONT/BACK starts from what is on screen rather than from nothing.
+    const perPosition = session.placementsByPosition?.[design.id]?.[position];
+    if (perPosition) return perPosition;
+    const shared = session.placements[design.id] ?? session.universalPlacement;
+    return { ...shared, position };
+  }, [
+    session.placementsByPosition,
+    session.placements,
+    session.universalPlacement,
+    design.id,
+    position,
+  ]);
 
   /**
-   * Writes THIS design's placement.
+   * Writes THIS design's placement for the position being edited.
    *
    * The values are rounded on write: a drag produces raw floats like
    * 0.5045991124897677, which is not a value the number inputs can show.
+   * They are stored under THIS position AND mirrored into the design's
+   * shared placement, so every existing reader (the Mockups tab renders,
+   * the listing fingerprints, product creation) sees the edit without
+   * knowing about per-position storage.
    */
   const setPlacement = (patch: Partial<StudioPlacement>) => {
     const merged = { ...editing, ...patch };
     const next: StudioPlacement = {
-      position: merged.position,
+      position,
       x: Math.round(merged.x * 1000) / 1000,
       y: Math.round(merged.y * 1000) / 1000,
       scale: Math.round(merged.scale * 1000) / 1000,
       angle: Math.round(merged.angle * 10) / 10,
     };
-    update({ placements: { ...session.placements, [design.id]: next } });
+    update({
+      placementsByPosition: {
+        ...(session.placementsByPosition ?? {}),
+        [design.id]: {
+          ...(session.placementsByPosition?.[design.id] ?? {}),
+          [position]: next,
+        },
+      },
+      placements: { ...session.placements, [design.id]: next },
+    });
   };
 
   /**
@@ -393,7 +420,11 @@ export function DesignAdjustmentPanel({
    * has not touched.
    */
   const applyToEveryDesign = () => {
-    update({ universalPlacement: editing, placements: {} });
+    update({
+      universalPlacement: editing,
+      placements: {},
+      placementsByPosition: {},
+    });
     toast.success("Placement used for every design");
   };
 
@@ -421,8 +452,8 @@ export function DesignAdjustmentPanel({
                   <Button
                     key={a.position}
                     size="sm"
-                    variant={editing.position === a.position ? "default" : "outline"}
-                    onClick={() => setPlacement({ position: a.position })}
+                    variant={position === a.position ? "default" : "outline"}
+                    onClick={() => setPosition(a.position)}
                     className="h-7 text-xs"
                   >
                     {a.position}
