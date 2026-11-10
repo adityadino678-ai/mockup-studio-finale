@@ -1344,6 +1344,15 @@ export function ListingImagesView() {
       return;
     }
 
+    // Send is self-sufficient now: the strip's background pass may still be
+    // filling tiles (it runs silently after every change, and a navigation
+    // can have interrupted one), so Send first settles the renders itself.
+    // A listing that genuinely cannot render still skips - with its reason -
+    // but a pass that was simply mid-flight no longer turns Send into
+    // "render all N first" rejections for images that would exist a second
+    // later.
+    await renderSelectedRef.current({ auto: true });
+
     setSending(true);
     appliedSignaturesRef.current = {};
     setSendProgress({ done: 0, total: targets.length, label: "Preparing images…" });
@@ -1520,14 +1529,20 @@ export function ListingImagesView() {
 
       if (prepared.length === 0) {
         // Keep the dialog open with the full failures/skipped list - a
-        // truncated toast hides why every listing was rejected.
+        // truncated toast hides why every listing was rejected. A single
+        // listing names ITS reason in the toast, not a generic count.
         setBridgePayload("");
         setBridgePayloadData(null);
         setBridgeApplied(null);
         setBridgeCopied(false);
         setBridgeSummary({ products: 0, images: 0, failures, skipped });
         setBridgeOpen(true);
-        toast.error("Nothing was prepared for Printify. See the dialog for why.");
+        const reason = failures[0] ?? skipped[0];
+        toast.error(
+          reason && targets.length === 1
+            ? `Nothing was prepared: ${reason}`
+            : "Nothing was prepared for Printify. See the dialog for why.",
+        );
         return;
       }
 
