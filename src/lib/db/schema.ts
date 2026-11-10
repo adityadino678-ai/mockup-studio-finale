@@ -36,6 +36,18 @@ export interface SettingRecord {
   value: unknown;
 }
 
+/**
+ * Where an interrupted local export left off. The handle is a
+ * FileSystemDirectoryHandle - structured-clonable, so IndexedDB stores it
+ * directly and Dexie needs no extra typing.
+ */
+export interface ExportHandleRecord {
+  id: string;
+  handle: FileSystemDirectoryHandle;
+  startedAt: number;
+  donePaths: string[];
+}
+
 export class MockupStudioDB extends Dexie {
   assets!: EntityTable<AssetMeta, "id">;
   blobs!: EntityTable<BlobRecord, "id">;
@@ -54,6 +66,7 @@ export class MockupStudioDB extends Dexie {
   settings!: EntityTable<SettingRecord, "key">;
   conversations!: EntityTable<Conversation, "id">;
   messages!: EntityTable<ChatMessage, "id">;
+  exportHandles!: EntityTable<ExportHandleRecord, "id">;
 
   constructor() {
     super("mockup-studio");
@@ -92,6 +105,9 @@ export class MockupStudioDB extends Dexie {
     // deletes a table by naming it with `null`; the v4 block stays because an
     // installed v4 database still has to upgrade through it.
     this.version(5).stores({ autopilotRuns: null });
+    // v6: resume state for the local export (Settings -> Local storage). One
+    // tiny table; the handle itself is the payload, so no indexes beyond the key.
+    this.version(6).stores({ exportHandles: "id" });
   }
 }
 

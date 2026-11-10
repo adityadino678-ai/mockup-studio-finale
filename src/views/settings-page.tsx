@@ -31,6 +31,17 @@ import {
 } from "@/lib/client/integrations";
 import { providerList, type ModelInfo } from "@/lib/ai/providers";
 import {
+  buildZipParts,
+  ensureReadWrite,
+  exportToLocalFolder,
+  loadExportResume,
+  pickExportDirectory,
+  storageNotice,
+  supportsDirectoryPicker,
+  type ExportResumeRecord,
+  type LocalExportProgress,
+} from "@/lib/export/local-export";
+import {
   Check,
   CircleCheck,
   CircleX,
@@ -74,6 +85,17 @@ interface ShopOption {
 
 type Provider = "printify" | "ai";
 
+/** Saves a Blob to the user's Downloads folder, entirely locally. */
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  // Revoke after a tick; revoking immediately can cancel the download.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export function SettingsPage() {
   const [storage, setStorage] = React.useState<{ usage: number; quota: number } | null>(null);
   const [integrations, setIntegrations] = React.useState<Record<string, IntegrationStatus> | null>(null);
@@ -92,6 +114,13 @@ export function SettingsPage() {
   const [etsyQuery, setEtsyQuery] = React.useState("personalized t-shirt");
   const [etsyTesting, setEtsyTesting] = React.useState(false);
   const [etsyResult, setEtsyResult] = React.useState<TestResult | null>(null);
+
+  // ---- Local export (Settings -> Local storage) ----
+  const [exportProgress, setExportProgress] = React.useState<LocalExportProgress | null>(null);
+  const [exportNotice, setExportNotice] = React.useState<string | null>(null);
+  const [exportResume, setExportResume] = React.useState<ExportResumeRecord | null>(null);
+  const [includeSecrets, setIncludeSecrets] = React.useState(false);
+  const exportCancelRef = React.useRef(false);
 
   // ---- Supabase auth (email/password only) ----
 const [authUser, setAuthUser] = React.useState<{ id: string; email: string } | null>(null);
@@ -197,6 +226,9 @@ const counts = useLiveQuery(async () => {
         setStorage({ usage: est.usage, quota: est.quota });
       }
     });
+    void loadExportResume()
+      .then((record) => setExportResume(record ?? null))
+      .catch(() => setExportResume(null));
     void refreshStatus();
     void checkSupabase();
     void loadIntegrations().then((c) => {
@@ -210,6 +242,76 @@ const counts = useLiveQuery(async () => {
 
   const patchConfig = (patch: Partial<IntegrationConfig>) => {
     setConfig((c) => (c ? { ...c, ...patch } : c));
+  };
+
+  // ---- Local export handlers ----
+
+  const finishExport = async () => {
+    setExportProgress(null);
+    try {
+      setExportResume((await loadExportResume()) ?? null);
+    } catch {
+      setExportResume(null);
+    }
+  };
+
+  /**
+   * Writes everything into a folder the user picks, or resumes an interrupted
+   * run into the remembered folder. Entirely local: the handle writes the
+   * files through the browser's File System Access API.
+   */
+  const runFolderExport = async (resumeRecord?: ExportResumeRecord) => {
+    exportCancelRef.current = false;
+    try {
+      const handle = resumeRecord ? resumeRecord.handle : await pickExportDirectory();
+      if (!handle) return; // the user backed out of the picker
+      if (!(await ensureReadWrite(handle))) {
+        setExportNotice(`Write permission to "${handle.name}" was refused.`);
+        toast.error(`Write permission to "${handle.name}" was refused.`);
+        return;
+      }
+      const result = await exportToLocalFolder({
+        includeSecrets,
+        directory: handle,
+        onProgress: setExportProgress,
+        shouldCancel: () => exportCancelRef.current,
+        skipPaths: resumeRecord ? new Set(resumeRecord.donePaths) : undefined,
+      });
+      setExportNotice(null);
+      if (result.cancelled) {
+        toast.warning(`Export paused after ${result.files} files. Resume from Settings when you are ready.`);
+      } else {
+        toast.success(`Exported ${result.files} files to "${result.folderName}".`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "The export could not be written";
+      setExportNotice(message);
+      toast.error(message);
+    } finally {
+      void finishExport();
+    }
+  };
+
+  /** ZIP fallback: same layout, downloaded part by part (max 500 MB each). */
+  const runZipExport = async () => {
+    exportCancelRef.current = false;
+    try {
+      const parts = await buildZipParts(includeSecrets, {
+        onProgress: setExportProgress,
+        shouldCancel: () => exportCancelRef.current,
+      });
+      for (const part of parts) downloadBlob(part.blob, part.name);
+      setExportNotice(null);
+      if (parts.length > 0) {
+        toast.success(`Downloaded ${parts.length} export file${parts.length === 1 ? "" : "s"}.`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "The export could not be built";
+      setExportNotice(message);
+      toast.error(message);
+    } finally {
+      void finishExport();
+    }
   };
 
   /**
@@ -470,10 +572,100 @@ const counts = useLiveQuery(async () => {
                   style={{ width: `${storage.quota ? Math.min(100, (storage.usage / storage.quota) * 100) : 100}%` }}
                 />
               </div>
+              {(() => {
+                const notice = storageNotice(storage.usage, storage.quota);
+                if (!notice) return null;
+                return (
+                  <p
+                    className={cn(
+                      "mt-2 text-xs",
+                      notice.level === "urgent" ? "text-destructive" : "text-ink-muted",
+                    )}
+                  >
+                    {notice.message}
+                  </p>
+                );
+              })()}
             </div>
           ) : (
             <p className="text-sm text-ink-muted">Storage estimate unavailable in this browser.</p>
           )}
+          <Separator className="my-4" />
+          <div className="space-y-2">
+            <label className="flex items-start gap-2 text-sm text-ink">
+              <input
+                id="export-include-keys"
+                type="checkbox"
+                checked={includeSecrets}
+                onChange={(e) => setIncludeSecrets(e.target.checked)}
+                disabled={exportProgress != null}
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-forest"
+              />
+              <span>
+                Include saved API keys and shops in the export
+                <span className="block text-xs text-ink-muted">
+                  Unticked by default: a backup carrying keys is one more thing to leak.
+                </span>
+              </span>
+            </label>
+            <p className="text-xs text-ink-muted">
+              Your files go straight from this browser to the folder you choose. Nothing is uploaded.
+              {supportsDirectoryPicker()
+                ? " An interrupted export can be resumed from here."
+                : " This browser cannot write folders directly, so the export arrives as ZIP files (500 MB max each)."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {supportsDirectoryPicker() ? (
+                <Button
+                  size="sm"
+                  onClick={() => void runFolderExport()}
+                  disabled={exportProgress != null}
+                >
+                  <Download className="h-3.5 w-3.5" /> Export everything to a folder
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={() => void runZipExport()}
+                  disabled={exportProgress != null}
+                >
+                  <Download className="h-3.5 w-3.5" /> Download export (ZIP parts)
+                </Button>
+              )}
+              {exportResume && !exportProgress && (
+                <Button size="sm" variant="outline" onClick={() => void runFolderExport(exportResume)}>
+                  <RefreshCw className="h-3.5 w-3.5" /> Resume the interrupted export
+                </Button>
+              )}
+              {exportProgress && (
+                <Button size="sm" variant="ghost" onClick={() => { exportCancelRef.current = true; }}>
+                  Cancel
+                </Button>
+              )}
+            </div>
+            {exportProgress && (
+              <div>
+                <div className="mb-1 flex items-center justify-between text-xs text-ink-muted">
+                  <span>
+                    {exportProgress.label ?? (exportProgress.phase === "collecting" ? "Collecting your workspace" : "Writing files")}
+                    {exportProgress.phase === "writing" ? ` — ${exportProgress.done}/${exportProgress.total}` : ""}
+                  </span>
+                  <span>{Math.round((exportProgress.phase === "writing" ? exportProgress.done / Math.max(1, exportProgress.total) : 0) * 100)}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
+                  <div
+                    className="h-full rounded-full bg-forest transition-all"
+                    style={{
+                      width: `${exportProgress.phase === "writing" ? Math.min(100, (exportProgress.done / Math.max(1, exportProgress.total)) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            {exportNotice && (
+              <p className="text-xs text-destructive">{exportNotice}</p>
+            )}
+          </div>
         </CardContent>
       </Card>
 
