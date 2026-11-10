@@ -13,10 +13,12 @@ const external = Boolean(process.env.BASE_URL);
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 1800000, // 30 minutes
+  timeout: 180_000,
   expect: { timeout: 30_000 },
-  fullyParallel: false,
-  workers: 1,
+  // Every test seeds its OWN browser context (own IndexedDB), so the suite
+  // is parallel-safe: files and the tests inside them run concurrently.
+  fullyParallel: true,
+  workers: process.env.CI ? 2 : 4,
   retries: 0,
   reporter: [["list"]],
   use: {

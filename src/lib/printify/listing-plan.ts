@@ -31,6 +31,13 @@ export interface StudioListing {
   partnerName?: string;
   /** The artwork used for the listing image previews and renders. */
   artworkAssetId: string;
+  /**
+   * Per-member main artwork, present only for a pair listing (memberIds
+   * length 2): the strip renders BOTH designs' tiles, and each tile needs
+   * its own design's artwork and print-area context. Ordinary listings
+   * leave this unset - their tiles read `artworkAssetId`.
+   */
+  memberArtworkIds?: Record<string, string>;
 }
 
 type ListingDesign = Pick<
@@ -105,6 +112,57 @@ export function buildStudioListings(
           partnerDesignId: white.id,
           partnerName: white.name,
           artworkAssetId: mainAssetId(black),
+          memberArtworkIds: {
+            [black.id]: mainAssetId(black),
+            [white.id]: mainAssetId(white),
+          },
+        });
+        continue;
+      }
+    }
+
+    // A DESIGN pair is also ONE listing, owned by its front half, covering
+    // BOTH designs' artwork. Entirely separate from ink pairs: it prints the
+    // plain panel's colours, front design on the front print area, back
+    // design on the back. Emitted at the front half's slot, like ink pairs.
+    const designPair = (session.designPairs ?? []).find(
+      (candidate) =>
+        candidate.frontDesignId === design.id || candidate.backDesignId === design.id,
+    );
+    if (designPair) {
+      const front = byId.get(designPair.frontDesignId);
+      const back = byId.get(designPair.backDesignId);
+      if (
+        design.id === designPair.backDesignId &&
+        front &&
+        scoped.has(front.id) &&
+        !handled.has(front.id)
+      ) {
+        continue;
+      }
+      if (
+        front &&
+        back &&
+        scoped.has(front.id) &&
+        scoped.has(back.id) &&
+        !handled.has(front.id) &&
+        !handled.has(back.id)
+      ) {
+        handled.add(front.id);
+        handled.add(back.id);
+        listings.push({
+          listingId: front.id,
+          designId: front.id,
+          designName: front.name,
+          row: "plain",
+          memberIds: [front.id, back.id],
+          partnerDesignId: back.id,
+          partnerName: back.name,
+          artworkAssetId: mainAssetId(front),
+          memberArtworkIds: {
+            [front.id]: mainAssetId(front),
+            [back.id]: mainAssetId(back),
+          },
         });
         continue;
       }

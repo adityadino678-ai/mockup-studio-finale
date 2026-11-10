@@ -133,6 +133,18 @@ import {
 
 interface SelectedImage {
   mockup: Mockup;
+  /**
+   * The tile's identity in the strip: for a pair listing this is
+   * `<designId>:<mockupId>` (both halves show every mockup); for an ordinary
+   * listing it is the bare mockup id, exactly as before.
+   */
+  tileId: string;
+  /** The design whose artwork this tile renders (a pair member or the owner). */
+  designId: string;
+  /** That design's name, for labels and filenames. */
+  designName: string;
+  /** That design's main artwork asset id. */
+  artworkAssetId: string;
   entry: StudioListingRender | undefined;
   /** The session entry is current. */
   fresh: boolean;
@@ -536,6 +548,31 @@ export function ListingImagesView() {
    */
   const effectiveIdsFor = React.useCallback(
     (listing: StudioListing): string[] => {
+      // A PAIR listing's selection holds TILE ids ("<designId>:<mockupId>"):
+      // both halves show every mockup, and the user includes or removes each
+      // half's tile on its own. Ordinary listings keep bare mockup ids.
+      const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+      if (pair) {
+        const validMembers = new Set(listing.memberIds);
+        const tileExists = (tileId: string) => {
+          const sep = tileId.indexOf(":");
+          if (sep <= 0) return false;
+          const mockup = mockupsById.get(tileId.slice(sep + 1));
+          return validMembers.has(tileId.slice(0, sep)) && !!mockup && isProductMockup(mockup);
+        };
+        if (session.listingImages?.[listing.listingId] !== undefined) {
+          return listingMockupIds(session, listing.listingId).filter(tileExists);
+        }
+        if (session.listingImageCleared?.[listing.listingId] === true) return [];
+        // Never configured: every member's tile for every mockup, members in
+        // listing order (front/black first) and the shared mockup order within
+        // each member - grouped by design, as the strip draws it.
+        return listing.memberIds.flatMap((memberId) =>
+          orderedIdsForListing(session, listing.listingId, orderedMockupIds).map(
+            (mockupId) => `${memberId}:${mockupId}`,
+          ),
+        );
+      }
       const configured = session.listingImages?.[listing.listingId] !== undefined;
       if (configured) {
         return listingMockupIds(session, listing.listingId).filter((id) => {
@@ -563,7 +600,13 @@ export function ListingImagesView() {
   const infoCardsFor = React.useCallback(
     (listing: StudioListing): Mockup[] => {
       if (!mockups) return [];
-      const attached = infoCardsForListing(mockups, effectiveIdsFor(listing));
+      // A pair's selection holds tile ids; the cards attach by the category
+      // of the MOCKUPS included, so the tiles fold back to their mockup part.
+      const idsForCards = effectiveIdsFor(listing).map((id) => {
+        const sep = id.indexOf(":");
+        return sep > 0 ? id.slice(sep + 1) : id;
+      });
+      const attached = infoCardsForListing(mockups, idsForCards);
       const ids = attached.map((card) => card.id);
       // Same rule as the mockup tiles: a detached design sorts its cards by
       // its own order, everyone else by the shared one.
@@ -585,31 +628,42 @@ export function ListingImagesView() {
 
   const selectionFor = React.useCallback(
     (listing: StudioListing): SelectedImage[] => {
+      const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
       return effectiveIdsFor(listing)
-        .map((mockupId) => mockupsById.get(mockupId))
-        .filter((mockup): mockup is Mockup => !!mockup)
-        .map((mockup) => {
-          const entry = listingRenderFor(session, listing.listingId, mockup.id);
-          const saved = placementsByKey.get(`${listing.designId}:${mockup.id}`);
+        .map((tileId) => {
+          // A pair's tile id carries its member design; an ordinary listing's
+          // id is the bare mockup id and belongs to the listing's own design.
+          const sep = pair ? tileId.indexOf(":") : -1;
+          const designId = pair && sep > 0 ? tileId.slice(0, sep) : listing.designId;
+          const mockupId = pair && sep > 0 ? tileId.slice(sep + 1) : tileId;
+          const mockup = mockupsById.get(mockupId);
+          if (!mockup) return null;
+          const artworkAssetId =
+            (pair ? listing.memberArtworkIds?.[designId] : undefined) ?? listing.artworkAssetId;
+          // Each tile renders and fingerprints against ITS design's context:
+          // artwork, print area, placement - the member's, not the owner's.
+          const memberListing: StudioListing = { ...listing, designId, artworkAssetId };
+          const member = designsById.get(designId);
+          const entry = listingRenderFor(session, designId, mockupId);
+          const saved = placementsByKey.get(`${designId}:${mockupId}`);
           const fingerprint = listingImageFingerprint({
-            listing,
+            listing: memberListing,
             mockup,
-            placement: placementFor(session, listing.designId),
+            placement: placementFor(session, designId),
             saved,
           });
           const fresh = isListingRenderFresh(entry, fingerprint);
           const adoptedAsset = fresh
             ? null
-            : matchInAdoptionIndex(
-                adoptionIndex,
-                listing.artworkAssetId,
-                mockup.id,
-                fingerprint,
-              );
-          const key = listingRenderKey(listing.listingId, mockup.id);
+            : matchInAdoptionIndex(adoptionIndex, artworkAssetId, mockupId, fingerprint);
+          const key = listingRenderKey(designId, mockupId);
           const overridden = Boolean(forceOverrides[key] || rowOverrides[key]);
           return {
             mockup,
+            tileId,
+            designId,
+            designName: member?.name ?? listing.designName,
+            artworkAssetId,
             entry,
             fresh,
             overridden,
@@ -617,15 +671,25 @@ export function ListingImagesView() {
               ? adoptedRenderEntry({
                   asset: adoptedAsset,
                   fingerprint,
-                  designId: listing.designId,
-                  mockupId: mockup.id,
+                  designId,
+                  mockupId,
                 })
               : undefined,
             fingerprint,
-          };
-        });
+          } satisfies SelectedImage;
+        })
+        .filter((image): image is SelectedImage => image !== null);
     },
-    [session, mockupsById, placementsByKey, effectiveIdsFor, adoptionIndex, forceOverrides, rowOverrides],
+    [
+      session,
+      mockupsById,
+      designsById,
+      placementsByKey,
+      effectiveIdsFor,
+      adoptionIndex,
+      forceOverrides,
+      rowOverrides,
+    ],
   );
 
   /**
@@ -644,7 +708,7 @@ export function ListingImagesView() {
     for (const listing of listings) {
       for (const image of selectionFor(listing)) {
         if (!image.adopted) continue;
-        const key = listingRenderKey(listing.listingId, image.mockup.id);
+        const key = listingRenderKey(image.designId, image.mockup.id);
         if (session.listingRenders?.[key]?.assetId === image.adopted.assetId) continue;
         adopted[key] = image.adopted;
       }
@@ -666,9 +730,9 @@ export function ListingImagesView() {
     for (const listing of listings) {
       for (const image of selectionFor(listing)) {
         targets.push({
-          key: listingRenderKey(listing.listingId, image.mockup.id),
-          artworkAssetId: listing.artworkAssetId,
-          designId: listing.designId,
+          key: listingRenderKey(image.designId, image.mockup.id),
+          artworkAssetId: image.artworkAssetId,
+          designId: image.designId,
           mockupId: image.mockup.id,
           fingerprint: image.fingerprint,
           covered: Boolean(currentEntry(image)),
@@ -703,33 +767,25 @@ export function ListingImagesView() {
   }, [linkableEntries, session.listingRenders, update]);
 
   /** Force one tile to use its saved Mockups render even if it is out of date. */
-  const forceTileOverride = React.useCallback(
-    (listing: StudioListing, mockupId: string) => {
-      const key = listingRenderKey(listing.listingId, mockupId);
-      setForceOverrides((prev) => ({ ...prev, [key]: true }));
-    },
-    [],
-  );
+  const forceTileOverride = React.useCallback((key: string) => {
+    setForceOverrides((prev) => ({ ...prev, [key]: true }));
+  }, []);
 
   /** Release a forced tile override so it re-evaluates freshness normally. */
-  const clearTileOverride = React.useCallback(
-    (listing: StudioListing, mockupId: string) => {
-      const key = listingRenderKey(listing.listingId, mockupId);
-      setForceOverrides((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-    },
-    [],
-  );
+  const clearTileOverride = React.useCallback((key: string) => {
+    setForceOverrides((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   /** Force every tile in one listing (row of tiles) to use its saved render. */
   const forceRowOverride = React.useCallback(
     (listing: StudioListing) => {
       const keys: string[] = [];
       for (const image of selectionFor(listing)) {
-        keys.push(listingRenderKey(listing.listingId, image.mockup.id));
+        keys.push(listingRenderKey(image.designId, image.mockup.id));
       }
       setRowOverrides((prev) => {
         const next = { ...prev };
@@ -746,7 +802,7 @@ export function ListingImagesView() {
     (listing: StudioListing) => {
       const keys: string[] = [];
       for (const image of selectionFor(listing)) {
-        keys.push(listingRenderKey(listing.listingId, image.mockup.id));
+        keys.push(listingRenderKey(image.designId, image.mockup.id));
       }
       setRowOverrides((prev) => {
         const next = { ...prev };
@@ -821,10 +877,18 @@ export function ListingImagesView() {
     (listing: StudioListing) => {
       if (rendering || sending) return;
       const current = effectiveIdsFor(listing);
-      const next = [...current, ...allMockupIds.filter((id) => !current.includes(id))];
+      // A pair's candidates are TILES (every member × every mockup); an
+      // ordinary listing's candidates stay the bare mockup ids.
+      const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+      const candidates = pair
+        ? listing.memberIds.flatMap((memberId) =>
+            orderedMockupIds.map((mockupId) => `${memberId}:${mockupId}`),
+          )
+        : allMockupIds;
+      const next = [...current, ...candidates.filter((id) => !current.includes(id))];
       update(selectionPatch(listing.listingId, next, false));
     },
-    [effectiveIdsFor, allMockupIds, update, selectionPatch, rendering, sending],
+    [effectiveIdsFor, allMockupIds, orderedMockupIds, update, selectionPatch, rendering, sending],
   );
 
   const clearListing = React.useCallback(
@@ -1002,6 +1066,15 @@ export function ListingImagesView() {
   const toggleOwnOrder = React.useCallback(
     (listing: StudioListing) => {
       const listingId = listing.listingId;
+      // A pair row's order is TILE ids (both halves); an ordinary row's is the
+      // bare mockup ids. Everything below just needs the candidates to be the
+      // ids the strip actually shows.
+      const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+      const rowCandidates = pair
+        ? listing.memberIds.flatMap((memberId) =>
+            orderedMockupIds.map((mockupId) => `${memberId}:${mockupId}`),
+          )
+        : allMockupIds;
       const own = session.listingImageOrders?.[listingId];
       if (own === undefined) {
         update({
@@ -1009,7 +1082,7 @@ export function ListingImagesView() {
             ...(session.listingImageOrders ?? {}),
             // The row was on the shared order, so this IS its current order:
             // the tile strip does not move when the toggle goes on.
-            [listingId]: orderedIdsForListing(session, listingId, allMockupIds),
+            [listingId]: orderedIdsForListing(session, listingId, rowCandidates),
           },
         });
         return;
@@ -1019,15 +1092,21 @@ export function ListingImagesView() {
         delete next[listingId];
         update({ listingImageOrders: next });
       };
-      const shared = applyGlobalOrder(session, allMockupIds);
-      const current = orderedIdsForListing(session, listingId, allMockupIds);
+      const shared = pair
+        ? listing.memberIds.flatMap((memberId) =>
+            applyGlobalOrder(session, orderedMockupIds).map(
+              (mockupId) => `${memberId}:${mockupId}`,
+            ),
+          )
+        : applyGlobalOrder(session, allMockupIds);
+      const current = orderedIdsForListing(session, listingId, rowCandidates);
       if (current.length === shared.length && current.every((id, i) => id === shared[i])) {
         discard();
         return;
       }
       setOwnOrderConfirm({ listingName: listing.designName, apply: discard });
     },
-    [session, allMockupIds, update],
+    [session, allMockupIds, orderedMockupIds, update],
   );
 
   /** Writes a dragged list into ONE detached row's own order - never the shared list. */
@@ -1062,12 +1141,17 @@ export function ListingImagesView() {
         ) {
           // The default becomes explicit in the order the row shows - own
           // order for a detached design, the shared one otherwise - so what
-          // Printify receives later matches the strip the user has seen.
-          listingImages[listing.listingId] = orderedIdsForListing(
-            base,
-            listing.listingId,
-            orderedMockupIds,
-          );
+          // Printify receives later matches the strip the user has seen. A
+          // pair's strip shows TILES (designId:mockupId, grouped by member),
+          // so that is what becomes explicit for it.
+          const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+          listingImages[listing.listingId] = pair
+            ? listing.memberIds.flatMap((memberId) =>
+                orderedIdsForListing(base, listing.listingId, orderedMockupIds).map(
+                  (mockupId) => `${memberId}:${mockupId}`,
+                ),
+              )
+            : orderedIdsForListing(base, listing.listingId, orderedMockupIds);
         }
       }
       return listingImages;
@@ -1126,9 +1210,9 @@ export function ListingImagesView() {
         setProgress({
           done: index,
           total: targets.length,
-          label: `${listing.designName} · ${image.mockup.name}`,
+          label: `${image.designName} · ${image.mockup.name}`,
         });
-        const key = listingRenderKey(listing.listingId, image.mockup.id);
+        const key = listingRenderKey(image.designId, image.mockup.id);
         // A current render - from this session OR adopted from the Mockups
         // panel by fingerprint - is reused. Adoption is what makes "the
         // mockups we saved in the Mockups panel" arrive here with no work.
@@ -1139,37 +1223,43 @@ export function ListingImagesView() {
           setProgress({
             done: index + 1,
             total: targets.length,
-            label: `${listing.designName} · reused ${image.mockup.name}`,
+            label: `${image.designName} · reused ${image.mockup.name}`,
           });
           continue;
         }
 
-        const design = designsById.get(listing.designId);
+        const design = designsById.get(image.designId);
         if (!design) {
           delete nextRenders[key];
-          failures.push(`${listing.designName}: design is no longer in the library`);
+          failures.push(`${image.designName}: design is no longer in the library`);
           setProgress({
             done: index + 1,
             total: targets.length,
-            label: `${listing.designName} · design missing`,
+            label: `${image.designName} · design missing`,
           });
           continue;
         }
         try {
           const result = await renderListingMockup({
-            listing,
+            // A pair tile renders with ITS member design's context - artwork,
+            // print area, placement - not the listing owner's.
+            listing: {
+              ...listing,
+              designId: image.designId,
+              artworkAssetId: image.artworkAssetId,
+            },
             design,
             mockup: image.mockup,
             // The placement is part of the fingerprint, so it is read fresh: a
             // move made on another page mid-render must be what the pixels and
             // the recorded fingerprint both describe, or the drafts engine will
             // (rightly) reject the render as obsolete.
-            placement: placementFor(sessionRef.current, listing.designId),
+            placement: placementFor(sessionRef.current, image.designId),
           });
           nextRenders[key] = {
             assetId: result.assetId,
             fingerprint: result.fingerprint,
-            designId: listing.designId,
+            designId: image.designId,
             mockupId: image.mockup.id,
             renderedAt: Date.now(),
           };
@@ -1177,7 +1267,7 @@ export function ListingImagesView() {
         } catch (error) {
           delete nextRenders[key];
           failures.push(
-            `${listing.designName} · ${image.mockup.name}: ${
+            `${image.designName} · ${image.mockup.name}: ${
               error instanceof Error ? error.message : "render failed"
             }`,
           );
@@ -1185,7 +1275,7 @@ export function ListingImagesView() {
         setProgress({
           done: index + 1,
           total: targets.length,
-          label: `${listing.designName} · ${image.mockup.name}`,
+          label: `${image.designName} · ${image.mockup.name}`,
         });
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
@@ -1197,7 +1287,7 @@ export function ListingImagesView() {
       const latestListings = buildStudioListings(latestDesigns, latest);
 
       const targetKeys = new Set(
-        targets.map((target) => listingRenderKey(target.listing.listingId, target.image.mockup.id)),
+        targets.map((target) => listingRenderKey(target.image.designId, target.image.mockup.id)),
       );
       const mergedRenders: Record<string, StudioListingRender> = {
         ...(latest.listingRenders ?? {}),
@@ -1258,9 +1348,9 @@ export function ListingImagesView() {
       .flatMap((listing) =>
         selectionFor(listing).map(
           (image) =>
-            `${listing.listingId}:${image.mockup.id}:${
-              currentEntry(image)?.assetId ?? "-"
-            }:${image.fresh ? 1 : 0}`,
+            `${image.tileId}:${currentEntry(image)?.assetId ?? "-"}:${
+              image.fresh ? 1 : 0
+            }`,
         ),
       )
       .join("|");
@@ -1308,7 +1398,7 @@ export function ListingImagesView() {
         }
         const ext = extensionFor(blob);
         const path = `${folder}/${String(index + 1).padStart(2, "0")}-${safeName(
-          image.mockup.name,
+          `${image.designName}-${image.mockup.name}`,
         )}.${ext}`;
         files[path] = [new Uint8Array(await blob.arrayBuffer()), { level: 6 }];
         included++;
@@ -1426,7 +1516,7 @@ export function ListingImagesView() {
               }
               const converted = await mockupImageForUpload(
                 blob,
-                `${listing.designName}-${image.mockup.name}`,
+                `${image.designName}-${image.mockup.name}`,
               );
               payloadImages.push(converted);
             }
@@ -1749,17 +1839,29 @@ export function ListingImagesView() {
     // Only an included tile can actually leave the listing, so only those
     // marks count - a stray mark must not enable a removal that does nothing.
     const markedCount = markedIds
-      ? selected.filter((image) => markedIds.has(image.mockup.id)).length
+      ? selected.filter((image) => markedIds.has(image.tileId)).length
       : 0;
     // The row's "Own order" toggle: a key in `listingImageOrders` means the
     // design is detached from the shared order, so drags only touch this row.
     const ownOrderOn = session.listingImageOrders?.[listing.listingId] !== undefined;
+    // A PAIR row shows TILES - both halves' artwork on every mockup, grouped
+    // by member. Its order (and its drag) works on tile ids; an ordinary row
+    // keeps the bare mockup ids exactly as before.
+    const pair =
+      listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+    const pairTileIds = listing.memberIds.flatMap((memberId) =>
+      orderedMockupIds.map((mockupId) => `${memberId}:${mockupId}`),
+    );
     // The full library in the order THIS row shows: its own entry when
     // detached, the shared order otherwise. The strip, the numbering and the
     // main-image badge all read this one list.
-    const rowOrderIds = ownOrderOn
-      ? orderedIdsForListing(session, listing.listingId, allMockupIds)
-      : orderedMockupIds;
+    const rowOrderIds = pair
+      ? ownOrderOn
+        ? orderedIdsForListing(session, listing.listingId, pairTileIds)
+        : pairTileIds
+      : ownOrderOn
+        ? orderedIdsForListing(session, listing.listingId, allMockupIds)
+        : orderedMockupIds;
     // Tiles the "Use Mockups render" override can act on: a saved render that
     // exists but is no longer fresh, with no fingerprint-matched alternative.
     const overrideCandidates = selected.filter(
@@ -1902,35 +2004,44 @@ export function ListingImagesView() {
                 as="div"
                 axis="x"
                 values={rowOrderIds}
-                onReorder={(next) =>
-                  ownOrderOn
-                    ? updateOwnOrder(listing.listingId, next)
-                    : update({ listingImageOrder: mergeGlobalOrder(session, next) })
-                }
+                onReorder={(next) => {
+                  // A pair's drag must never touch the GLOBAL order: that
+                  // list is bare mockup ids shared by ordinary rows, and
+                  // tile ids would poison it. A pair row is therefore always
+                  // detached - its drags write its own order.
+                  if (pair) {
+                    updateOwnOrder(listing.listingId, next);
+                    return;
+                  }
+                  if (ownOrderOn) updateOwnOrder(listing.listingId, next);
+                  else update({ listingImageOrder: mergeGlobalOrder(session, next) });
+                }}
                 className="flex gap-3 overflow-x-auto pb-1"
                 role="list"
                 aria-label={`Mockups for ${listing.designName}`}
               >
-                {rowOrderIds.map((mockupId) => {
+                {rowOrderIds.map((tileId) => {
+                  const sep = pair ? tileId.indexOf(":") : -1;
+                  const mockupId = sep > 0 ? tileId.slice(sep + 1) : tileId;
                   const mockup = mockupsById.get(mockupId);
                   if (!mockup) return null;
-                  const image = selected.find((entry) => entry.mockup.id === mockup.id);
+                  const image = selected.find((entry) => entry.tileId === tileId);
                   const order = image
-                    ? selected.findIndex((entry) => entry.mockup.id === mockup.id) + 1
+                    ? selected.findIndex((entry) => entry.tileId === tileId) + 1
                     : 0;
                   const entry = image ? currentEntry(image) : undefined;
-                  const marked = markedIds?.has(mockup.id) ?? false;
+                  const marked = markedIds?.has(tileId) ?? false;
                   return (
                     <DraggableTile
-                      key={mockup.id}
-                      value={mockup.id}
-                      label={mockup.name}
+                      key={tileId}
+                      value={tileId}
+                      label={pair && image ? `${image.designName} on ${mockup.name}` : mockup.name}
                       disabled={rendering || sending}
                     >
                       {(handle) => (
                         <div
                           role="listitem"
-                          data-tile={mockup.id}
+                          data-tile={tileId}
                           data-included={image ? "true" : "false"}
                           className={`relative h-full w-full overflow-hidden rounded-md border transition-colors ${
                             marked
@@ -1943,19 +2054,23 @@ export function ListingImagesView() {
                           <button
                             type="button"
                             className="block w-full text-left disabled:cursor-not-allowed"
-                            onClick={() => onTileClick(listing, mockup.id)}
-                            onPointerDown={startPress(listing, mockup.id)}
+                            onClick={() => onTileClick(listing, tileId)}
+                            onPointerDown={startPress(listing, tileId)}
                             onPointerMove={movePress}
                             onPointerUp={releasePress}
                             onPointerLeave={releasePress}
                             onPointerCancel={releasePress}
                             onContextMenu={(event) => {
                               event.preventDefault();
-                              beginRemoval(listing, mockup.id);
+                              beginRemoval(listing, tileId);
                             }}
                             disabled={rendering || sending}
                             aria-pressed={Boolean(image)}
-                            aria-label={`${image ? "Remove" : "Use"} ${mockup.name} for ${listing.designName}`}
+                            aria-label={`${
+                              image ? "Remove" : "Use"
+                            } ${pair && image ? `${image.designName} on ` : ""}${mockup.name} for ${
+                              listing.designName
+                            }`}
                           >
                             <div className="relative aspect-square overflow-hidden bg-surface-muted">
                               <AssetThumb
@@ -1971,6 +2086,14 @@ export function ListingImagesView() {
                               {order === 1 && (
                                 <span className="absolute right-2 top-2 rounded bg-forest px-1.5 py-0.5 text-xs font-medium text-white">
                                   main
+                                </span>
+                              )}
+                              {/* A pair row shows TWO tiles per mockup, so
+                                  each tile names the design whose artwork it
+                                  carries - otherwise the halves are guesses. */}
+                              {pair && image && (
+                                <span className="absolute bottom-2 right-2 max-w-[85%] truncate rounded bg-ink/70 px-1.5 py-0.5 text-xs font-medium text-white">
+                                  {image.designName}
                                 </span>
                               )}
                               {/* Only problems are labelled: a covered tile is
@@ -2013,7 +2136,11 @@ export function ListingImagesView() {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  onClick={() => clearTileOverride(listing, mockup.id)}
+                                  onClick={() =>
+                                    clearTileOverride(
+                                      listingRenderKey(image.designId, mockup.id),
+                                    )
+                                  }
                                   className="text-xs text-amber hover:bg-amber-soft"
                                 >
                                   Clear override
@@ -2026,9 +2153,14 @@ export function ListingImagesView() {
                                     lockedListings.has(listing.listingId)
                                       ? setLockedConfirm({
                                           listingName: listing.designName,
-                                          apply: () => forceTileOverride(listing, mockup.id),
+                                          apply: () =>
+                                            forceTileOverride(
+                                              listingRenderKey(image.designId, mockup.id),
+                                            ),
                                         })
-                                      : forceTileOverride(listing, mockup.id)
+                                      : forceTileOverride(
+                                          listingRenderKey(image.designId, mockup.id),
+                                        )
                                   }
                                   className="text-xs text-amber hover:bg-amber-soft"
                                 >

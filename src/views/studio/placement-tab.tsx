@@ -29,10 +29,13 @@ import {
 
 import {
   inkArtworkProblems,
+  designPairForDesign,
   pairedDesignIds,
   pairForDesign,
   planDesignColours,
+  planDesignPairColours,
   planPairedDesignColours,
+  setDesignPairRole,
   setInkPairRole,
   summariseColourGroups,
   withInkPair,
@@ -217,23 +220,77 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
    * with its main artwork; a ticked one prints the ink panel's colours, split
    * by the black/white ink switch.
    */
+  // --- design pairs -----------------------------------------------------------
+  const designPairs = React.useMemo(() => session.designPairs ?? [], [session.designPairs]);
+  const designPairTicks = React.useMemo(
+    () => session.designPairIds ?? [],
+    [session.designPairIds],
+  );
+
   const designColours = React.useCallback(
     (design: DesignCardData): DesignColours => {
       const groups = productColourGroups(session);
+      // A DESIGN pair member prints the PLAIN panel's colours on its own side
+      // of the product - separate from ink pairs in every way.
+      const designPair = designPairForDesign(designPairs, design.id);
       const pair = pairForDesign(inkPairs, design.id);
-      const plan = pair
-        ? planPairedDesignColours(pair.role, groups)
-        : planDesignColours(
-            {
-              hasInkPair: (session.inkPairIds ?? []).includes(design.id),
-              hasBlackInk: Boolean(design.blackInkAssetId),
-              hasWhiteInk: Boolean(design.whiteInkAssetId),
-            },
-            groups,
-          );
+      const plan = designPair
+        ? planDesignPairColours(groups)
+        : pair
+          ? planPairedDesignColours(pair.role, groups)
+          : planDesignColours(
+              {
+                hasInkPair: (session.inkPairIds ?? []).includes(design.id),
+                hasBlackInk: Boolean(design.blackInkAssetId),
+                hasWhiteInk: Boolean(design.whiteInkAssetId),
+              },
+              groups,
+            );
       return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
     },
-    [session, hexFor, inkPairs],
+    [session, hexFor, inkPairs, designPairs],
+  );
+
+  /** Ticks / unticks "Design pair". Unticking one half breaks its pair. */
+  const toggleDesignPair = (id: string) => {
+    const ticks = designPairTicks;
+    if (ticks.includes(id)) {
+      const found = designPairForDesign(designPairs, id);
+      const members = found ? [found.pair.frontDesignId, found.pair.backDesignId] : [id];
+      update({
+        designPairIds: ticks.filter((x) => !members.includes(x)),
+        designPairs: withoutDesignPair(designPairs, id),
+      });
+      return;
+    }
+    update({ designPairIds: [...ticks, id] });
+  };
+  /** Moves a design-paired design to the other side of its pair. */
+  const setSide = (id: string, role: "front" | "back") => {
+    update({ designPairs: setDesignPairRole(designPairs, id, role) });
+  };
+  /** Breaks the design pair a design belongs to. */
+  const unpairDesignPair = (id: string) => {
+    const found = designPairForDesign(designPairs, id);
+    if (!found) return;
+    const members = [found.pair.frontDesignId, found.pair.backDesignId];
+    update({
+      designPairs: withoutDesignPair(designPairs, id),
+      designPairIds: designPairTicks.filter((x) => !members.includes(x)),
+    });
+    toast.success("Design pair broken — both designs print on their own again");
+  };
+  /** The partner's name and this design's SIDE, for the card. */
+  const designPairInfo = React.useCallback(
+    (id: string) => {
+      const found = designPairForDesign(designPairs, id);
+      if (!found) return undefined;
+      const partnerId =
+        found.role === "front" ? found.pair.backDesignId : found.pair.frontDesignId;
+      const partner = designs.find((d) => d.id === partnerId);
+      return { partnerName: partner?.name ?? "a deleted design", role: found.role };
+    },
+    [designPairs, designs],
   );
 
   /** The colour swatches of a row, so every card in it shows its colours. */
@@ -520,6 +577,11 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           onSetInkRole={setRole}
           onUnpair={unpair}
           onPairInk={pairTwo}
+          designPairIds={designPairTicks}
+          onToggleDesignPair={toggleDesignPair}
+          designPairInfo={designPairInfo}
+          onSetDesignPairRole={setSide}
+          onUnpairDesignPair={unpairDesignPair}
           onOpen={(id) => setEditingDesignId(id)}
         />
       ))}
@@ -745,6 +807,11 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
           update={update}
           area={editingArea}
           printAreas={printAreas}
+          // A design-pair member's side is fixed by the pair: the front half
+          // opens on "front", the back half on "back".
+          defaultPosition={
+            designPairForDesign(session.designPairs ?? [], editingDesign.id)?.role
+          }
           onClose={() => setEditingDesignId(null)}
         />
       )}

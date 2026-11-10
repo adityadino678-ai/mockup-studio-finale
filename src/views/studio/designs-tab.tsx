@@ -16,11 +16,16 @@ import {
 } from "@/lib/db/repo";
 import { removeBackgroundAuto } from "@/lib/printify/remove-background";
 import {
+  designPairForDesign,
   pairForDesign,
   planDesignColours,
+  planDesignPairColours,
   planPairedDesignColours,
+  setDesignPairRole,
   setInkPairRole,
+  withDesignPair,
   withInkPair,
+  withoutDesignPair,
   withoutInkPair,
 } from "@/lib/printify/design-colours";
 import { remapListingDraftOwner } from "@/lib/printify/listing-drafts";
@@ -257,6 +262,88 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       .sort((a, b) => a.createdAt - b.createdAt);
   }, []);
 
+  // --- design pairs: two designs, ONE product, front + back -------------------
+  const designPairs = React.useMemo(() => session.designPairs ?? [], [session.designPairs]);
+  const designPairTicks = React.useMemo(
+    () => session.designPairIds ?? [],
+    [session.designPairIds],
+  );
+
+  /** Ticks / unticks "Design pair" on a card. Unticking one half breaks its pair. */
+  const toggleDesignPair = (id: string) => {
+    const ticks = designPairTicks;
+    if (ticks.includes(id)) {
+      const found = designPairForDesign(designPairs, id);
+      const members = found ? [found.pair.frontDesignId, found.pair.backDesignId] : [id];
+      update({
+        designPairIds: ticks.filter((x) => !members.includes(x)),
+        designPairs: withoutDesignPair(designPairs, id),
+      });
+      return;
+    }
+    update({ designPairIds: [...ticks, id] });
+  };
+
+  /** Moves a design-paired design to the other side of its pair. */
+  const setSide = (id: string, role: "front" | "back") => {
+    update({ designPairs: setDesignPairRole(designPairs, id, role) });
+  };
+
+  /** Breaks the design pair a design belongs to. */
+  const unpairDesignPair = (id: string) => {
+    const found = designPairForDesign(designPairs, id);
+    if (!found) return;
+    const members = [found.pair.frontDesignId, found.pair.backDesignId];
+    update({
+      designPairs: withoutDesignPair(designPairs, id),
+      designPairIds: designPairTicks.filter((x) => !members.includes(x)),
+    });
+    toast.success("Design pair broken — both designs print on their own again");
+  };
+
+  /**
+   * Pairs the two Design-pair-ticked designs as ONE product: the OLDER design
+   * prints on the FRONT print area, the newer on the BACK, both on the plain
+   * panel's colours. Both halves join the batch scope, because a pair IS a
+   * listing.
+   */
+  const pairFrontBack = (firstId: string, secondId: string) => {
+    if (!firstId || !secondId || firstId === secondId) return;
+    const existing = designPairForDesign(designPairs, firstId);
+    if (
+      existing &&
+      (existing.pair.frontDesignId === secondId || existing.pair.backDesignId === secondId)
+    ) {
+      return;
+    }
+    const first = (designs ?? []).find((d) => d.id === firstId);
+    const second = (designs ?? []).find((d) => d.id === secondId);
+    // The older design takes the front; the listing order follows it.
+    const [frontId, backId] =
+      first && second && second.createdAt < first.createdAt
+        ? [secondId, firstId]
+        : [firstId, secondId];
+    update({
+      designPairs: withDesignPair(designPairs, frontId, backId),
+      designPairIds: [...new Set([...designPairTicks, firstId, secondId])],
+      designIds: [...new Set([...session.designIds, firstId, secondId])],
+    });
+    toast.success("Paired front + back — one listing with both designs' images");
+  };
+
+  /** The partner's name and this design's SIDE, for the card. */
+  const designPairInfo = React.useCallback(
+    (id: string) => {
+      const found = designPairForDesign(designPairs, id);
+      if (!found) return undefined;
+      const partnerId =
+        found.role === "front" ? found.pair.backDesignId : found.pair.frontDesignId;
+      const partner = (designs ?? []).find((d) => d.id === partnerId);
+      return { partnerName: partner?.name ?? "a deleted design", role: found.role };
+    },
+    [designPairs, designs],
+  );
+
   /**
    * Drops ticked ids whose design no longer exists.
    *
@@ -361,21 +448,26 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   const designColours = React.useCallback(
     (design: DesignCardData): DesignColours => {
       const groups = productColourGroups(session);
+      // A DESIGN pair member prints the PLAIN panel's colours on its own side
+      // of the product - separate from ink pairs in every way.
+      const designPair = designPairForDesign(designPairs, design.id);
       const pair = pairForDesign(inkPairs, design.id);
-      const plan = pair
-        ? planPairedDesignColours(pair.role, groups)
-        : planDesignColours(
-            {
-              hasInkPair: inkPairIds.includes(design.id),
-              hasBlackInk: Boolean(design.blackInkAssetId),
-              hasWhiteInk: Boolean(design.whiteInkAssetId),
-            },
-            groups,
-          );
+      const plan = designPair
+        ? planDesignPairColours(groups)
+        : pair
+          ? planPairedDesignColours(pair.role, groups)
+          : planDesignColours(
+              {
+                hasInkPair: inkPairIds.includes(design.id),
+                hasBlackInk: Boolean(design.blackInkAssetId),
+                hasWhiteInk: Boolean(design.whiteInkAssetId),
+              },
+              groups,
+            );
       const hexFor = (name: string) => hexByColour.get(name) ?? hexForColourName(name);
       return { colors: plan.colors, swatches: swatchesForPlan(plan, hexFor) };
     },
-    [session, hexByColour, inkPairIds, inkPairs],
+    [session, hexByColour, inkPairIds, inkPairs, designPairs],
   );
 
   const toggle = (id: string) =>
@@ -651,6 +743,19 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
             >
               <Link2 className="h-3.5 w-3.5" /> Pair for one listing
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => pairFrontBack(selected[0], selected[1])}
+              disabled={selected.length !== 2}
+              title={
+                selected.length === 2
+                  ? "One product with both designs: the older design prints on the FRONT print area, the newer on the BACK, both on the 'No ink variants' colours"
+                  : "Tick exactly two designs to pair them front + back"
+              }
+            >
+              <Link2 className="h-3.5 w-3.5" /> Pair front + back
+            </Button>
             <Button size="sm" variant="outline" onClick={toggleAll}>
               {selected.length === (designs ?? []).length ? "Clear" : "Select all"}
             </Button>
@@ -728,6 +833,11 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
             onSetInkRole={setRole}
             onUnpair={unpair}
             onPairInk={pairTwo}
+            designPairIds={designPairTicks}
+            onToggleDesignPair={toggleDesignPair}
+            designPairInfo={designPairInfo}
+            onSetDesignPairRole={setSide}
+            onUnpairDesignPair={unpairDesignPair}
             {...cardActions}
           />
         ))

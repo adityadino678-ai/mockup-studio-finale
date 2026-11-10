@@ -5,10 +5,10 @@ import type { Design, StudioSession } from "@/types/domain";
 
 /**
  * `linkSavedRender` is what makes "Save render" mean "save AND use": it finds
- * the listing that owns the pixels, records the render under that listing's
- * current fingerprint, and makes sure the mockup is part of the selection. A
- * pair is owned by its black-ink half, so the white half refuses rather than
- * attaching the wrong artwork.
+ * the listing that owns the pixels, records the render under the RENDERING
+ * design's key, and makes sure the tile is part of the selection. Both halves
+ * of a pair link now - the merged strip shows every member's artwork - each
+ * under its own design key.
  */
 
 function design(id: string, name = id): Design {
@@ -51,7 +51,7 @@ describe("linkSavedRender", () => {
     });
   });
 
-  it("blocks saving on a pair's white-ink half with an explanation", () => {
+  it("links a pair member's render under that member's own design key", () => {
     const active = session({
       inkPairs: [{ blackInkDesignId: "black", whiteInkDesignId: "white" }],
     });
@@ -63,10 +63,19 @@ describe("linkSavedRender", () => {
       session: active,
       designs: baseDesigns,
     });
-    expect(result.status).toBe("white-half");
-    if (result.status !== "white-half") return;
-    // The pair listing is the black half, whose artwork is the real image.
+    expect(result.status).toBe("linked");
+    if (result.status !== "linked") return;
+    // The pair listing is the black half; the render belongs to the WHITE
+    // member and is keyed by its own design, so the merged strip can show it.
     expect(result.listing.designId).toBe("black");
+    expect(result.entry.designId).toBe("white");
+    expect(result.patch.listingRenders?.["white:mockup-1"]).toMatchObject({
+      assetId: "render-1",
+      designId: "white",
+    });
+    // The pair's selection holds TILE ids, so the extension writes the white
+    // member's tile, never a bare mockup id that would mean BOTH halves.
+    expect(result.patch.listingRenders).toBeDefined();
   });
 
   it("refuses a design that is not in the batch instead of guessing", () => {

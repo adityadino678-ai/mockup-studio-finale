@@ -38,7 +38,7 @@
 // browser, a catalogue or a Printify account.
 // ---------------------------------------------------------------------------
 
-import type { StudioSession } from "@/types/domain";
+import type { StudioDesignPair, StudioSession } from "@/types/domain";
 
 /** Which artwork a group prints. */
 export type DesignInk = "main" | "black" | "white";
@@ -358,6 +358,101 @@ export function withoutInkPair(
   return pairs.filter(
     (pair) => pair.blackInkDesignId !== designId && pair.whiteInkDesignId !== designId,
   );
+}
+
+// ---------------------------------------------------------------------------
+// DESIGN pairs: two designs on ONE product, front + back, plain colours.
+//
+// Entirely separate from ink pairs: an ink pair splits the INK panel between
+// two artworks; a design pair puts the older design on the product's FRONT
+// print area and the newer on the BACK, both printing the "No ink variants"
+// panel's colours. The two kinds never share state or affect each other.
+// ---------------------------------------------------------------------------
+
+/** Which side of a design pair a design prints on. */
+export type DesignPairRole = "front" | "back";
+
+/** The pair a design belongs to, and the side it plays in it. */
+export function designPairForDesign(
+  pairs: readonly StudioDesignPair[],
+  designId: string,
+): { pair: StudioDesignPair; role: DesignPairRole } | undefined {
+  for (const pair of pairs) {
+    if (pair.frontDesignId === designId) return { pair, role: "front" };
+    if (pair.backDesignId === designId) return { pair, role: "back" };
+  }
+  return undefined;
+}
+
+/** Every design that belongs to a design pair, in pair order. */
+export function designPairedDesignIds(pairs: readonly StudioDesignPair[]): string[] {
+  return unique(pairs.flatMap((pair) => [pair.frontDesignId, pair.backDesignId]));
+}
+
+/**
+ * Adds a design pair, replacing any pair either design was already in.
+ *
+ * A design can be in ONE design pair: it supplies one artwork for one side
+ * of one product, and letting it sit in two pairs would print it on two
+ * listings the user did not ask for.
+ */
+export function withDesignPair(
+  pairs: readonly StudioDesignPair[],
+  frontDesignId: string,
+  backDesignId: string,
+): StudioDesignPair[] {
+  const touched = new Set([frontDesignId, backDesignId]);
+  const kept = pairs.filter(
+    (pair) => !touched.has(pair.frontDesignId) && !touched.has(pair.backDesignId),
+  );
+  return [...kept, { frontDesignId, backDesignId }];
+}
+
+/** Drops the design pair a design belongs to. */
+export function withoutDesignPair(
+  pairs: readonly StudioDesignPair[],
+  designId: string,
+): StudioDesignPair[] {
+  return pairs.filter(
+    (pair) => pair.frontDesignId !== designId && pair.backDesignId !== designId,
+  );
+}
+
+/** Moves a design to the other side of its own design pair. */
+export function setDesignPairRole(
+  pairs: readonly StudioDesignPair[],
+  designId: string,
+  role: DesignPairRole,
+): StudioDesignPair[] {
+  return pairs.map((pair) => {
+    if (pair.frontDesignId !== designId && pair.backDesignId !== designId) return pair;
+    const partner =
+      pair.frontDesignId === designId ? pair.backDesignId : pair.frontDesignId;
+    return role === "front"
+      ? { frontDesignId: designId, backDesignId: partner }
+      : { frontDesignId: partner, backDesignId: designId };
+  });
+}
+
+/**
+ * What ONE member of a DESIGN pair prints.
+ *
+ * Both halves read the PLAIN panel ("No ink variants") — that is the whole
+ * point of a design pair — and each prints its own main artwork on its own
+ * side of the product. Shaped like `DesignColourPlan` so the cards and the
+ * swatches treat all three cases (plain, ink pair, design pair) the same way.
+ */
+export function planDesignPairColours(
+  groups: ProductColourGroups,
+): DesignColourPlan {
+  const { plain } = normaliseColourGroups(groups);
+  return {
+    groups: plain.length > 0 ? [{ ink: "main", colors: plain }] : [],
+    missing: [],
+    usesInkArtwork: false,
+    undecided: [],
+    colors: plain,
+  };
 }
 
 /**

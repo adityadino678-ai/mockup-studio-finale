@@ -52,9 +52,9 @@ export interface ArtworkVerification {
   checked: number;
 }
 
-/** The first non-empty image id attached to a variant, if any. */
-function imagesByVariant(product: ProductSnapshot): Map<number, string> {
-  const byVariant = new Map<number, string>();
+/** The non-empty image ids attached to a variant, as a set. */
+function imagesByVariant(product: ProductSnapshot): Map<number, Set<string>> {
+  const byVariant = new Map<number, Set<string>>();
   for (const area of product.print_areas ?? []) {
     const variantIds = area.variant_ids ?? [];
     for (const placeholder of area.placeholders ?? []) {
@@ -62,10 +62,9 @@ function imagesByVariant(product: ProductSnapshot): Map<number, string> {
         const id = typeof image.id === "string" ? image.id : "";
         if (!id) continue;
         for (const variantId of variantIds) {
-          // First image wins, matching the order Printify reports. A variant
-          // named by two groups is itself a defect; the id comparison below
-          // reports it instead of hiding it.
-          if (!byVariant.has(variantId)) byVariant.set(variantId, id);
+          const ids = byVariant.get(variantId) ?? new Set<string>();
+          ids.add(id);
+          byVariant.set(variantId, ids);
         }
       }
     }
@@ -74,13 +73,15 @@ function imagesByVariant(product: ProductSnapshot): Map<number, string> {
 }
 
 /** What we uploaded, by variant. An artwork with no image id claims nothing. */
-function expectedByVariant(artworks: readonly EchoedArtwork[]): Map<number, string> {
-  const expected = new Map<number, string>();
+function expectedByVariant(artworks: readonly EchoedArtwork[]): Map<number, Set<string>> {
+  const expected = new Map<number, Set<string>>();
   for (const artwork of artworks) {
     const imageId = typeof artwork.imageId === "string" ? artwork.imageId : "";
     if (!imageId) continue;
     for (const variantId of artwork.variantIds ?? []) {
-      expected.set(Number(variantId), imageId);
+      const ids = expected.get(Number(variantId)) ?? new Set<string>();
+      ids.add(imageId);
+      expected.set(Number(variantId), ids);
     }
   }
   return expected;
@@ -122,15 +123,25 @@ export function verifyProductArtwork(
     checked += 1;
     const want = expected.get(variant.id);
     const got = actual.get(variant.id);
-    if (!want) {
+    if (!want || want.size === 0) {
       missingExpected.push(variant.id);
       continue;
     }
-    if (!got) {
+    if (!got || got.size === 0) {
       missingActual.push(variant.id);
       continue;
     }
-    if (got !== want) wrongArtwork.push(variant.id);
+    // A variant may carry SEVERAL images (a design pair's front + back), so
+    // the check compares the whole SET: the product must carry exactly the
+    // images we uploaded for the variant - every one of them, and nothing
+    // else. An image nobody expected is exactly the "wrong artwork" defect.
+    if (
+      want.size !== got.size ||
+      [...want].some((id) => !got.has(id)) ||
+      [...got].some((id) => !want.has(id))
+    ) {
+      wrongArtwork.push(variant.id);
+    }
   }
 
   return {

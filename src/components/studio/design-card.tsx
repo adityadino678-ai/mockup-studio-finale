@@ -72,6 +72,20 @@ export interface DesignCardProps {
   onSetInkRole?: (role: "black" | "white") => void;
   /** Breaks the pair. */
   onUnpair?: () => void;
+  /** True when the user ticked this design for a "Design pair" (front + back). */
+  designPair?: boolean;
+  /** Ticks / unticks "Design pair". Omit to hide the checkbox. */
+  onToggleDesignPair?: () => void;
+  /**
+   * The DESIGN pair this design belongs to: the older design prints on the
+   * product's FRONT print area, the newer on the BACK, both on the plain
+   * panel's colours. Separate from an ink pair in every way.
+   */
+  designPairInfo?: { partnerName: string; role: "front" | "back" };
+  /** Moves this design to the other side of its design pair. */
+  onSetDesignPairRole?: (role: "front" | "back") => void;
+  /** Breaks the design pair. */
+  onUnpairDesignPair?: () => void;
   /** Called when the card BODY is clicked (opens the adjustment panel). */
   onOpen?: () => void;
   /**
@@ -116,6 +130,11 @@ export function DesignCard({
   pairInfo,
   onSetInkRole,
   onUnpair,
+  designPair = false,
+  onToggleDesignPair,
+  designPairInfo,
+  onSetDesignPairRole,
+  onUnpairDesignPair,
   onOpen,
   onEdit,
   onInkVariants,
@@ -340,6 +359,79 @@ export function DesignCard({
                 <button
                   type="button"
                   onClick={onUnpair}
+                  className="ml-auto cursor-pointer text-xs text-ink-muted underline"
+                >
+                  Unpair
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {onToggleDesignPair && (
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <Checkbox
+              id={`design-pair-${design.id}`}
+              checked={designPair}
+              onCheckedChange={() => onToggleDesignPair()}
+              aria-label={`Design pair for ${design.name}`}
+              className="h-3.5 w-3.5"
+            />
+            <label
+              htmlFor={`design-pair-${design.id}`}
+              className="cursor-pointer text-xs text-ink-muted"
+            >
+              Design pair
+            </label>
+          </div>
+        )}
+
+        {designPairInfo && (
+          // The design pair's side: the front half's artwork fills the
+          // product's FRONT print area, the back half's the BACK. Both print
+          // the "No ink variants" panel's colours.
+          <div className="space-y-1 pt-0.5" data-design-pair-role="">
+            <p
+              className="truncate text-xs text-ink-muted"
+              title={`Design-paired with "${designPairInfo.partnerName}"`}
+            >
+              Paired with &ldquo;{designPairInfo.partnerName}&rdquo; (front + back)
+            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="flex items-center gap-1">
+                <Checkbox
+                  id={`design-pair-front-${design.id}`}
+                  checked={designPairInfo.role === "front"}
+                  onCheckedChange={() => onSetDesignPairRole?.("front")}
+                  aria-label={`${design.name} prints on the front`}
+                  className="h-3.5 w-3.5"
+                />
+                <label
+                  htmlFor={`design-pair-front-${design.id}`}
+                  className="cursor-pointer text-[10.5px] text-ink-muted"
+                >
+                  Front
+                </label>
+              </span>
+              <span className="flex items-center gap-1">
+                <Checkbox
+                  id={`design-pair-back-${design.id}`}
+                  checked={designPairInfo.role === "back"}
+                  onCheckedChange={() => onSetDesignPairRole?.("back")}
+                  aria-label={`${design.name} prints on the back`}
+                  className="h-3.5 w-3.5"
+                />
+                <label
+                  htmlFor={`design-pair-back-${design.id}`}
+                  className="cursor-pointer text-[10.5px] text-ink-muted"
+                >
+                  Back
+                </label>
+              </span>
+              {onUnpairDesignPair && (
+                <button
+                  type="button"
+                  onClick={onUnpairDesignPair}
                   className="ml-auto cursor-pointer text-xs text-ink-muted underline"
                 >
                   Unpair

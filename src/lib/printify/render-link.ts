@@ -8,9 +8,9 @@
 // the render under that listing's current fingerprint, and makes sure the
 // mockup is part of the listing's image selection.
 //
-// A pair is ONE listing owned by its black-ink half. Saving on the white half
-// would attach the wrong artwork to the listing, so that case is blocked with
-// an explanation instead of silently doing the wrong thing.
+// A pair is ONE listing, and BOTH members' artwork matters now: the merged
+// strip covers every member design, so a render saved on any member links
+// under that member's own design key instead of being refused.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -69,14 +69,33 @@ export function linkSavedRender(params: {
   );
 
   if (!listing) return { status: "not-in-batch" };
-  if (listing.partnerDesignId === params.designId) {
+  // PAIRS: both halves' artwork matters now. The listing's tiles cover every
+  // member design, so a render saved on ANY member links under that member's
+  // own key (`<memberDesignId>:<mockupId>`) - the white half of an ink pair
+  // and the back half of a design pair are no longer refused, because their
+  // pixels are exactly what the merged strip shows.
+  const isPair = listing.memberIds.length === 2 && Boolean(listing.partnerDesignId);
+  if (isPair && !listing.memberIds.includes(params.designId)) {
+    return { status: "not-in-batch" };
+  }
+  if (!isPair && listing.partnerDesignId === params.designId) {
+    // Unreachable today (a single-design listing has no partner), kept as a
+    // guard: never attach a foreign design's pixels to a listing.
     return { status: "white-half", listing };
   }
+  // The render is keyed by the design whose artwork was rendered. For an
+  // ordinary listing that is the owner; for a pair it is the member that was
+  // rendered on screen.
+  const renderDesignId = isPair ? params.designId : listing.designId;
+  // The selection of a pair listing holds TILE ids (`<designId>:<mockupId>`)
+  // so each half can be included or removed on its own; an ordinary
+  // listing's selection holds plain mockup ids.
+  const tileId = isPair ? `${renderDesignId}:${params.mockupId}` : params.mockupId;
 
   const entry: StudioListingRender = {
     assetId: params.assetId,
     fingerprint: params.fingerprint,
-    designId: listing.designId,
+    designId: renderDesignId,
     mockupId: params.mockupId,
     renderedAt: params.renderedAt ?? Date.now(),
     source: "mockups",
@@ -84,7 +103,7 @@ export function linkSavedRender(params: {
 
   const listingRenders = {
     ...(params.session.listingRenders ?? {}),
-    [`${listing.listingId}:${params.mockupId}`]: entry,
+    [`${renderDesignId}:${params.mockupId}`]: entry,
   };
   const listingImageCleared = { ...(params.session.listingImageCleared ?? {}) };
   delete listingImageCleared[listing.listingId];
@@ -97,14 +116,12 @@ export function linkSavedRender(params: {
   if (existing !== undefined) {
     listingImages = {
       ...(params.session.listingImages ?? {}),
-      [listing.listingId]: existing.includes(params.mockupId)
-        ? existing
-        : [...existing, params.mockupId],
+      [listing.listingId]: existing.includes(tileId) ? existing : [...existing, tileId],
     };
   } else if (params.session.listingImageCleared?.[listing.listingId] === true) {
     listingImages = {
       ...(params.session.listingImages ?? {}),
-      [listing.listingId]: [params.mockupId],
+      [listing.listingId]: [tileId],
     };
   }
 

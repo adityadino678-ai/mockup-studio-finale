@@ -155,6 +155,17 @@ const MAX_IMAGES_PER_UPLOAD = 8;
 /** One image of a listing's effective selection, with its render state. */
 interface SelectedImage {
   mockup: Mockup;
+  /**
+   * The tile's identity: for a pair listing `<designId>:<mockupId>` (both
+   * halves show every mockup); for an ordinary listing the bare mockup id.
+   */
+  tileId: string;
+  /** The design whose artwork this tile carries (a pair member or the owner). */
+  designId: string;
+  /** That design's name, for filenames and labels. */
+  designName: string;
+  /** That design's main artwork asset id. */
+  artworkAssetId: string;
   /** The session's recorded render, whether or not it is still current. */
   entry: StudioListingRender | undefined;
   /** The session entry matches what this listing would render now. */
@@ -704,6 +715,27 @@ export function ListingPreviewView() {
    */
   const effectiveIdsFor = React.useCallback(
     (listing: StudioListing): string[] => {
+      // A PAIR listing's selection holds TILE ids ("<designId>:<mockupId>")
+      // — the preview shows both halves' images in the same grouped order.
+      const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+      if (pair) {
+        const validMembers = new Set(listing.memberIds);
+        const tileExists = (tileId: string) => {
+          const sep = tileId.indexOf(":");
+          if (sep <= 0) return false;
+          const mockup = mockupsById.get(tileId.slice(sep + 1));
+          return validMembers.has(tileId.slice(0, sep)) && !!mockup && isProductMockup(mockup);
+        };
+        if (session.listingImages?.[listing.listingId] !== undefined) {
+          return listingMockupIds(session, listing.listingId).filter(tileExists);
+        }
+        if (session.listingImageCleared?.[listing.listingId] === true) return [];
+        return listing.memberIds.flatMap((memberId) =>
+          orderedIdsForListing(session, listing.listingId, allMockupIds).map(
+            (mockupId) => `${memberId}:${mockupId}`,
+          ),
+        );
+      }
       const configured = session.listingImages?.[listing.listingId] !== undefined;
       if (configured) {
         return listingMockupIds(session, listing.listingId).filter((id) => {
@@ -729,41 +761,49 @@ export function ListingPreviewView() {
   const selectionFor = React.useCallback(
     (listing: StudioListing): SelectedImage[] =>
       effectiveIdsFor(listing)
-        .map((mockupId) => mockupsById.get(mockupId))
-        .filter((mockup): mockup is Mockup => !!mockup)
-        .map((mockup) => {
-          const entry = listingRenderFor(session, listing.listingId, mockup.id);
-          const saved = placementsByKey.get(`${listing.designId}:${mockup.id}`);
+        .map((tileId) => {
+          const pair = listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+          const sep = pair ? tileId.indexOf(":") : -1;
+          const designId = pair && sep > 0 ? tileId.slice(0, sep) : listing.designId;
+          const mockupId = pair && sep > 0 ? tileId.slice(sep + 1) : tileId;
+          const mockup = mockupsById.get(mockupId);
+          if (!mockup) return null;
+          const artworkAssetId =
+            (pair ? listing.memberArtworkIds?.[designId] : undefined) ?? listing.artworkAssetId;
+          const memberListing: StudioListing = { ...listing, designId, artworkAssetId };
+          const entry = listingRenderFor(session, designId, mockupId);
+          const saved = placementsByKey.get(`${designId}:${mockupId}`);
           const fingerprint = listingImageFingerprint({
-            listing,
+            listing: memberListing,
             mockup,
-            placement: placementFor(session, listing.designId),
+            placement: placementFor(session, designId),
             saved,
           });
           const fresh = isListingRenderFresh(entry, fingerprint);
           const adoptedAsset = fresh
             ? null
-            : matchInAdoptionIndex(
-                adoptionIndex,
-                listing.artworkAssetId,
-                mockup.id,
-                fingerprint,
-              );
+            : matchInAdoptionIndex(adoptionIndex, artworkAssetId, mockupId, fingerprint);
           return {
             mockup,
+            tileId,
+            designId,
+            designName:
+              (designs ?? []).find((d) => d.id === designId)?.name ?? listing.designName,
+            artworkAssetId,
             entry,
             fresh,
             adopted: adoptedAsset
               ? adoptedRenderEntry({
                   asset: adoptedAsset,
                   fingerprint,
-                  designId: listing.designId,
-                  mockupId: mockup.id,
+                  designId,
+                  mockupId,
                 })
               : undefined,
-          };
-        }),
-    [session, mockupsById, placementsByKey, effectiveIdsFor, adoptionIndex],
+          } satisfies SelectedImage;
+        })
+        .filter((image): image is SelectedImage => image !== null),
+    [session, mockupsById, designs, placementsByKey, effectiveIdsFor, adoptionIndex],
   );
 
   /**
@@ -771,12 +811,17 @@ export function ListingPreviewView() {
    *
    * Cards attach by the category of the product mockups INCLUDED in the
    * listing (no Printify catalogue needed), and their order follows the
-   * listing image order shared with the mockups strip.
+   * listing image order shared with the mockups strip. A pair's selection
+   * holds tile ids, so they fold back to their mockup part for the lookup.
    */
   const cardsFor = React.useCallback(
     (listing: StudioListing): Mockup[] => {
       if (!mockups) return [];
-      const attached = infoCardsForListing(mockups, effectiveIdsFor(listing));
+      const idsForCards = effectiveIdsFor(listing).map((id) => {
+        const sep = id.indexOf(":");
+        return sep > 0 ? id.slice(sep + 1) : id;
+      });
+      const attached = infoCardsForListing(mockups, idsForCards);
       return orderedIdsForListing(
         session,
         listing.listingId,
@@ -1315,7 +1360,7 @@ export function ListingPreviewView() {
         const blob = entry ? await getAssetBlob(entry.assetId) : null;
         if (!blob) throw new Error(`${image.mockup.name} has no stored render`);
         payloadImages.push(
-          await mockupImageForUpload(blob, `${params.listing.designName}-${image.mockup.name}`),
+          await mockupImageForUpload(blob, `${image.designName}-${image.mockup.name}`),
         );
       }
 

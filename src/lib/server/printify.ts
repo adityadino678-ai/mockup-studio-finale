@@ -268,6 +268,20 @@ export interface PrintifyPrintAreaGroup {
   scale?: number;
   /** Rotation in degrees, clockwise. */
   angle?: number;
+  /**
+   * Additional placeholders on the SAME variants: a design pair prints one
+   * product with an artwork on the FRONT and another on the BACK, which is
+   * one print-area group with a placeholder per side. Each entry carries its
+   * own position, image id and placement.
+   */
+  extraPlaceholders?: Array<{
+    position: string;
+    imageId: string;
+    x?: number;
+    y?: number;
+    scale?: number;
+    angle?: number;
+  }>;
 }
 
 function extractError(data: unknown, status: number): string {
@@ -616,6 +630,21 @@ export function createPrintifyClient(explicitKey?: string) {
                   },
                 ],
               },
+              // A design pair's other side(s): same variants, one placeholder
+              // per position. Printify prints each placeholder's image on its
+              // own print area of the same colour.
+              ...(group.extraPlaceholders ?? []).map((extra) => ({
+                position: extra.position,
+                images: [
+                  {
+                    id: String(extra.imageId),
+                    x: extra.x ?? 0.5,
+                    y: extra.y ?? 0.5,
+                    scale: extra.scale ?? 1,
+                    angle: extra.angle ?? 0,
+                  },
+                ],
+              })),
             ],
           });
         }

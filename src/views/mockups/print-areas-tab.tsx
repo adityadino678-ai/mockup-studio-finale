@@ -844,9 +844,8 @@ export function PrintAreasTab({
     let done = 0;
     let failed = 0;
     try {
-      const listings = buildStudioListings(designsRef.current, await loadSession());
-      if (listings.some((listing) => listing.partnerDesignId === design.id)) return;
-
+      // Both halves of a pair render now: the strip covers every member's
+      // artwork, and linkSavedRender files each render under its own design.
       const freshMockups = await db.mockups.toArray();
       const targets = freshMockups.filter((m) => isProductMockup(m) && printAreaOf(m, design.id));
       if (targets.length === 0) return;

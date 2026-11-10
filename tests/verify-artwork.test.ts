@@ -151,4 +151,60 @@ describe("verifyProductArtwork", () => {
     ];
     expect(verifyProductArtwork(product, ARTWORKS).ok).toBe(true);
   });
+
+  it("passes a DESIGN PAIR product: one variant carrying a front AND a back image", () => {
+    const product = goodProduct();
+    // Every variant carries both sides now; the echo says so too.
+    product.print_areas = [
+      {
+        variant_ids: [1, 2, 3, 4],
+        placeholders: [
+          { position: "front", images: [{ id: "img-front" }] },
+          { position: "back", images: [{ id: "img-back" }] },
+        ],
+      },
+      {
+        variant_ids: [5, 6, 7, 8],
+        placeholders: [
+          { position: "front", images: [{ id: "img-front" }] },
+          { position: "back", images: [{ id: "img-back" }] },
+        ],
+      },
+    ];
+    const echo = [
+      { variantIds: [1, 2, 3, 4], imageId: "img-front" },
+      { variantIds: [1, 2, 3, 4], imageId: "img-back" },
+      { variantIds: [5, 6, 7, 8], imageId: "img-front" },
+      { variantIds: [5, 6, 7, 8], imageId: "img-back" },
+    ];
+    const result = verifyProductArtwork(product, echo);
+    expect(result.ok).toBe(true);
+    expect(result.wrongArtwork).toEqual([]);
+  });
+
+  it("fails a design pair when one side's image is missing from the product", () => {
+    const product = goodProduct();
+    product.print_areas = [
+      {
+        variant_ids: [1, 2, 3, 4],
+        placeholders: [{ position: "front", images: [{ id: "img-front" }] }],
+      },
+      {
+        variant_ids: [5, 6, 7, 8],
+        placeholders: [
+          { position: "front", images: [{ id: "img-front" }] },
+          { position: "back", images: [{ id: "img-back" }] },
+        ],
+      },
+    ];
+    const echo = [
+      { variantIds: [1, 2, 3, 4], imageId: "img-front" },
+      { variantIds: [1, 2, 3, 4], imageId: "img-back" },
+      { variantIds: [5, 6, 7, 8], imageId: "img-front" },
+      { variantIds: [5, 6, 7, 8], imageId: "img-back" },
+    ];
+    const result = verifyProductArtwork(product, echo);
+    expect(result.ok).toBe(false);
+    expect(result.wrongArtwork).toEqual([1, 2, 3, 4]);
+  });
 });

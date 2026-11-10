@@ -533,6 +533,23 @@ export interface StudioInkPair {
   whiteInkDesignId: string;
 }
 
+/**
+ * Two uploaded designs that print as ONE product on the "No ink variants"
+ * panel's colours: the FRONT design's artwork fills the product's front
+ * print area, the BACK design's artwork fills the back print area.
+ *
+ * Completely separate from `StudioInkPair`: an ink pair splits the INK
+ * panel's colours between two artworks, a design pair puts two designs on
+ * one product's two sides using the plain panel. A design can belong to one
+ * of each, and neither touches the other's state.
+ */
+export interface StudioDesignPair {
+  /** The older design; its artwork goes on the product's front print area. */
+  frontDesignId: string;
+  /** The newer design; its artwork goes on the product's back print area. */
+  backDesignId: string;
+}
+
 /** One cached listing render, keyed by `<listingId>:<mockupId>` in the session. */
 export interface StudioListingRender {
   assetId: string;
@@ -598,6 +615,22 @@ export interface StudioSession {
    * the old behaviour (its own ink files, or one artwork on every colour).
    */
   inkPairs: StudioInkPair[];
+  /**
+   * The designs the user ticked "Design pair" on.
+   *
+   * The tick is the user's own gesture, exactly like `inkPairIds`: ticking
+   * exactly two designs offers "Pair front + back", which writes the pair
+   * below. Nothing here is inferred.
+   */
+  designPairIds: string[];
+  /**
+   * The design pairs: two designs as ONE product on the plain panel's
+   * colours, the older design on the front print area, the newer on the
+   * back. A pair creates one listing whose tiles cover BOTH designs'
+   * artwork on every mockup, and neither half creates a product of its own.
+   * Separate from `inkPairs` in every way.
+   */
+  designPairs: StudioDesignPair[];
   /**
    * The ink model this session was saved with.
    *

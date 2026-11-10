@@ -736,4 +736,44 @@ localhost before any deploy.
 Gates at each commit: lint 0 errors, typecheck 0 errors, 719 unit tests,
 64 e2e, build clean. NOT pushed and NOT deployed — awaiting owner approval.
 
+## 2026-11-10 — Placement text strip, per-side placements, DESIGN pairs
+
+Owner-approved batch on top of the auto-render work:
+
+### feat(ui): strip the guidance text from the placement Adjust dialog (4553d65)
+- Removed the explainer, the "This placement belongs to..." card, the
+  "Dashed frame = print area..." caption and the "Saved for..." footer note.
+
+### fix(send): Listing images Send settles the renders before preparing (ceacbce)
+- Send awaits the strip's background render pass first, so a mid-flight pass
+  can no longer turn Send into "render all N first" skips. A single-listing
+  batch names its own skip reason in the toast.
+
+### feat(placement): separate FRONT and BACK placements per design (d4e4e2a)
+- `session.placementsByPosition[designId][position]` keeps each side's own
+  width/rotation/centre; the Adjust dialog's position buttons switch sides;
+  writes mirror into the shared placement so every existing reader (mockup
+  renders, listing fingerprints, creation) sees the edit. Old sessions fall
+  back unchanged.
+
+### feat(pairs): DESIGN pairs — two designs, one product, front + back
+- New "Design pair" checkbox under "Ink variants" on every design card, plus
+  a "Pair front + back" action; completely separate from ink pairs.
+- A design pair prints BOTH halves on the PLAIN ("No ink variants") panel's
+  colours: the older design on the product's FRONT print area, the newer on
+  the BACK. The Adjust dialog opens on the member's fixed side.
+- Product creation sends one print-area group per colour with a placeholder
+  per side; the endpoint merges same-variant artworks into one group with
+  front+back placeholders and `verifyProductArtwork` compares image SETS per
+  variant (old single-image comparison extended, not replaced).
+- Ink pairs AND design pairs now produce ONE LISTING with BOTH designs'
+  tiles, grouped by design (front/black first): every mockup rendered with
+  each half's artwork, all auto-rendered and auto-saved. Tile ids are
+  `<designId>:<mockupId>` for pairs, so the user includes/removes each half's
+  image individually before Send; ordinary listings keep bare mockup ids.
+- Both pair members' renders link from the Mockups panel under their own
+  design key (`render-link.ts` no longer refuses a pair's second half).
+- Unit tests: `tests/design-pairs.test.ts` plus updated render-link and
+  verify-artwork tests.
+
 

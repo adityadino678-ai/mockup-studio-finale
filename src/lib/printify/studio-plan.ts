@@ -20,6 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  designPairedDesignIds,
   inkArtworkProblems,
   normaliseColourGroups,
   pairedColourGroups,
@@ -43,6 +44,20 @@ export interface StudioDesignGroup {
   label: string;
   /** True when the design has no ink file and the main design is used. */
   fallback: boolean;
+  /**
+   * The design that OWNS this group's artwork, when it is not the plan
+   * item's owner. Only a design pair's back half sets this: its artwork is
+   * the partner's file, so the placement and the blob read must follow the
+   * partner, not the listing owner.
+   */
+  designId?: string;
+  /**
+   * The print-area position this group prints on, when the group is fixed
+   * to one side. Only a design pair sets this: "front" for the first half,
+   * "back" for the second. Every group of a sided pair carries a position,
+   * which is what `isSidedPairItem` keys on.
+   */
+  position?: string;
 }
 
 /** One product the Studio will create. */
@@ -150,6 +165,60 @@ export function buildStudioPlan(
     });
   }
 
+  for (const pair of session.designPairs ?? []) {
+    if (handled.has(pair.frontDesignId) || handled.has(pair.backDesignId)) continue;
+    if (!scoped.has(pair.frontDesignId) || !scoped.has(pair.backDesignId)) continue;
+    const front = byId.get(pair.frontDesignId);
+    const back = byId.get(pair.backDesignId);
+    if (!front || !back) continue;
+    handled.add(front.id);
+    handled.add(back.id);
+
+    // Both halves print the PLAIN panel's colours — that is the whole point
+    // of a design pair — each with its own artwork on its own side of the
+    // product. The group carries designId + position so the creator uploads
+    // the partner's file and places it with the partner's per-position
+    // placement, and so the partition machinery is bypassed (a partition
+    // cannot claim the same variants twice). An EMPTY plain panel produces
+    // NO groups, so `emptyPanelProblems` names the pair instead of letting
+    // the creator upload two artworks that would print on nothing.
+    const plainColors = session.rows.plain?.colors ?? [];
+    const pairGroups: StudioDesignGroup[] =
+      plainColors.length === 0
+        ? []
+        : [
+            {
+              ink: "main",
+              assetId: mainAssetId(front),
+              colors: plainColors,
+              label: `Front · ${front.name}`,
+              fallback: false,
+              designId: front.id,
+              position: "front",
+            },
+            {
+              ink: "main",
+              assetId: mainAssetId(back),
+              colors: plainColors,
+              label: `Back · ${back.name}`,
+              fallback: false,
+              designId: back.id,
+              position: "back",
+            },
+          ];
+    items.push({
+      designId: front.id,
+      designName: front.name,
+      listingId: front.id,
+      memberIds: [front.id, back.id],
+      partnerDesignId: back.id,
+      partnerName: back.name,
+      row: "plain",
+      inkTicked: false,
+      groups: pairGroups,
+    });
+  }
+
   for (const design of designs) {
     if (!scoped.has(design.id)) continue;
     if (handled.has(design.id)) continue;
@@ -201,17 +270,38 @@ export function buildStudioPlan(
   return { items, colourIndex, groups };
 }
 
+/**
+ * True when every group of a plan item is pinned to one print-area position.
+ *
+ * Only a design pair's items look like this: both groups carry the SAME
+ * plain colours (one variant set), so the variant partition cannot express
+ * them - a partition claims each variant once. The creator sends them as
+ * two artworks on the same variants (front + back), and the endpoint merges
+ * them into one print-area group with two placeholders.
+ */
+export function isSidedPairItem(item: StudioDesignPlan): boolean {
+  return item.groups.length > 0 && item.groups.every((group) => Boolean(group.position));
+}
+
+/** The enabled variant ids for a plan item, with the session's sizes applied. */
+function itemEnabledVariantIds(
+  plan: StudioPlan,
+  item: StudioDesignPlan,
+  sizes: string[],
+): number[] {
+  // A sided pair names the SAME colours twice, so resolve from the first
+  // group only - the colour set is identical by construction.
+  const colors = isSidedPairItem(item) ? (item.groups[0]?.colors ?? []) : item.groups.flatMap((group) => group.colors);
+  return resolveVariantIds(plan.colourIndex, colors, sizes);
+}
+
 /** The variant ids a plan item enables, with the session's sizes applied. */
 export function planItemVariantIds(
   plan: StudioPlan,
   item: StudioDesignPlan,
   sizes: string[],
 ): number[] {
-  return resolveVariantIds(
-    plan.colourIndex,
-    item.groups.flatMap((group) => group.colors),
-    sizes,
-  );
+  return itemEnabledVariantIds(plan, item, sizes);
 }
 
 /**
@@ -251,10 +341,16 @@ export function planVariantCounts(plan: StudioPlan, sizes: string[]): Map<string
 export function studioPartitionProblems(plan: StudioPlan, session: StudioSession): string[] {
   const found: string[] = [];
   for (const item of plan.items) {
-    buildPartition(
-      plan.colourIndex,
-      item.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
-    );
+    // A sided (design-pair) item claims the SAME variants twice — once per
+    // side — so the variant partition does not apply to it; its variants are
+    // enabled exactly once and the print areas become one group with two
+    // placeholders. Only the cap and the empty-set checks mean anything here.
+    if (!isSidedPairItem(item)) {
+      buildPartition(
+        plan.colourIndex,
+        item.groups.map((group) => ({ ink: group.ink, colors: group.colors })),
+      );
+    }
 
     const enabled = planItemVariantIds(plan, item, session.sizes);
     if (enabled.length > MAX_STUDIO_VARIANTS) {
@@ -266,6 +362,7 @@ export function studioPartitionProblems(plan: StudioPlan, session: StudioSession
       found.push(`${item.designName}: no variants match the selected colours and sizes.`);
     }
 
+    if (isSidedPairItem(item)) continue;
     // Warn about groups that have colors but no matching variants in selected sizes
     const coverageWarnings = checkGroupVariantCoverage(plan, item, session.sizes);
     for (const warning of coverageWarnings) {
@@ -317,16 +414,35 @@ export function studioPlanProblems(
 ): string[] {
   const scope = new Set(session.designIds);
   const pairIds = pairedDesignIds(session.inkPairs ?? []);
+  const designPairIds = designPairedDesignIds(session.designPairs ?? []);
   const artworkProblems = inkArtworkProblems(
     // A paired design is never "missing" its ink artwork: its partner IS the
-    // artwork for the other half.
-    designs.filter((design) => scope.has(design.id) && !pairIds.includes(design.id)),
+    // artwork for the other half. The same is true for a design-pair member
+    // that prints the plain panel — unless it is ALSO ink-paired, in which
+    // case the ink pair's product really does need its ink files.
+    designs.filter(
+      (design) =>
+        scope.has(design.id) &&
+        !pairIds.includes(design.id) &&
+        !(designPairIds.includes(design.id) && !pairIds.includes(design.id)),
+    ),
     plan.groups,
     session.inkPairIds ?? [],
   );
+  const nameOf = new Map(designs.map((design) => [design.id, design.name]));
+  const overlapProblems: string[] = [];
+  for (const pair of session.designPairs ?? []) {
+    for (const id of [pair.frontDesignId, pair.backDesignId]) {
+      if (!pairIds.includes(id)) continue;
+      overlapProblems.push(
+        `"${nameOf.get(id) ?? id}" is in both an ink pair and a design pair. Unpair one of them - a design can only carry one kind of pairing at a time.`,
+      );
+    }
+  }
 
   return [
     ...undecidedInkProblems(plan),
+    ...overlapProblems,
     ...artworkProblems.map(
       (problem) => `${problem.designName}: ${describeMissingInk(problem)}`,
     ),
@@ -353,7 +469,9 @@ export function emptyPanelProblems(plan: StudioPlan): string[] {
       // but the panel that needs fixing is still the ink one.
       item.inkTicked
         ? `"${item.designName}" is in the Has ink variants row, but no colours are selected in the "Has ink variants" panel of Colors. Select colours there (and mark each one Black ink or White ink), or untick "Ink variants" to move it back.`
-        : `"${item.designName}" is in the No ink variants row, but no colours are selected in the "No ink variants" panel of Colors. Select colours there, or tick "Ink variants" on this design to move it to the other panel.`,
+        : item.partnerDesignId
+          ? `"${item.designName}" and "${item.partnerName}" are paired front + back, but no colours are selected in the "No ink variants" panel of Colors. A design pair prints both sides with that panel's colours - select colours there, or unpair them.`
+          : `"${item.designName}" is in the No ink variants row, but no colours are selected in the "No ink variants" panel of Colors. Select colours there, or tick "Ink variants" on this design to move it to the other panel.`,
     );
 }
 

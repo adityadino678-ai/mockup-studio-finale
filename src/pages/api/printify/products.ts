@@ -364,9 +364,10 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    // A product's print areas must partition its variants. Printify rewrites
-    // a group to swallow anything nobody named, and a variant that lands in
-    // the wrong group is printed with the wrong artwork.
+    // A product's print areas must partition its variants BY POSITION: a
+    // variant may carry several positions (a design pair prints the FRONT
+    // and the BACK of the same colour), but never the same position twice -
+    // that would be two artworks fighting over one print area.
     const leftovers = body.leftoverVariantIds ?? [];
     if (leftovers.length > 0 && printAreaGroups.length === 0) {
       return json({ error: "Attach a design to a print area before creating the product" }, 400);
@@ -384,16 +385,20 @@ export const POST: APIRoute = async ({ request }) => {
       }
     }
 
-    const covered = new Set<number>();
+    const covered = new Map<number, Set<string>>();
     for (const group of printAreaGroups) {
       for (const id of group.variantIds) {
-        if (covered.has(id)) {
+        const positions = covered.get(id) ?? new Set<string>();
+        if (positions.has(group.position)) {
           return json(
-            { error: `Variant ${id} is assigned to more than one print area. Every variant must belong to exactly one.` },
+            {
+              error: `Variant ${id} is assigned to print area "${group.position}" more than once. Every variant carries one artwork per print area.`,
+            },
             400,
           );
         }
-        covered.add(id);
+        positions.add(group.position);
+        covered.set(id, positions);
       }
     }
     const uncovered = variantIds.filter((id) => !covered.has(id));
@@ -424,6 +429,39 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
+    // A DESIGN PAIR names the same variants twice (front + back). One
+    // Printify group carries BOTH: `placeholders` is an array, so the second
+    // artwork joins the first as an extra placeholder instead of forming a
+    // second group that would break the variant partition.
+    const merged: NonNullable<
+      Parameters<typeof client.createProduct>[0]["printAreaGroups"]
+    > = [];
+    const byVariants = new Map<
+      string,
+      NonNullable<Parameters<typeof client.createProduct>[0]["printAreaGroups"]>[number]
+    >();
+    for (const group of printAreaGroups) {
+      const key = [...group.variantIds].sort((a, b) => a - b).join(",");
+      const existing = byVariants.get(key);
+      if (existing) {
+        existing.extraPlaceholders = [
+          ...(existing.extraPlaceholders ?? []),
+          {
+            position: group.position,
+            imageId: group.imageId,
+            x: group.x,
+            y: group.y,
+            scale: group.scale,
+            angle: group.angle,
+          },
+        ];
+        continue;
+      }
+      const created = { ...group };
+      merged.push(created);
+      byVariants.set(key, created);
+    }
+
     // Resolve the shop once per request: the response carries it so the
     // mockup bridge can address the same product without guessing.
     const product = await client.createProduct({
@@ -434,20 +472,31 @@ export const POST: APIRoute = async ({ request }) => {
       printProviderId: body.printProviderId,
       variants: body.variants,
       prices,
-      printAreaGroups,
+      printAreaGroups: merged,
       shopId,
     });
 
     // The uploaded image ids are echoed back so the client can VERIFY that
-    // every enabled variant really carries the artwork it was meant to.
+    // every enabled variant really carries the artwork it was meant to. A
+    // merged group echoes one entry per placeholder, so a design pair's
+    // variant expects BOTH of its images.
     return json({
       product,
       shopId,
-      artworks: printAreaGroups.map((g) => ({
-        printAreaId: g.position,
-        variantIds: g.variantIds,
-        imageId: g.imageId,
-      })),
+      artworks: merged.flatMap((group) =>
+        [
+          {
+            printAreaId: group.position,
+            variantIds: group.variantIds,
+            imageId: group.imageId,
+          },
+          ...(group.extraPlaceholders ?? []).map((extra) => ({
+            printAreaId: extra.position,
+            variantIds: group.variantIds,
+            imageId: extra.imageId,
+          })),
+        ],
+      ),
     });
   } catch (error) {
     if (error instanceof PrintifyError) {

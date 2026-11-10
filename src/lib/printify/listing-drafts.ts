@@ -37,9 +37,23 @@ export interface ListingImageState {
 
 /** One selected mockup whose cached render still matches the current plan. */
 export interface FreshListingRender {
+  /** The design whose artwork this render carries (a pair member or the owner). */
+  designId: string;
   mockupId: string;
   assetId: string;
   fingerprint: string;
+}
+
+/** True when the listing covers TWO designs' artwork (an ink or design pair). */
+function isPairListing(listing: StudioListing): boolean {
+  return listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+}
+
+/** Splits a pair listing's tile id ("<designId>:<mockupId>") into its parts. */
+function splitTileId(tileId: string): { designId: string; mockupId: string } | null {
+  const sep = tileId.indexOf(":");
+  if (sep <= 0 || sep === tileId.length - 1) return null;
+  return { designId: tileId.slice(0, sep), mockupId: tileId.slice(sep + 1) };
 }
 
 /**
@@ -55,6 +69,45 @@ export async function freshListingRenders(
   listing: StudioListing,
 ): Promise<FreshListingRender[]> {
   const selected = listingMockupIds(session, listing.listingId);
+  if (isPairListing(listing)) {
+    // A pair's selection holds TILE ids - one per member design per mockup -
+    // so both halves' tiles are checked against their OWN design's render,
+    // print area and placement. The strip shows both halves; a stale tile on
+    // either half is exactly as unusable as a stale tile on an ordinary row.
+    const parts = selected.map((tileId) => splitTileId(tileId));
+    const mockupRows = await db.mockups.bulkGet(parts.map((part) => part?.mockupId ?? ""));
+    const savedPlacements = await Promise.all(
+      parts.map((part) =>
+        part ? getPlacement(part.designId, part.mockupId) : Promise.resolve(null),
+      ),
+    );
+    const fresh: FreshListingRender[] = [];
+    for (let index = 0; index < selected.length; index++) {
+      const part = parts[index];
+      const mockup = mockupRows[index];
+      if (!part || !mockup || !isProductMockup(mockup)) continue;
+      const artworkAssetId = listing.memberArtworkIds?.[part.designId];
+      if (!artworkAssetId) continue;
+      const entry = listingRenderFor(session, part.designId, part.mockupId);
+      if (!entry) continue;
+      const fingerprint = listingImageFingerprint({
+        listing: { ...listing, designId: part.designId, artworkAssetId },
+        mockup,
+        placement: placementFor(session, part.designId),
+        saved: savedPlacements[index],
+      });
+      if (entry.fingerprint !== fingerprint) continue;
+      fresh.push({
+        designId: part.designId,
+        mockupId: part.mockupId,
+        assetId: entry.assetId,
+        fingerprint,
+      });
+    }
+    const metas = await db.assets.bulkGet(fresh.map((render) => render.assetId));
+    return fresh.filter((_, index) => Boolean(metas[index]));
+  }
+
   const mockupRows = await db.mockups.bulkGet(selected);
   const savedPlacements = await Promise.all(
     selected.map((mockupId) => getPlacement(listing.designId, mockupId)),
@@ -73,7 +126,12 @@ export async function freshListingRenders(
       saved: savedPlacements[index],
     });
     if (entry.fingerprint !== fingerprint) continue;
-    fresh.push({ mockupId, assetId: entry.assetId, fingerprint });
+    fresh.push({
+      designId: listing.designId,
+      mockupId,
+      assetId: entry.assetId,
+      fingerprint,
+    });
   }
   const metas = await db.assets.bulkGet(fresh.map((render) => render.assetId));
   return fresh.filter((_, index) => Boolean(metas[index]));
@@ -165,12 +223,18 @@ export async function saveStudioListingDrafts(params: {
 
   for (const listing of listings) {
     const selected = listingMockupIds(session, listing.listingId);
+    // A pair listing's selection holds TILE ids ("designId:mockupId"); the
+    // info cards attach by the category of the MOCKUPS included, so the tile
+    // ids are folded back to their mockup part for the card lookup.
+    const mockupIdsForCards = isPairListing(listing)
+      ? selected.map((tileId) => splitTileId(tileId)?.mockupId ?? tileId)
+      : selected;
     // Info cards attach by the category of the mockups used in the listing;
     // they follow the renders in the locked selection.
     const cardIds = orderedIdsForListing(
       session,
       listing.listingId,
-      infoCardsForListing(allMockups, selected).map((card) => card.id),
+      infoCardsForListing(allMockups, mockupIdsForCards).map((card) => card.id),
     )
       .map((id) => allMockups.find((mockup) => mockup.id === id)?.assetId)
       .filter((assetId): assetId is string => typeof assetId === "string");

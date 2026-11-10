@@ -27,6 +27,7 @@ import {
   renderTitle,
 } from "@/lib/printify/studio-session";
 import type { StudioDesignPlan, StudioPlan } from "@/lib/printify/studio-plan";
+import { isSidedPairItem } from "@/lib/printify/studio-plan";
 import {
   buildPartition,
   resolveVariantIds,
@@ -127,6 +128,7 @@ export async function createStudioProduct(
     // One upload per ink group, sized to the print area so the print is sharp
     // and Printify's resolution check passes.
     // partition.groups now matches item.groups 1:1 (no absorber), so index zipping is correct.
+    const longEdge = Math.max(context.areaWidth ?? 3000, context.areaHeight ?? 3000);
     const artworks: Array<{
       printAreaId: string;
       variantIds: number[];
@@ -142,29 +144,57 @@ export async function createStudioProduct(
     // colour-specific design on the wrong colour. Naming them explicitly keeps
     // every colour group clean.
     const leftoverVariantIds = plan.colourIndex.allVariantIds.filter((id) => !enabledSet.has(id));
-    for (let index = 0; index < partition.groups.length; index++) {
-      const group = partition.groups[index];
-      const artwork = item.groups[index];
-      const activeVariantIds = group.variantIds.filter((id) => enabledSet.has(id));
-      if (!artwork || activeVariantIds.length === 0) continue;
-      const blob = await getAssetBlob(artwork.assetId);
-      if (!blob) throw new Error(`Could not read "${item.designName}" from storage`);
-      const longEdge = Math.max(context.areaWidth ?? 3000, context.areaHeight ?? 3000);
-      const base64 = await artworkToBase64Sized(blob, longEdge);
-      const placement = placementFor(session, item.designId);
-      const variantGroups = splitVariantIdsByColour(plan.colourIndex, activeVariantIds);
-      artworks.push({
-        printAreaId: placement.position,
-        variantIds: activeVariantIds,
-        base64,
-        filename: artworkFilename({
-          label: artwork.label,
-          designName: item.designName,
-          ink: artwork.ink,
-        }),
-        placement: clampPlacement(placement),
-        variantGroups: variantGroups.length > 1 ? variantGroups : undefined,
-      });
+
+    if (isSidedPairItem(item)) {
+      // A DESIGN PAIR: one artwork per SIDE on the same variants. The variant
+      // partition cannot express "the same variants, two positions", so the
+      // groups are sent as-is and the endpoint merges them into one
+      // print-area group with a placeholder per side. Each group reads the
+      // OWNING design's per-position placement: the front half's placement
+      // for "front", the back half's for "back".
+      for (const group of item.groups) {
+        const position = group.position as string;
+        const ownerDesignId = group.designId ?? item.designId;
+        const blob = await getAssetBlob(group.assetId);
+        if (!blob) throw new Error(`Could not read "${item.designName}" from storage`);
+        const base64 = await artworkToBase64Sized(blob, longEdge);
+        artworks.push({
+          printAreaId: position,
+          variantIds: enabled,
+          base64,
+          filename: artworkFilename({
+            label: group.label,
+            designName: item.designName,
+            ink: group.ink,
+          }),
+          placement: clampPlacement(placementFor(session, ownerDesignId, position)),
+          variantGroups: splitVariantIdsByColour(plan.colourIndex, enabled),
+        });
+      }
+    } else {
+      for (let index = 0; index < partition.groups.length; index++) {
+        const group = partition.groups[index];
+        const artwork = item.groups[index];
+        const activeVariantIds = group.variantIds.filter((id) => enabledSet.has(id));
+        if (!artwork || activeVariantIds.length === 0) continue;
+        const blob = await getAssetBlob(artwork.assetId);
+        if (!blob) throw new Error(`Could not read "${item.designName}" from storage`);
+        const base64 = await artworkToBase64Sized(blob, longEdge);
+        const placement = placementFor(session, item.designId);
+        const variantGroups = splitVariantIdsByColour(plan.colourIndex, activeVariantIds);
+        artworks.push({
+          printAreaId: placement.position,
+          variantIds: activeVariantIds,
+          base64,
+          filename: artworkFilename({
+            label: artwork.label,
+            designName: item.designName,
+            ink: artwork.ink,
+          }),
+          placement: clampPlacement(placement),
+          variantGroups: variantGroups.length > 1 ? variantGroups : undefined,
+        });
+      }
     }
 
     const title =

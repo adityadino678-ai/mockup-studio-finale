@@ -11,6 +11,7 @@
 
 import { getSetting, setSetting } from "@/lib/db/schema";
 import type {
+  StudioDesignPair,
   StudioInkPair,
   StudioListingMockupsApplied,
   StudioListingRender,
@@ -51,6 +52,8 @@ export function emptySession(): StudioSession {
     designIds: [],
     inkPairIds: [],
     inkPairs: [],
+    designPairIds: [],
+    designPairs: [],
     inkRevision: 2,
     inkReset: false,
     universalPlacement: { ...DEFAULT_PLACEMENT },
@@ -236,6 +239,33 @@ function inkPairArray(value: unknown): StudioInkPair[] {
 }
 
 /**
+ * Reads the stored DESIGN pairs, dropping anything malformed.
+ *
+ * Same one-pair-per-design rule as ink pairs, but its own namespace: a
+ * design pair never touches ink-pair state, and a design may legitimately
+ * sit in one ink pair AND one design pair? No - a design can be in only one
+ * pair of each kind, and the two kinds never share state. A design that is
+ * already in a design pair is not added again.
+ */
+function designPairArray(value: unknown): StudioDesignPair[] {
+  if (!Array.isArray(value)) return [];
+  const out: StudioDesignPair[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const front = (entry as Partial<StudioDesignPair>).frontDesignId;
+    const back = (entry as Partial<StudioDesignPair>).backDesignId;
+    if (typeof front !== "string" || typeof back !== "string") continue;
+    if (!front || !back || front === back) continue;
+    if (seen.has(front) || seen.has(back)) continue;
+    seen.add(front);
+    seen.add(back);
+    out.push({ frontDesignId: front, backDesignId: back });
+  }
+  return out;
+}
+
+/**
  * Reads the stored session, repairing anything missing or malformed.
  *
  * The stored value is untrusted: it may have been written by an older version
@@ -336,6 +366,8 @@ export async function loadSession(): Promise<StudioSession> {
     designIds: stringArray(stored.designIds),
     inkPairIds: stringArray(stored.inkPairIds),
     inkPairs: inkPairArray(stored.inkPairs),
+    designPairIds: stringArray(stored.designPairIds),
+    designPairs: designPairArray(stored.designPairs),
     // Always 2 after a load: the next save records the explicit model, so the
     // one-time reset cannot run twice.
     inkRevision: 2,
@@ -424,6 +456,15 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
   if (inkPairs.length !== session.inkPairs.length) {
     changed = true;
   }
+  const designPairs = (session.designPairs ?? []).filter(
+    (pair) => pair.frontDesignId !== designId && pair.backDesignId !== designId,
+  );
+  if (designPairs.length !== (session.designPairs ?? []).length) {
+    changed = true;
+  }
+  if (session.designPairIds?.includes(designId)) {
+    changed = true;
+  }
 
   const listingImages = { ...(session.listingImages ?? {}) };
   if (designId in listingImages) {
@@ -464,6 +505,8 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
       designIds: session.designIds.filter((id) => id !== designId),
       inkPairIds: session.inkPairIds.filter((id) => id !== designId),
       inkPairs,
+      designPairIds: (session.designPairIds ?? []).filter((id) => id !== designId),
+      designPairs,
       placements,
       placementsByPosition,
       listingImages,

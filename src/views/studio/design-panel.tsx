@@ -159,6 +159,16 @@ export interface DesignGalleryProps {
    * black-ink half; the cards let them swap the roles afterwards.
    */
   onPairInk?: (blackInkDesignId: string, whiteInkDesignId: string) => void;
+  /** The designs the user ticked for a "Design pair" (front + back). */
+  designPairIds?: readonly string[];
+  /** Ticks / unticks "Design pair". Omit to hide the box. */
+  onToggleDesignPair?: (id: string) => void;
+  /** The DESIGN pair a design belongs to: partner name and its side. */
+  designPairInfo?: (id: string) => { partnerName: string; role: "front" | "back" } | undefined;
+  /** Moves a design-paired design to the other side of its pair. */
+  onSetDesignPairRole?: (id: string, role: "front" | "back") => void;
+  /** Breaks a design's DESIGN pair. */
+  onUnpairDesignPair?: (id: string) => void;
   /** Called when a card's body is clicked. */
   onOpen?: (id: string) => void;
   /** The per-design actions in the card's "…" menu. */
@@ -190,6 +200,11 @@ export function DesignGallery({
   onSetInkRole,
   onUnpair,
   onPairInk,
+  designPairIds,
+  onToggleDesignPair,
+  designPairInfo,
+  onSetDesignPairRole,
+  onUnpairDesignPair,
   onOpen,
   onEditDesign,
   onInkVariants,
@@ -270,6 +285,17 @@ export function DesignGallery({
                 pairInfo={pairInfo?.(d.id)}
                 onSetInkRole={onSetInkRole ? (role) => onSetInkRole(d.id, role) : undefined}
                 onUnpair={onUnpair ? () => onUnpair(d.id) : undefined}
+                designPair={designPairIds?.includes(d.id) ?? false}
+                onToggleDesignPair={
+                  onToggleDesignPair ? () => onToggleDesignPair(d.id) : undefined
+                }
+                designPairInfo={designPairInfo?.(d.id)}
+                onSetDesignPairRole={
+                  onSetDesignPairRole ? (role) => onSetDesignPairRole(d.id, role) : undefined
+                }
+                onUnpairDesignPair={
+                  onUnpairDesignPair ? () => onUnpairDesignPair(d.id) : undefined
+                }
                 onOpen={onOpen ? () => onOpen(d.id) : undefined}
                 onEdit={onEditDesign ? () => onEditDesign(d.id) : undefined}
                 onInkVariants={onInkVariants ? () => onInkVariants(d.id) : undefined}
@@ -305,6 +331,12 @@ export interface DesignAdjustmentPanelProps {
   onClose: () => void;
   /** Every print area the product offers. */
   printAreas?: ReadonlyArray<PrintAreaOption>;
+  /**
+   * The position this dialog opens on, when the design's side is FIXED by a
+   * pair: a design pair's front half opens on "front", its back half on
+   * "back". Absent, the dialog opens on the design's own placement position.
+   */
+  defaultPosition?: string;
 }
 
 /**
@@ -321,6 +353,7 @@ export function DesignAdjustmentPanel({
   area,
   onClose,
   printAreas,
+  defaultPosition,
 }: DesignAdjustmentPanelProps) {
   const [artwork, setArtwork] = React.useState<{ url: string; width: number; height: number } | null>(
     null,
@@ -363,7 +396,9 @@ export function DesignAdjustmentPanel({
 
   /** The placement of THIS design, for the position being edited. */
   const [position, setPosition] = React.useState<string>(
-    () => (session.placements[design.id] ?? session.universalPlacement).position,
+    () =>
+      defaultPosition ??
+      (session.placements[design.id] ?? session.universalPlacement).position,
   );
   const editing: StudioPlacement = React.useMemo(() => {
     // This position's own values when the user tuned them before; otherwise
