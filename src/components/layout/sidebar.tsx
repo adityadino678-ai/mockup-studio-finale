@@ -6,16 +6,32 @@ import { usePathname } from "@/lib/client/nav";
 import { cn } from "@/lib/utils";
 import { getSetting, setSetting } from "@/lib/db/schema";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/primitives";
+import {
+  CircleHelp,
   ClipboardList,
+  Cookie,
+  Earth,
   Eye,
   FileArchive,
   History,
   Images,
+  LogIn,
+  Mail,
   PanelLeftClose,
   PanelLeftOpen,
+  Receipt,
+  Scale,
   Settings as SettingsIcon,
   Shapes,
   Shirt,
+  Shield,
 } from "lucide-react";
 
 interface NavItem {
@@ -62,6 +78,78 @@ const NAV: NavGroup[] = [
 
 /** Where the collapsed rail's choice is remembered. */
 const COLLAPSE_KEY = "ui:sidebarCollapsed";
+
+/**
+ * The footer's "Learn more" menu: every destination that is not part of the
+ * working day (the public landing, sign-in and the legal/contact pages), one
+ * list for the expanded footer and the collapsed rail. The links are real
+ * `Link` documents loads; the menu merely groups them so the footer stays one
+ * line instead of seven.
+ */
+const LEARN_MORE: Array<{ href: string; label: string; icon: React.ReactNode; tail?: string }> = [
+  { href: "/", label: "Public page", icon: <Earth className="h-3.5 w-3.5" />, tail: "↗" },
+  { href: "/?auth=in", label: "Log in", icon: <LogIn className="h-3.5 w-3.5" /> },
+  { href: "/privacy", label: "Privacy", icon: <Shield className="h-3.5 w-3.5" /> },
+  { href: "/terms", label: "Terms", icon: <Scale className="h-3.5 w-3.5" /> },
+  { href: "/refunds", label: "Refunds", icon: <Receipt className="h-3.5 w-3.5" /> },
+  { href: "/cookies", label: "Cookies", icon: <Cookie className="h-3.5 w-3.5" /> },
+  { href: "/contact", label: "Contact", icon: <Mail className="h-3.5 w-3.5" /> },
+];
+
+/** Sketch styling shared by the two trigger shapes. */
+const LEARN_MORE_ITEM_CLASS =
+  "block w-full cursor-pointer px-2 py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-ink outline-none transition-colors hover:bg-wash focus:bg-wash";
+
+/**
+ * One "Learn more" dropdown, opening upward from the expanded footer and to
+ * the right from the collapsed rail's icon button.
+ */
+function LearnMoreMenu({ collapsed }: { collapsed: boolean }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title="Learn more"
+          aria-label="Learn more"
+          className={cn(
+            "flex w-full items-center border border-ink bg-paper py-1.5 text-xs font-bold uppercase tracking-[0.12em] text-ink transition-colors hover:bg-wash",
+            collapsed ? "justify-center px-0" : "justify-between gap-2 px-2 py-1.5",
+          )}
+        >
+          <CircleHelp className="h-4 w-4" />
+          {!collapsed && <span>Learn more</span>}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side={collapsed ? "right" : "top"}
+        align={collapsed ? "end" : "start"}
+        sideOffset={collapsed ? 8 : 6}
+        className="min-w-[10.5rem] p-1"
+      >
+        {LEARN_MORE.map((item) => (
+          <DropdownMenuItem key={item.href} asChild>
+            <Link href={item.href} className={LEARN_MORE_ITEM_CLASS}>
+              <span className="flex items-center gap-2">
+                {item.icon}
+                <span>{item.label}</span>
+              </span>
+              {item.tail && (
+                <span aria-hidden className="ml-auto pl-2 text-ink-muted">
+                  {item.tail}
+                </span>
+              )}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="normal-case tracking-normal text-ink-muted">
+          Local-first · account optional
+        </DropdownMenuLabel>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -160,7 +248,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className={cn("border-t-2 border-ink", collapsed ? "p-2" : "p-3")}>
+      <div className={cn("border-t-2 border-ink", collapsed ? "space-y-2 p-2" : "space-y-2 p-3")}>
         <button
           type="button"
           onClick={toggle}
@@ -175,40 +263,7 @@ export function Sidebar() {
           {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           {!collapsed && <span>Collapse</span>}
         </button>
-        {!collapsed && (
-          <>
-            <Link
-              href="/"
-              className="mt-2 flex items-center justify-between px-1 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted hover:text-blue"
-            >
-              <span>Public page</span>
-              <span aria-hidden>↗</span>
-            </Link>
-            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 px-1 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted">
-              <Link href="/?auth=in" className="hover:text-blue">
-                Log in
-              </Link>
-              <Link href="/privacy" className="hover:text-blue">
-                Privacy
-              </Link>
-              <Link href="/terms" className="hover:text-blue">
-                Terms
-              </Link>
-              <Link href="/refunds" className="hover:text-blue">
-                Refunds
-              </Link>
-              <Link href="/cookies" className="hover:text-blue">
-                Cookies
-              </Link>
-              <Link href="/contact" className="hover:text-blue">
-                Contact
-              </Link>
-            </div>
-            <div className="mt-2 px-1 text-xs font-bold uppercase tracking-[0.16em] text-ink-muted">
-              Local-first · account optional
-            </div>
-          </>
-        )}
+        <LearnMoreMenu collapsed={collapsed} />
       </div>
     </aside>
   );
