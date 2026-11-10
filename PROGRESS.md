@@ -580,3 +580,110 @@ both to the no-ink row.
 - `e2e/ink-pairs.spec.ts` - 2/2 pass. The rest of the e2e suite still has the
   other session's in-progress print-area failures (tests 25-27).
 
+---
+
+## ListBulkly fixes: print-area scope, own order, export, auth-only, Learn more (Nov 2026)
+
+Five owner-approved fixes, each an isolated commit (`4c7ad75` … `d9bc227`),
+all five gates run at the end.
+
+### 1. A print-area save stays on this mockup (`4c7ad75`)
+
+The debounced auto-save, the pending-draft flush (tab switch, unmount) and
+"Save on this mockup" wrote the frame to every same-type mockup
+(`areaScope` default `category`). Now a normal save writes the design's
+area to the mockup it was edited on and NOTHING else; **"Render on every
+mockup" remains the only propagating action** (it still passes scope
+`category` to `applyPrintAreaToMockups`). The write lives in
+`src/lib/mockups/print-area-draft.ts` (`savePrintAreaDraft`, scope `this`)
+so the three flush sites and the unit tests cannot drift; toast copy names
+the mockup; a one-sentence helper explains it in the panel.
+
+### 2. Listing images: Reset gone, per-design "Own order" in (`efa186e`)
+
+The strip order was one global shared list, with a "Reset to all mockups"
+button. Now every listing can keep its OWN order: a new
+`session.listingImageOrders` (key present = toggle ON, optional field,
+sanitised in `loadSession` so old sessions keep working) holds that
+listing's id list; `orderedIdsForListing(session, listingId, ids)` returns
+the listing's order when the toggle is ON, the shared order otherwise, and
+`listingMockupIds`, the drafts engine, the ZIP export and the preview all
+go through it. Toggling OFF with a differing order asks first
+("Keep my order" / "Switch to shared order"); toggling ON seeds from
+what is on screen. Removed mockups are restored to the shared default.
+Because `orderedIdsForListing` originally bypassed the global order for an
+empty own-entry (caught by its own tests), `own.length > 0 ? own :
+session.listingImageOrder` is pinned in `tests/listing-own-order-state.test.ts`.
+
+### 3. Export ALL of IndexedDB to a folder the user chooses (`4eab0bd`)
+
+Nothing beyond the per-listing ZIP could leave the browser before. Settings →
+Local storage now has an export card that writes the whole workspace —
+`manifest.json` (schema version, counts), one `tables/<table>.json` per
+metadata table, `blobs/<asset id>` and `thumbs/<id>` — to a picked folder
+via the File System Access API (Chrome/Edge), or as fflate ZIP parts of at
+most 500 MB elsewhere. Saved API keys are left out unless the user ticks
+the opt-in box. Progress bar + Cancel on both paths; an interrupted folder
+export is RESUMABLE (handle + finished paths in the tiny `exportHandles`
+table, Dexie schema v6; the Resume button skips what was written; a write
+failure records the resume state too). The storage bar now warns at 80%
+of the quota and again at 95%. One sentence of copy says nothing is
+uploaded, because nothing is. Tests inject a table loader
+(`defaultTableLoader`) because fake-indexeddb cannot round-trip a Blob.
+
+### 4. Supabase is auth-only; migration 005 (`b1b2c9b`)
+
+The `/api/sync/*` routes — the only writers of the Supabase
+design/listing tables — had no code caller and are deleted. New
+`supabase/migrations/005_auth_only.sql` drops `printify_products`,
+`listing_drafts`, `mockups`, `designs` and `user_settings` CASCADE and
+keeps `profiles` (001 + the 004 delete cascade). **It was NOT applied**:
+the header and DEPLOYMENT.md say to review it and run it by hand. Copy
+updated everywhere it implied syncing: the Settings Account card, README,
+DEPLOYMENT.md, AGENTS.md and the privacy page (which now also points at
+the local folder export for data portability).
+
+### 5. The sidebar footer is one "Learn more" dropdown (`2610d22`)
+
+Public page, Log in and the six legal/contact links were a wrapping word
+pile that vanished entirely when the rail collapsed. One sketch-styled
+"Learn more" button (an icon button on the collapsed rail) opens a Radix
+DropdownMenu — `side="top"` from the footer, `side="right"` from the rail —
+keeping all seven destinations as real `Link` document loads, then a
+separator and the quiet "Local-first · account optional" line. The first
+cut used a `text-[9px]` label on the rail; the project's 13px font-floor
+guard caught it (`tests/font-size-floor.test.ts`), so the rail shows the
+icon only.
+
+### A regression the e2e caught in this work
+
+Tests 17/18 started failing ~1 run in 3: their store readers took the
+FIRST mockup holding *either* a design override or a shared base, which was
+correct only while a normal save papered every same-type mockup. With the
+scope fixed, only the edited photo carries the override, so the reader met
+the sibling's stale base whenever the sibling sorted first. The helpers now
+mirror `printAreaOf` (`d9bc227`); after the fix the pair passed 6/6 runs
+and the whole suite went green.
+
+### Gates (final, at `d9bc227`)
+
+- `npm run lint` — 0 errors (2 pre-existing `react-hooks/exhaustive-deps`
+  warnings in `agent-panel.tsx` and `listing-images-view.tsx`, both present
+  at the pre-branch baseline).
+- `npm run typecheck` — 0 errors (260 files).
+- `npm run test` — **722 passed (47 files)**, including 12 new in
+  `tests/local-export.test.ts`.
+- `npm run test:e2e` — **64/64 passed** (4.5 m).
+- `npm run build` — complete; `dist/.assetsignore` written.
+
+### Manual follow-ups (not automatable here)
+
+- **Review `supabase/migrations/005_auth_only.sql` by hand and apply it**
+  against the project once auth-only is confirmed in production (SQL editor
+  or `supabase db push`). It destroys the listed sync tables' rows.
+- **Test the new export in a real browser matrix**: Chrome/Edge for the
+  folder-picker + resume path (Playwright cannot automate the native
+  `showDirectoryPicker` dialog) and a non-Chromium browser (Firefox/Safari)
+  for the ZIP-parts downloads.
+
+
