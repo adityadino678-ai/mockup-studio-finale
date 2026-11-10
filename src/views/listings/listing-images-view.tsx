@@ -73,7 +73,6 @@ import {
   orderedIdsForListing,
   placementFor,
   RESULTS_KEY,
-  ROW_HINTS,
   ROW_LABELS,
 } from "@/lib/printify/studio-session";
 import {
@@ -97,7 +96,6 @@ import {
   loadSession,
   saveSession,
 } from "@/lib/printify/studio-session";
-import { printAreaOf } from "@/lib/mockups/print-area";
 import {
   infoCardsForListing,
   isProductMockup,
@@ -1719,24 +1717,10 @@ export function ListingImagesView() {
                 <h3 className="truncate text-sm font-semibold text-ink">
                   {listing.designName}
                 </h3>
-                <p className="text-xs text-ink-muted">
-                  {listing.partnerName
-                    ? `One listing with ${listing.partnerName} · the first included tile is the main image`
-                    : "The first included tile is the main image"}
-                  {" · drag the handle to reorder (shared until Own order is on)"}
-                </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={selected.length > 0 ? "forest" : "muted"}>
-                {selected.length} included
-              </Badge>
               {ownOrderOn && <Badge variant="outline">Own order</Badge>}
-              {selected.length > 0 && (
-                <Badge variant={current === selected.length ? "default" : "muted"}>
-                  {current === selected.length ? "rendered" : `${current}/${selected.length} rendered`}
-                </Badge>
-              )}
               {result?.remoteProductId ? (
                 <a
                   href={`https://printify.com/app/products/${result.remoteProductId}`}
@@ -1872,9 +1856,6 @@ export function ListingImagesView() {
                     : 0;
                   const entry = image ? currentEntry(image) : undefined;
                   const marked = markedIds?.has(mockup.id) ?? false;
-                  // The label is about THIS listing's design, not the shared
-                  // default: a per-design frame is still a mapped area.
-                  const area = printAreaOf(mockup, listing.designId);
                   return (
                     <DraggableTile
                       key={mockup.id}
@@ -1928,49 +1909,40 @@ export function ListingImagesView() {
                                   main
                                 </span>
                               )}
-                              <span
-                                className={
-                                  `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-xs font-medium ${
-                                    !image
-                                      ? "bg-ink-subtle text-white"
-                                      : image.overridden
-                                        ? "bg-amber text-white"
-                                        : entry
-                                          ? entry.source === "mockups"
-                                            ? "bg-forest text-white"
-                                            : "bg-default text-white"
-                                          : "bg-warning text-white"
-                                  }`
-                                }
-                              >
-                                {marked
+                              {/* Only problems are labelled: a covered tile is
+                                  bare, so the strip stays quiet. */}
+                              {(() => {
+                                const badge = marked
                                   ? "Will be removed"
                                   : !image
                                     ? "Excluded"
                                     : image.overridden
                                       ? "Override: Mockups"
-                                      : entry
-                                        ? entry.source === "mockups"
-                                          ? "From Mockups"
-                                          : "Rendered here"
-                                        : "Not rendered"}
-                              </span>
+                                      : !entry
+                                        ? "Not rendered"
+                                        : null;
+                                if (!badge) return null;
+                                return (
+                                  <span
+                                    className={
+                                      `absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-xs font-medium ${
+                                        badge === "Override: Mockups"
+                                          ? "bg-amber text-white"
+                                          : badge === "Not rendered"
+                                            ? "bg-warning text-white"
+                                            : "bg-ink-subtle text-white"
+                                      }`
+                                    }
+                                  >
+                                    {badge}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </button>
-                          <div className="flex items-center gap-1 p-2">
-                            <div className="min-w-0 flex-1 space-y-0.5">
-                              <p
-                                className="truncate text-xs font-medium text-ink"
-                                title={mockup.name}
-                              >
-                                {mockup.name}
-                              </p>
-                              <p className="text-xs text-ink-muted">
-                                {area ? "Print area mapped" : "No print area"}
-                              </p>
-                            </div>
-                            {handle}
-                          </div>
+                          {/* The strip stays plain: no filename, no meta -
+                              the tile's pixels and its drag handle are it. */}
+                          <div className="flex justify-end p-2">{handle}</div>
                           {image && image.entry && !image.fresh && !image.adopted && (
                             <div className="flex items-center gap-1 px-2 pb-2">
                               {image.overridden ? (
@@ -2015,12 +1987,6 @@ export function ListingImagesView() {
 
               {cards.length > 0 && (
                 <div className="space-y-1.5 border-t border-border-subtle pt-2">
-                  <p className="text-xs text-ink-muted">
-                    Info cards attach automatically - the categories of the mockups used in
-                    this listing. They are uploaded to Printify after the mockups, in this
-                    order. Drag to reorder; a detached design keeps its card order in its own
-                    list, like the mockup tiles.
-                  </p>
                   <Reorder.Group
                     as="div"
                     axis="x"
@@ -2060,20 +2026,9 @@ export function ListingImagesView() {
                                 Info card
                               </span>
                             </div>
-                            <div className="flex items-center gap-1 p-2">
-                              <div className="min-w-0 flex-1 space-y-0.5">
-                                <p
-                                  className="truncate text-xs font-medium text-ink"
-                                  title={card.name}
-                                >
-                                  {card.name}
-                                </p>
-                                <p className="text-xs text-ink-muted">
-                                  after the mockups
-                                </p>
-                              </div>
-                              {handle}
-                            </div>
+                            {/* Bare image + drag handle: the filename the card
+                              was uploaded with is not part of the listing. */}
+                          <div className="flex justify-end p-2">{handle}</div>
                           </div>
                         )}
                       </DraggableTile>
@@ -2099,7 +2054,6 @@ export function ListingImagesView() {
             {ROW_LABELS[row]}
             <Badge variant="muted">{rowListings.length}</Badge>
           </h2>
-          <p className="text-xs text-ink-muted">{ROW_HINTS[row]}</p>
         </div>
 
         <div className="space-y-4">{rowListings.map(renderListingRow)}</div>
@@ -2116,9 +2070,6 @@ export function ListingImagesView() {
               <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
                 <Images className="h-4 w-4 text-forest" /> Listing images
               </h2>
-              <p className="text-xs text-ink-muted">
-                One row per design; every product mockup is a tile. First tile = main image. Dragging reorders every row until you switch a design&apos;s Own order toggle on, which detaches that row. Long-press to remove. Tiles use saved renders only when current.
-              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button

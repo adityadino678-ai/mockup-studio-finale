@@ -1166,9 +1166,7 @@ export function PrintAreasTab({
               design's name is on screen - it names what the canvas below is
               editing. */}
           {design ? (
-            <span className="text-xs text-ink-muted">
-              {design.name} · its placement is used on every mockup, and by the Studio
-            </span>
+            <span className="text-xs text-ink-muted">{design.name}</span>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
             <Button
@@ -1265,10 +1263,6 @@ export function PrintAreasTab({
                       </Button>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-[10.5px] leading-snug text-ink-muted">
-                    A window into the area for folded garments: the design is cut at the fold. The
-                    area and the print file are not changed.
-                  </p>
                 </div>
               ) : null}
             </Card>
@@ -1320,13 +1314,6 @@ export function PrintAreasTab({
                   Render on every mockup
                 </Button>
               </div>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-muted">
-                A template carries the area and the frame as a fraction of the photo. Tick mockups on
-                the left to apply it to them. <strong className="font-medium text-ink-muted">Save on
-                this mockup</strong> saves the composed mockup and uses it in Listing images, and{" "}
-                <strong className="font-medium text-ink-muted">Render on every mockup</strong> does
-                the whole set for this design in one pass.
-              </p>
             </Card>
           </div>
         </div>

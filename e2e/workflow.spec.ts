@@ -608,7 +608,7 @@ test.describe("core workflow", () => {
       {
         link: /^Listing images$/,
         path: "/listing-images",
-        copy: /One row per design/,
+        copy: /Download selected/,
       },
       {
         link: /^Listing details$/,
@@ -1504,9 +1504,7 @@ test.describe("core workflow", () => {
     // name appears in the context line above the canvas controls - the one
     // place a numbered tab spells its design out.
     await page.getByRole("button", { name: "zz-late-12", exact: true }).click();
-    await expect(
-      page.getByText(/zz-late-12 · its placement is used/),
-    ).toBeVisible();
+    await expect(page.getByText("zz-late-12", { exact: true })).toBeVisible();
   });
 
   test("24. one ticked batch flows through images, details and preview", async ({ page }) => {
@@ -1736,16 +1734,16 @@ test.describe("core workflow", () => {
     });
 
     // Those renders are saved AND used: the Mockups panel writes the session
-    // entry for the owning listing, so Listing images shows them immediately as
-    // "From Mockups" instead of asking for another render.
+    // entry for the owning listing, so Listing images adopts them instead of
+    // asking for another render. The strip is quiet - a covered tile shows no
+    // badge at all - so "Not rendered" must not appear anywhere.
     await gotoApp(page, "/listing-images");
     await expect(page.locator("[data-listing-id]")).toHaveCount(1, { timeout: 30_000 });
-    const fromMockups = page.locator('[data-tile]').getByText("From Mockups", { exact: true });
-    await expect(fromMockups.first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-tile][data-included="true"]')).toHaveCount(2, {
+      timeout: 30_000,
+    });
     await expect(page.getByText("Not rendered", { exact: true })).toHaveCount(0);
     await expect(page.getByText(/saved render.* can be linked/i)).toHaveCount(0);
-    // The per-design area is what the tile reports, not the shared default.
-    await expect(page.getByText("Print area mapped").first()).toBeVisible();
   });
 
   test("32. Save render is visible on the Mockups toolbar and offers the source badge", async ({
