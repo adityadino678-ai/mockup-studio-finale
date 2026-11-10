@@ -82,7 +82,7 @@ import {
 import {
   emptySession,
   listingMockupIds,
-  applyGlobalOrder,
+  orderedIdsForListing,
   listingRenderFor,
   loadSession,
   placementFor,
@@ -712,7 +712,9 @@ export function ListingPreviewView() {
         });
       }
       if (session.listingImageCleared?.[listing.listingId] === true) return [];
-      return applyGlobalOrder(session, allMockupIds);
+      // Never-configured rows show every mockup in the order THIS listing
+      // uses - own order when the design is detached, shared otherwise.
+      return orderedIdsForListing(session, listing.listingId, allMockupIds);
     },
     [session, mockupsById, allMockupIds],
   );
@@ -775,8 +777,9 @@ export function ListingPreviewView() {
     (listing: StudioListing): Mockup[] => {
       if (!mockups) return [];
       const attached = infoCardsForListing(mockups, effectiveIdsFor(listing));
-      return applyGlobalOrder(
+      return orderedIdsForListing(
         session,
+        listing.listingId,
         attached.map((card) => card.id),
       )
         .map((id) => mockupsById.get(id))

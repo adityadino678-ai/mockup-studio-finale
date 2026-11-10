@@ -4,6 +4,8 @@ import {
   emptySession,
   listingMockupIds,
   mergeGlobalOrder,
+  mergeOwnOrder,
+  orderedIdsForListing,
 } from "@/lib/printify/studio-session";
 import {
   DEFAULT_SUBCATEGORY,
@@ -112,6 +114,123 @@ describe("listingMockupIds", () => {
   it("keeps an explicit empty selection empty (a deliberate Clear)", () => {
     const session = sessionWith(["a"], { "listing-1": [] });
     expect(listingMockupIds(session, "listing-1")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A listing whose "Own order" toggle is ON is DETACHED from the global order:
+// `listingImageOrders[listingId]` exists and wins over `listingImageOrder`.
+// A key being PRESENT is the toggle, not its contents - an empty entry cannot
+// happen in the views, and one that arrives from storage falls back to the
+// shared order rather than silently displaying nothing.
+// ---------------------------------------------------------------------------
+
+describe("orderedIdsForListing", () => {
+  it("follows the global order when the toggle is OFF (no key)", () => {
+    const session = { ...sessionWith(["b", "a"]), listingImageOrders: {} };
+    expect(orderedIdsForListing(session, "listing-1", ["a", "b"])).toEqual(["b", "a"]);
+  });
+
+  it("follows its own entry when the toggle is ON, ignoring the global order", () => {
+    const session = {
+      ...sessionWith(["b", "a"]),
+      listingImageOrders: { "listing-1": ["a", "b"] },
+    };
+    expect(orderedIdsForListing(session, "listing-1", ["a", "b"])).toEqual(["a", "b"]);
+    // A different key still follows the shared order.
+    expect(orderedIdsForListing(session, "listing-2", ["a", "b"])).toEqual(["b", "a"]);
+  });
+
+  it("seeding the toggle ON keeps the row's current (shared) order visible", () => {
+    // The views seed the new entry with the row's CURRENT order, so switching
+    // cannot visibly jump the tiles. The round trip proves that works.
+    const shared = applyGlobalOrder(sessionWith(["b", "a"]), ["a", "b"]);
+    const seeded: StudioSession = {
+      ...emptySession(),
+      listingImageOrder: ["b", "a"],
+      listingImageOrders: { "listing-1": shared },
+    };
+    expect(orderedIdsForListing(seeded, "listing-1", ["a", "b"])).toEqual(shared);
+  });
+
+  it("seeding the toggle OFF returns to the shared order", () => {
+    const session: StudioSession = {
+      ...emptySession(),
+      listingImageOrder: ["b", "a"],
+      listingImageOrders: { "listing-1": ["a", "b"] },
+    };
+    const next = { ...session, listingImageOrders: {} };
+    expect(orderedIdsForListing(next, "listing-1", ["a", "b"])).toEqual(["b", "a"]);
+  });
+
+  it("appends a mockup the own entry does not know yet (new upload)", () => {
+    const session = {
+      ...sessionWith(["a"]),
+      listingImageOrders: { "listing-1": ["a"] },
+    };
+    expect(orderedIdsForListing(session, "listing-1", ["a", "new"])).toEqual(["a", "new"]);
+  });
+
+  it("skips an id in the own entry that the caller did not pass", () => {
+    const session = {
+      ...sessionWith(["a", "b"]),
+      listingImageOrders: { "listing-1": ["b", "excluded", "a"] },
+    };
+    expect(orderedIdsForListing(session, "listing-1", ["a", "b"])).toEqual(["b", "a"]);
+  });
+
+  it("falls back to the shared order when the own entry is empty", () => {
+    // Cannot happen from the views, but storage is not trusted: an empty
+    // entry must not make a detached row show nothing.
+    const session = {
+      ...sessionWith(["b", "a"]),
+      listingImageOrders: { "listing-1": [] },
+    };
+    expect(orderedIdsForListing(session, "listing-1", ["a", "b"])).toEqual(["b", "a"]);
+  });
+});
+
+describe("drag semantics for own orders", () => {
+  it("mergeOwnOrder keeps the previously ordered ids that were not dragged", () => {
+    expect(mergeOwnOrder(["a", "b", "c"], ["c"])).toEqual(["c", "a", "b"]);
+    expect(mergeOwnOrder(undefined, ["b", "a"])).toEqual(["b", "a"]);
+  });
+
+  it("a drag in an OFF row reorders the shared order only", () => {
+    const session = {
+      ...sessionWith(["b", "a"], { "listing-1": ["a", "b"] }),
+      listingImageOrders: { "listing-2": ["b", "a"] },
+    };
+    // The user drags listing-1's handle, which is OFF, putting "a" first.
+    const patch = { ...session, listingImageOrder: mergeGlobalOrder(session, ["a", "b"]) };
+    expect(patch.listingImageOrder).toEqual(["a", "b"]);
+    // The ON design's own entry is untouched.
+    expect(patch.listingImageOrders).toEqual({ "listing-2": ["b", "a"] });
+    expect(orderedIdsForListing(patch, "listing-2", ["a", "b"])).toEqual(["b", "a"]);
+  });
+
+  it("a drag in an ON row writes only that row's own entry", () => {
+    const session = {
+      ...sessionWith(["b", "a"]),
+      listingImageOrders: { "listing-1": ["a", "b"], "listing-2": ["b", "a"] },
+    };
+    const next = {
+      ...session,
+      listingImageOrders: {
+        ...session.listingImageOrders,
+        "listing-1": mergeOwnOrder(session.listingImageOrders?.["listing-1"], ["b", "a"]),
+      },
+    };
+    expect(next.listingImageOrder).toEqual(["b", "a"]);
+    expect(next.listingImageOrders).toEqual({ "listing-1": ["b", "a"], "listing-2": ["b", "a"] });
+  });
+
+  it("listingMockupIds resolves an explicit selection through the own order", () => {
+    const session = {
+      ...sessionWith(["b", "a"], { "listing-1": ["a", "b"] }),
+      listingImageOrders: { "listing-1": ["a", "b"] },
+    };
+    expect(listingMockupIds(session, "listing-1")).toEqual(["a", "b"]);
   });
 });
 

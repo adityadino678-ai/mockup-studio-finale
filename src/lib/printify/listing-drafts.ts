@@ -10,8 +10,8 @@
 import { db } from "@/lib/db/schema";
 import { getPlacement, uid, logActivity } from "@/lib/db/repo";
 import {
-  applyGlobalOrder,
   listingMockupIds,
+  orderedIdsForListing,
   listingRenderFor,
   parseTags,
   placementFor,
@@ -167,8 +167,9 @@ export async function saveStudioListingDrafts(params: {
     const selected = listingMockupIds(session, listing.listingId);
     // Info cards attach by the category of the mockups used in the listing;
     // they follow the renders in the locked selection.
-    const cardIds = applyGlobalOrder(
+    const cardIds = orderedIdsForListing(
       session,
+      listing.listingId,
       infoCardsForListing(allMockups, selected).map((card) => card.id),
     )
       .map((id) => allMockups.find((mockup) => mockup.id === id)?.assetId)

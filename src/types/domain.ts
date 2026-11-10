@@ -677,6 +677,15 @@ export interface StudioSession {
    */
   listingImageOrder?: string[];
   /**
+   * Per-design order overrides, keyed by listing id (the owner design's id).
+   *
+   * A key being PRESENT means that design's "Own order" toggle is ON: its row
+   * is detached from the global order above, and dragging reorders only this
+   * entry. Absent means the row follows the shared order like every other
+   * design. Optional, so existing sessions load unchanged.
+   */
+  listingImageOrders?: Record<string, string[]>;
+  /**
    * The last successful render for a listing/mockup pair.
    *
    * The fingerprint makes "reuse unchanged images" honest: a changed design

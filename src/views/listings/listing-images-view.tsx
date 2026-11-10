@@ -69,6 +69,8 @@ import {
   listingMockupIds,
   listingRenderFor,
   mergeGlobalOrder,
+  mergeOwnOrder,
+  orderedIdsForListing,
   placementFor,
   RESULTS_KEY,
   ROW_HINTS,
@@ -317,6 +319,11 @@ export function ListingImagesView() {
     listingName: string;
     apply: () => void;
   } | null>(null);
+  /** A pending confirmation for discarding a detached row's own order. */
+  const [ownOrderConfirm, setOwnOrderConfirm] = React.useState<{
+    listingName: string;
+    apply: () => void;
+  } | null>(null);
   const catalog = useListingCatalog();
 
   // --- session ---------------------------------------------------------------
@@ -493,10 +500,11 @@ export function ListingImagesView() {
     [mockups],
   );
   /**
-   * The product mockups in the GLOBAL order.
+   * The product mockups in the SHARED order.
    *
-   * The order is shared by every listing, so the strip below reads the same
-   * everywhere and a drag in one row moves the photographs on every product.
+   * The order is shared by every listing whose "Own order" toggle is OFF, so
+   * a drag in any such row moves the photographs on all of them. A detached
+   * design overrides this list through `orderedIdsForListing` below.
    */
   const orderedMockupIds = React.useMemo(
     () => applyGlobalOrder(session, allMockupIds),
@@ -538,7 +546,10 @@ export function ListingImagesView() {
         });
       }
       if (session.listingImageCleared?.[listing.listingId] === true) return [];
-      return orderedMockupIds;
+      // A never-configured row starts with every mockup, in the order THIS
+      // listing shows - the shared order unless the row is detached, so a new
+      // listing on a detached design agrees with its own strip.
+      return orderedIdsForListing(session, listing.listingId, orderedMockupIds);
     },
     [session, mockupsById, orderedMockupIds],
   );
@@ -556,7 +567,9 @@ export function ListingImagesView() {
       if (!mockups) return [];
       const attached = infoCardsForListing(mockups, effectiveIdsFor(listing));
       const ids = attached.map((card) => card.id);
-      return applyGlobalOrder(session, ids)
+      // Same rule as the mockup tiles: a detached design sorts its cards by
+      // its own order, everyone else by the shared one.
+      return orderedIdsForListing(session, listing.listingId, ids)
         .map((id) => mockupsById.get(id))
         .filter((card): card is Mockup => !!card);
     },
@@ -978,15 +991,58 @@ export function ListingImagesView() {
     [removal, effectiveIdsFor, update, selectionPatch],
   );
 
-  const resetListing = React.useCallback(
+  /**
+   * The "Own order" toggle for ONE design's row.
+   *
+   * ON (the key being present in `listingImageOrders`): the row is detached
+   * from the shared order. The entry is seeded with the order the row shows
+   * right now, so switching cannot visibly jump the tiles.
+   * OFF: the entry is deleted and the row returns to the shared order. The
+   * design's own order IS discarded - that is what "back to shared" means -
+   * so it is confirmed when the two orders actually differ.
+   */
+  const toggleOwnOrder = React.useCallback(
     (listing: StudioListing) => {
-      // The reset goes back to "every mockup", in the GLOBAL order — the same
-      // sequence the default selection now uses, so the persisted list agrees
-      // with what the strip shows and with the main-image badge.
-      update(selectionPatch(listing.listingId, orderedMockupIds, false));
-      if (removal?.listingId === listing.listingId) setRemoval(null);
+      const listingId = listing.listingId;
+      const own = session.listingImageOrders?.[listingId];
+      if (own === undefined) {
+        update({
+          listingImageOrders: {
+            ...(session.listingImageOrders ?? {}),
+            // The row was on the shared order, so this IS its current order:
+            // the tile strip does not move when the toggle goes on.
+            [listingId]: orderedIdsForListing(session, listingId, allMockupIds),
+          },
+        });
+        return;
+      }
+      const discard = () => {
+        const next = { ...(session.listingImageOrders ?? {}) };
+        delete next[listingId];
+        update({ listingImageOrders: next });
+      };
+      const shared = applyGlobalOrder(session, allMockupIds);
+      const current = orderedIdsForListing(session, listingId, allMockupIds);
+      if (current.length === shared.length && current.every((id, i) => id === shared[i])) {
+        discard();
+        return;
+      }
+      setOwnOrderConfirm({ listingName: listing.designName, apply: discard });
     },
-    [orderedMockupIds, update, selectionPatch, removal],
+    [session, allMockupIds, update],
+  );
+
+  /** Writes a dragged list into ONE detached row's own order - never the shared list. */
+  const updateOwnOrder = React.useCallback(
+    (listingId: string, dragged: string[]) => {
+      update({
+        listingImageOrders: {
+          ...(session.listingImageOrders ?? {}),
+          [listingId]: mergeOwnOrder(session.listingImageOrders?.[listingId], dragged),
+        },
+      });
+    },
+    [session.listingImageOrders, update],
   );
 
   /**
@@ -999,19 +1055,21 @@ export function ListingImagesView() {
    * a render ran is never put back to the snapshot this page last saw.
    */
   const explicitSelection = React.useCallback(
-    (
-      base: Pick<StudioSession, "listingImages" | "listingImageCleared">,
-      scope: StudioListing[],
-    ): Record<string, string[]> => {
+    (base: StudioSession, scope: StudioListing[]): Record<string, string[]> => {
       const listingImages = { ...(base.listingImages ?? {}) };
       for (const listing of scope) {
         if (
           listingImages[listing.listingId] === undefined &&
           base.listingImageCleared?.[listing.listingId] !== true
         ) {
-          // The default becomes explicit in the GLOBAL order, so what Printify
-          // receives later matches the strip the user has been dragging.
-          listingImages[listing.listingId] = orderedMockupIds;
+          // The default becomes explicit in the order the row shows - own
+          // order for a detached design, the shared one otherwise - so what
+          // Printify receives later matches the strip the user has seen.
+          listingImages[listing.listingId] = orderedIdsForListing(
+            base,
+            listing.listingId,
+            orderedMockupIds,
+          );
         }
       }
       return listingImages;
@@ -1631,12 +1689,15 @@ export function ListingImagesView() {
     const markedCount = markedIds
       ? selected.filter((image) => markedIds.has(image.mockup.id)).length
       : 0;
-    // The row is on the "every mockup" default only when it has neither an
-    // explicit list nor the cleared marker - the same rule `effectiveIdsFor`
-    // applies, so Reset is offered exactly when there is something to reset.
-    const isDefaultSelection =
-      session.listingImages?.[listing.listingId] === undefined &&
-      session.listingImageCleared?.[listing.listingId] !== true;
+    // The row's "Own order" toggle: a key in `listingImageOrders` means the
+    // design is detached from the shared order, so drags only touch this row.
+    const ownOrderOn = session.listingImageOrders?.[listing.listingId] !== undefined;
+    // The full library in the order THIS row shows: its own entry when
+    // detached, the shared order otherwise. The strip, the numbering and the
+    // main-image badge all read this one list.
+    const rowOrderIds = ownOrderOn
+      ? orderedIdsForListing(session, listing.listingId, allMockupIds)
+      : orderedMockupIds;
     // Tiles the "Use Mockups render" override can act on: a saved render that
     // exists but is no longer fresh, with no fingerprint-matched alternative.
     const overrideCandidates = selected.filter(
@@ -1662,7 +1723,7 @@ export function ListingImagesView() {
                   {listing.partnerName
                     ? `One listing with ${listing.partnerName} · the first included tile is the main image`
                     : "The first included tile is the main image"}
-                  {" · drag the handle to reorder"}
+                  {" · drag the handle to reorder (shared until Own order is on)"}
                 </p>
               </div>
             </div>
@@ -1670,6 +1731,7 @@ export function ListingImagesView() {
               <Badge variant={selected.length > 0 ? "forest" : "muted"}>
                 {selected.length} included
               </Badge>
+              {ownOrderOn && <Badge variant="outline">Own order</Badge>}
               {selected.length > 0 && (
                 <Badge variant={current === selected.length ? "default" : "muted"}>
                   {current === selected.length ? "rendered" : `${current}/${selected.length} rendered`}
@@ -1711,11 +1773,13 @@ export function ListingImagesView() {
             </Button>
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => resetListing(listing)}
-              disabled={rendering || sending || isDefaultSelection}
+              variant={ownOrderOn ? "secondary" : "outline"}
+              onClick={() => toggleOwnOrder(listing)}
+              disabled={rendering || sending || allMockupIds.length === 0}
+              aria-pressed={ownOrderOn}
+              title="Off: dragging changes the order for all designs. On: dragging changes the order for this design only."
             >
-              Reset to all mockups
+              Own order
             </Button>
             <Button
               size="sm"
@@ -1789,15 +1853,17 @@ export function ListingImagesView() {
               <Reorder.Group
                 as="div"
                 axis="x"
-                values={orderedMockupIds}
+                values={rowOrderIds}
                 onReorder={(next) =>
-                  update({ listingImageOrder: mergeGlobalOrder(session, next) })
+                  ownOrderOn
+                    ? updateOwnOrder(listing.listingId, next)
+                    : update({ listingImageOrder: mergeGlobalOrder(session, next) })
                 }
                 className="flex gap-3 overflow-x-auto pb-1"
                 role="list"
                 aria-label={`Mockups for ${listing.designName}`}
               >
-                {orderedMockupIds.map((mockupId) => {
+                {rowOrderIds.map((mockupId) => {
                   const mockup = mockupsById.get(mockupId);
                   if (!mockup) return null;
                   const image = selected.find((entry) => entry.mockup.id === mockup.id);
@@ -1952,14 +2018,17 @@ export function ListingImagesView() {
                   <p className="text-xs text-ink-muted">
                     Info cards attach automatically - the categories of the mockups used in
                     this listing. They are uploaded to Printify after the mockups, in this
-                    order. Drag to reorder.
+                    order. Drag to reorder; a detached design keeps its card order in its own
+                    list, like the mockup tiles.
                   </p>
                   <Reorder.Group
                     as="div"
                     axis="x"
                     values={cards.map((card) => card.id)}
                     onReorder={(next) =>
-                      update({ listingImageOrder: mergeGlobalOrder(session, next) })
+                      ownOrderOn
+                        ? updateOwnOrder(listing.listingId, next)
+                        : update({ listingImageOrder: mergeGlobalOrder(session, next) })
                     }
                     className="flex gap-3 overflow-x-auto pb-1"
                     role="list"
@@ -2048,7 +2117,7 @@ export function ListingImagesView() {
                 <Images className="h-4 w-4 text-forest" /> Listing images
               </h2>
               <p className="text-xs text-ink-muted">
-                One row per design; every product mockup is a tile. First tile = main image. Drag to reorder (shared across listings). Long-press to remove. Tiles use saved renders only when current.
+                One row per design; every product mockup is a tile. First tile = main image. Dragging reorders every row until you switch a design&apos;s Own order toggle on, which detaches that row. Long-press to remove. Tiles use saved renders only when current.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -2383,6 +2452,38 @@ export function ListingImagesView() {
             <Button size="sm" onClick={openPrintify}>
               <ExternalLink className="h-3.5 w-3.5" />
               {bridgeSummary?.firstProductId ? "Open the Printify product" : "Open Printify"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(ownOrderConfirm)}
+        onOpenChange={(open) => {
+          if (!open) setOwnOrderConfirm(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Discard {ownOrderConfirm?.listingName}&apos;s own order?</DialogTitle>
+            <DialogDescription>
+              This row is using its own image order, different from the shared one. Switching
+              Own order off returns it to the shared order and throws the design&apos;s own
+              order away.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setOwnOrderConfirm(null)}>
+              Keep my order
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                ownOrderConfirm?.apply();
+                setOwnOrderConfirm(null);
+              }}
+            >
+              Switch to shared order
             </Button>
           </DialogFooter>
         </DialogContent>

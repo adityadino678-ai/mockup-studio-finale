@@ -2,7 +2,7 @@ import { unzip, zip, type Zippable } from "fflate";
 import { db } from "@/lib/db/schema";
 import { designMainAssetId, getAssetBlob } from "@/lib/db/repo";
 import { sanitizeFilename } from "@/lib/image/image";
-import { applyGlobalOrder, loadSession, listingMockupIds } from "@/lib/printify/studio-session";
+import { loadSession, listingMockupIds, orderedIdsForListing } from "@/lib/printify/studio-session";
 import { infoCardsForListing, productMockups } from "@/lib/mockups/info-cards";
 import type { Design, ExportJob, ExportSelection, ListingDraft, Mockup } from "@/types/domain";
 
@@ -184,8 +184,9 @@ export async function buildExportArchive(
         // renders. Locked drafts already carry the card assets inside
         // imageAssetIds; the unlocked fallback computes them here.
         const explicit = listingMockupIds(session, ownerId);
-        const fallback = applyGlobalOrder(
+        const fallback = orderedIdsForListing(
           session,
+          ownerId,
           productMockups(allMockups).map((m) => m.id),
         );
         const includedIds =
@@ -196,8 +197,9 @@ export async function buildExportArchive(
               : fallback;
         const attachedCards = selectedAssetIds
           ? []
-          : applyGlobalOrder(
+          : orderedIdsForListing(
               session,
+              ownerId,
               infoCardsForListing(allMockups, includedIds).map((card) => card.id),
             )
               .map((id) => allMockups.find((mockup) => mockup.id === id))

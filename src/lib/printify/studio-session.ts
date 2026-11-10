@@ -65,6 +65,7 @@ export function emptySession(): StudioSession {
     quantity: 1,
     listingImages: {},
     listingImageCleared: {},
+    listingImageOrders: {},
     listingRenders: {},
     listingMockupsApplied: {},
     updatedAt: Date.now(),
@@ -336,6 +337,10 @@ export async function loadSession(): Promise<StudioSession> {
     // The GLOBAL image order. It is a plain list of mockup ids; duplicates are
     // dropped, because a repeated id would make the sort ambiguous.
     listingImageOrder: [...new Set(stringArray(stored.listingImageOrder))],
+    // The per-design "Own order" overrides. Same sanitising as the explicit
+    // selections: strings only, de-duplicated; an empty list is dropped
+    // because a key with no order cannot express a detached row.
+    listingImageOrders: imageSelectionRecord(stored.listingImageOrders),
     listingRenders: renderRecord(stored.listingRenders),
     listingMockupsApplied: appliedMockupRecord(stored.listingMockupsApplied),
     // UI memory for the Mockups panel's per-design tabs. A non-empty string
@@ -402,6 +407,11 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
     delete listingImageCleared[designId];
     changed = true;
   }
+  const listingImageOrders = { ...(session.listingImageOrders ?? {}) };
+  if (designId in listingImageOrders) {
+    delete listingImageOrders[designId];
+    changed = true;
+  }
   const listingPrices = { ...(session.listingPrices ?? {}) };
   if (designId in listingPrices) {
     delete listingPrices[designId];
@@ -429,6 +439,7 @@ export async function pruneStudioDesign(designId: string): Promise<void> {
       placements,
       listingImages,
       listingImageCleared,
+      listingImageOrders,
       listingPrices,
       listingRenders,
       listingMockupsApplied,
@@ -492,20 +503,19 @@ export function priceForListing(session: StudioSession, listingId: string): numb
 }
 
 /**
- * Applies the GLOBAL image order to a list of mockup ids.
+ * Applies ONE stored order to a list of mockup ids.
  *
- * One order is shared by every listing, so the main photograph is the same on
- * every product in the batch. The rule is deliberately simple:
+ * The rule is deliberately simple, and the global order and a listing's own
+ * order both use it:
  *
  *  - a mockup that IS in the order comes first, in that order;
  *  - a mockup that is NOT in the order (a newly uploaded one, or one added
  *    while the order was already set) comes last, keeping its own order.
  *
  * Ids the caller did not pass are ignored, so an excluded mockup is skipped
- * rather than reserving a slot.
+ * rather than reserving a slot. No stored order = the ids unchanged.
  */
-export function applyGlobalOrder(session: StudioSession, ids: string[]): string[] {
-  const order = session.listingImageOrder;
+function applyOrder(order: string[] | undefined, ids: string[]): string[] {
   if (!order || order.length === 0) return ids;
   const rank = new Map<string, number>();
   order.forEach((id, index) => {
@@ -521,6 +531,23 @@ export function applyGlobalOrder(session: StudioSession, ids: string[]): string[
   return [...known, ...unknown];
 }
 
+/** Merges a dragged list into one stored order, hidden ids keeping their slot. */
+function mergeOrder(previous: string[] | undefined, dragged: string[]): string[] {
+  const draggedSet = new Set(dragged);
+  const rest = (previous ?? []).filter((id) => !draggedSet.has(id));
+  return [...dragged, ...rest];
+}
+
+/**
+ * Applies the GLOBAL image order to a list of mockup ids.
+ *
+ * One order is shared by every listing, so the main photograph is the same on
+ * every product in the batch.
+ */
+export function applyGlobalOrder(session: StudioSession, ids: string[]): string[] {
+  return applyOrder(session.listingImageOrder, ids);
+}
+
 /**
  * Writes a new global order.
  *
@@ -533,20 +560,54 @@ export function mergeGlobalOrder(
   session: StudioSession,
   dragged: string[],
 ): string[] {
-  const previous = session.listingImageOrder ?? [];
-  const draggedSet = new Set(dragged);
-  const rest = previous.filter((id) => !draggedSet.has(id));
-  return [...dragged, ...rest];
+  return mergeOrder(session.listingImageOrder, dragged);
 }
 
 /**
- * The selected mockup ids for a listing, in the GLOBAL order.
+ * Merges a dragged list into ONE listing's own order entry.
  *
- * `session.listingImages` says WHICH mockups a listing uses; the global order
- * says in what order they go. The first id is the main image.
+ * Same merge rule as the global order; the caller owns whether the entry is
+ * created or deleted (the "Own order" toggle), so passing no previous value
+ * simply stores the dragged list.
+ */
+export function mergeOwnOrder(
+  previous: string[] | undefined,
+  dragged: string[],
+): string[] {
+  return mergeOrder(previous, dragged);
+}
+
+/**
+ * The order ids take for ONE listing.
+ *
+ * A design whose "Own order" toggle is ON (a key in `listingImageOrders`)
+ * sorts by its own entry; every other design uses the shared global order.
+ * This is the single resolver the tile strip, the drafts engine, the preview,
+ * the Export Center and the Printify bridge all read, so what the row shows
+ * is exactly what gets uploaded. An own entry that is empty (never populated)
+ * falls back to the shared order rather than silently displaying nothing.
+ */
+export function orderedIdsForListing(
+  session: StudioSession,
+  listingId: string,
+  ids: string[],
+): string[] {
+  const own = session.listingImageOrders?.[listingId];
+  // Toggle ON with a real entry -> the own order; every other case (no key,
+  // or an entry with no usable ids) -> the shared global order.
+  const order = own && own.length > 0 ? own : session.listingImageOrder;
+  return applyOrder(order, ids);
+}
+
+/**
+ * The selected mockup ids for a listing, in the order that listing uses.
+ *
+ * `session.listingImages` says WHICH mockups a listing uses; the order (own
+ * when the design is detached, shared otherwise) says in what order they go.
+ * The first id is the main image.
  */
 export function listingMockupIds(session: StudioSession, listingId: string): string[] {
-  return applyGlobalOrder(session, session.listingImages?.[listingId] ?? []);
+  return orderedIdsForListing(session, listingId, session.listingImages?.[listingId] ?? []);
 }
 
 /**
@@ -583,6 +644,7 @@ export function remapListingState(
   return {
     listingImages: move(session.listingImages),
     listingImageCleared: move(session.listingImageCleared),
+    listingImageOrders: move(session.listingImageOrders),
     listingPrices: move(session.listingPrices),
     listingRenders,
     listingMockupsApplied: move(session.listingMockupsApplied),
