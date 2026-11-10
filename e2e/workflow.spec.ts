@@ -398,7 +398,8 @@ test.describe("core workflow", () => {
       // photo.
       const mockup =
         mockups.find((m) => m.id === metas[0].sourceMockupId) ??
-        mockups.find((m) => m.designAreas?.[designId] || m.printArea);
+        mockups.find((m) => m.designAreas?.[designId] != null) ??
+        mockups.find((m) => m.printArea);
       const area = mockup?.designAreas?.[designId] ?? mockup?.printArea;
       if (!mockup || !area) return { found: false as const, reason: "no print area" };
       // The area's frame in photo pixels.
@@ -941,8 +942,15 @@ test.describe("core workflow", () => {
           rq.onsuccess = () => res(rq.result);
         });
         const designId = designs.find((d) => d.name === "design-a")!.id;
-        const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea);
-        return mockup?.designAreas?.[designId]?.frame ?? mockup?.printArea?.frame;
+        // A normal save stays on ONE mockup: it writes the design's override
+        // on the photo it was made on only. Reading "the first row with
+        // either an override or a base" picks the sibling whenever it sorts
+        // earlier in the store's insertion order and then reports the stale
+        // shared base. Mirrors printAreaOf: prefer the mockup that actually
+        // carries this design's override, fall back to the shared base.
+        const withDesign = mockups.find((m) => m.designAreas?.[designId] != null);
+        const withBase = withDesign ?? mockups.find((m) => m.printArea);
+        return withDesign?.designAreas?.[designId]?.frame ?? withBase?.printArea?.frame;
       });
 
     const before = await readFrame();
@@ -987,7 +995,11 @@ test.describe("core workflow", () => {
         rq.onsuccess = () => res(rq.result);
       });
       const designId = designs.find((d) => d.name === "design-a")!.id;
-      const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea)!;
+      // Same printAreaOf ordering as readFrame above: the mockup carrying
+      // this design's override is the one the frame was saved on; a first-row
+      // match can be the sibling that only holds the shared base.
+      const withDesign = mockups.find((m) => m.designAreas?.[designId] != null);
+      const mockup = (withDesign ?? mockups.find((m) => m.printArea))!;
       return {
         width: mockup.width,
         height: mockup.height,
@@ -1205,8 +1217,11 @@ test.describe("core workflow", () => {
           rq.onsuccess = () => res(rq.result);
         });
         const designId = designs.find((d) => d.name === "design-a")!.id;
-        const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea);
-        return mockup?.designAreas?.[designId]?.crop ?? mockup?.printArea?.crop;
+        // Same printAreaOf ordering as readFrame: prefer the mockup carrying
+        // the design's override, fall back to the shared base.
+        const withDesign = mockups.find((m) => m.designAreas?.[designId] != null);
+        const withBase = withDesign ?? mockups.find((m) => m.printArea);
+        return withDesign?.designAreas?.[designId]?.crop ?? withBase?.printArea?.crop;
       });
       return stored;
     };
@@ -1251,7 +1266,11 @@ test.describe("core workflow", () => {
         rq.onsuccess = () => res(rq.result);
       });
       const designId = designs.find((d) => d.name === "design-a")!.id;
-      const mockup = mockups.find((m) => m.designAreas?.[designId] || m.printArea)!;
+      // Same printAreaOf ordering as readFrame above: the mockup carrying
+      // this design's override is the one the frame was saved on; a first-row
+      // match can be the sibling that only holds the shared base.
+      const withDesign = mockups.find((m) => m.designAreas?.[designId] != null);
+      const mockup = (withDesign ?? mockups.find((m) => m.printArea))!;
       return {
         width: mockup.width,
         height: mockup.height,
