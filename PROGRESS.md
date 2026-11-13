@@ -769,6 +769,41 @@ clean. Playwright config now runs 4 parallel workers (the serial 1-worker
 config was the suite's slowness). NOT pushed and NOT deployed — awaiting
 owner approval.
 
+## 2026-11-13 — Owner requests: buttons deleted, exclusive checkboxes, pair tiles fixed
+
+Three owner requests from screenshots, each its own commit:
+
+### fix(pairs): the selection bar's two pair buttons are gone (5045e2d)
+- "Pair for one listing" and "Pair front + back" deleted; the checkbox
+  gestures carry pairing entirely (ink row's button + instant second-tick
+  design pairing). `pairSelected`/`pairFrontBack` removed, `pairTwo`/
+  `pairDesigns` kept. e2e and AGENTS.md updated to match.
+
+### fix(pairs): "Ink variants" and "Design pair" are mutually exclusive (c1398ee)
+- `design-card.tsx` (the one card both tabs draw) hides the other checkbox:
+  ink-ticked/ink-paired designs show no "Design pair" box; design-pair
+  members show no "Ink variants" box. One design can no longer sit in both
+  mechanisms.
+
+### fix(listings): a pair keeps the selection it had before the pairing (93edafa)
+- THE OWNER'S BLANK-TILE BUG, root-caused with a runtime probe: a listing
+  configured BEFORE pairing stores BARE mockup ids; read as a pair, every id
+  failed the tile filter, the row collapsed to an EMPTY selection, all 14
+  tiles drew as excluded raw photos, and the background pass had zero
+  targets — nothing ever rendered. Fresh pairs (never configured) were
+  unaffected, which is why the code path looked correct.
+- `listingSelectionIds` (listing-plan.ts) expands a pair's bare ids to both
+  members' tiles in member order, preserving the include/exclude decisions
+  and the stored order. All readers go through it: both listing pages'
+  effective selection, the drafts engine, Listing details' freshness
+  warnings (which also never understood tile ids), and the Export Center's
+  card fold.
+- New e2e drives the exact owner sequence (configure → pair → tiles included
+  and rendering).
+
+Gates: lint 0 errors, typecheck 0 errors, 735 unit tests, 67 e2e, build
+clean. NOT pushed and NOT deployed — awaiting owner approval.
+
 ## 2026-11-10 — Placement text strip, per-side placements, DESIGN pairs
 
 Owner-approved batch on top of the auto-render work:
