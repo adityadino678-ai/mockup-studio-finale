@@ -337,7 +337,10 @@ test.describe("core workflow", () => {
 
     // The render happens on its own now: the tab's background pass backfills
     // the ACTIVE design onto every mockup with an area for it, so the asset
-    // simply shows up in storage. No save button exists to click.
+    // simply shows up in storage. No save button exists to click. The pass
+    // renders SERIALLY, so "at least one asset" is not enough - the pixel
+    // assertions below sample the 1200x1200 photo's render, and on a slower
+    // machine the sample once raced the second render. Wait for THAT one.
     await expect
       .poll(
         () =>
@@ -346,7 +349,7 @@ test.describe("core workflow", () => {
               const r = indexedDB.open("mockup-studio");
               r.onsuccess = () => res(r.result);
             });
-            const metas: Array<unknown> = await new Promise((res) => {
+            const metas: Array<{ sourceMockupId?: string }> = await new Promise((res) => {
               const rq = db
                 .transaction(["assets"], "readonly")
                 .objectStore("assets")
@@ -354,7 +357,13 @@ test.describe("core workflow", () => {
                 .getAll("mockup-render");
               rq.onsuccess = () => res(rq.result);
             });
-            return metas.length;
+            const mockups: Array<{ id: string; width: number }> = await new Promise((res) => {
+              const rq = db.transaction(["mockups"], "readonly").objectStore("mockups").getAll();
+              rq.onsuccess = () => res(rq.result);
+            });
+            return metas.filter(
+              (m) => mockups.find((mu) => mu.id === m.sourceMockupId)?.width === 1200,
+            ).length;
           }),
         { timeout: 90_000 },
       )
