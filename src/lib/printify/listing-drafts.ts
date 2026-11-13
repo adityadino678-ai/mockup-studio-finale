@@ -10,7 +10,6 @@
 import { db } from "@/lib/db/schema";
 import { getPlacement, uid, logActivity } from "@/lib/db/repo";
 import {
-  listingMockupIds,
   orderedIdsForListing,
   listingRenderFor,
   parseTags,
@@ -21,7 +20,7 @@ import {
 } from "@/lib/printify/studio-session";
 import { listingImageFingerprint } from "@/lib/printify/listing-render";
 import { infoCardsForListing, isProductMockup } from "@/lib/mockups/info-cards";
-import type { StudioListing } from "@/lib/printify/listing-plan";
+import { isPairListing, listingSelectionIds, type StudioListing } from "@/lib/printify/listing-plan";
 import type { ListingDraft, StudioSession } from "@/types/domain";
 
 export interface SaveListingDraftsResult {
@@ -44,11 +43,6 @@ export interface FreshListingRender {
   fingerprint: string;
 }
 
-/** True when the listing covers TWO designs' artwork (an ink or design pair). */
-function isPairListing(listing: StudioListing): boolean {
-  return listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
-}
-
 /** Splits a pair listing's tile id ("<designId>:<mockupId>") into its parts. */
 function splitTileId(tileId: string): { designId: string; mockupId: string } | null {
   const sep = tileId.indexOf(":");
@@ -68,7 +62,11 @@ export async function freshListingRenders(
   session: StudioSession,
   listing: StudioListing,
 ): Promise<FreshListingRender[]> {
-  const selected = listingMockupIds(session, listing.listingId);
+  const selected = orderedIdsForListing(
+    session,
+    listing.listingId,
+    listingSelectionIds(session, listing),
+  );
   if (isPairListing(listing)) {
     // A pair's selection holds TILE ids - one per member design per mockup -
     // so both halves' tiles are checked against their OWN design's render,
@@ -222,7 +220,11 @@ export async function saveStudioListingDrafts(params: {
   const allMockups = await db.mockups.toArray();
 
   for (const listing of listings) {
-    const selected = listingMockupIds(session, listing.listingId);
+    const selected = orderedIdsForListing(
+      session,
+      listing.listingId,
+      listingSelectionIds(session, listing),
+    );
     // A pair listing's selection holds TILE ids ("designId:mockupId"); the
     // info cards attach by the category of the MOCKUPS included, so the tile
     // ids are folded back to their mockup part for the card lookup.

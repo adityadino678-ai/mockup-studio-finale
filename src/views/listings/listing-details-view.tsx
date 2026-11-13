@@ -57,12 +57,14 @@ import { Switch } from "@/components/ui/primitives";
 import {
   buildStudioListings,
   catalogProductName,
+  isPairListing,
+  listingSelectionIds,
   type StudioListing,
 } from "@/lib/printify/listing-plan";
 import {
-  listingMockupIds,
   listingRenderFor,
   MAX_TAGS,
+  orderedIdsForListing,
   parseTags,
   placementFor,
   priceForListing,
@@ -425,24 +427,44 @@ export function ListingDetailsView() {
     [placements],
   );
 
+  /**
+   * The listing's selection ids, with the pre-pairing repair: an ordinary
+   * listing's bare mockup ids, a pair's TILE ids - bare ids a pair inherited
+   * from before the pairing existed are expanded to both members' tiles.
+   */
+  const selectionIdsFor = React.useCallback(
+    (listing: StudioListing): string[] =>
+      orderedIdsForListing(session, listing.listingId, listingSelectionIds(session, listing)),
+    [session],
+  );
+
   const freshCountFor = React.useCallback(
     (listing: StudioListing): number => {
+      const pair = isPairListing(listing);
       let fresh = 0;
-      for (const mockupId of listingMockupIds(session, listing.listingId)) {
+      for (const id of selectionIdsFor(listing)) {
+        // A pair's ids are TILES ("<memberId>:<mockupId>"), each checked
+        // against ITS member's artwork, print area and placement; an
+        // ordinary listing's ids are the listing design's own mockups.
+        const sep = pair ? id.indexOf(":") : -1;
+        const designId = pair && sep > 0 ? id.slice(0, sep) : listing.designId;
+        const mockupId = pair && sep > 0 ? id.slice(sep + 1) : id;
         const mockup = mockupsById.get(mockupId);
-        const entry = listingRenderFor(session, listing.listingId, mockupId);
+        const entry = listingRenderFor(session, designId, mockupId);
         if (!mockup || !entry) continue;
+        const artworkAssetId =
+          (pair ? listing.memberArtworkIds?.[designId] : undefined) ?? listing.artworkAssetId;
         const fingerprint = listingImageFingerprint({
-          listing,
+          listing: { ...listing, designId, artworkAssetId },
           mockup,
-          placement: placementFor(session, listing.designId),
-          saved: placementsByKey.get(`${listing.designId}:${mockupId}`),
+          placement: placementFor(session, designId),
+          saved: placementsByKey.get(`${designId}:${mockupId}`),
         });
         if (isListingRenderFresh(entry, fingerprint)) fresh++;
       }
       return fresh;
     },
-    [session, mockupsById, placementsByKey],
+    [session, mockupsById, placementsByKey, selectionIdsFor],
   );
 
   const setField = <K extends keyof DetailsForm>(field: K, value: DetailsForm[K]) => {
@@ -686,11 +708,9 @@ export function ListingDetailsView() {
     }
   };
 
-  const noImages = listings.filter(
-    (listing) => listingMockupIds(session, listing.listingId).length === 0,
-  );
+  const noImages = listings.filter((listing) => selectionIdsFor(listing).length === 0);
   const pendingRenders = listings.filter((listing) => {
-    const ids = listingMockupIds(session, listing.listingId);
+    const ids = selectionIdsFor(listing);
     return ids.length > 0 && freshCountFor(listing) < ids.length;
   });
 

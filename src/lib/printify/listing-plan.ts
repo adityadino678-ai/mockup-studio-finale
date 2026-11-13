@@ -197,6 +197,44 @@ export function groupStudioListings(listings: StudioListing[]): {
   };
 }
 
+/**
+ * True when a listing is a pair (either kind): two designs, one listing.
+ */
+export function isPairListing(
+  listing: Pick<StudioListing, "memberIds" | "memberArtworkIds">,
+): boolean {
+  return listing.memberIds.length === 2 && Boolean(listing.memberArtworkIds);
+}
+
+/**
+ * The stored selection ids for a listing, with one repair applied:
+ *
+ * A listing that was CONFIGURED before its pair existed holds BARE mockup
+ * ids (an ordinary listing's shape). Read as-is, a pair's tile filter drops
+ * every one of them - the row collapses to an empty selection, all of its
+ * tiles draw as excluded, and the bare mockup photo shows instead of the
+ * design (the owner's report). So a pair's bare ids EXPAND to both members'
+ * tiles, in member order, keeping the user's include/exclude decision and
+ * the stored order. Proper tile ids pass through; a tile id naming a design
+ * that is no longer a member is dropped, exactly as the callers' validity
+ * filter would drop it.
+ */
+export function listingSelectionIds(
+  session: StudioSession,
+  listing: Pick<StudioListing, "listingId" | "memberIds" | "memberArtworkIds">,
+): string[] {
+  const stored = session.listingImages?.[listing.listingId];
+  if (!stored) return [];
+  if (!isPairListing(listing)) return stored;
+  const members = new Set(listing.memberIds);
+  return stored.flatMap((id) => {
+    const sep = id.indexOf(":");
+    if (sep > 0) return members.has(id.slice(0, sep)) ? [id] : [];
+    // A bare mockup id from before the pairing existed: both halves inherit it.
+    return listing.memberIds.map((memberId) => `${memberId}:${id}`);
+  });
+}
+
 /** The Printify product title for a blueprint, for `{product}` expansion. */
 export function catalogProductName(
   blueprints: Array<{ id: number; title: string }>,

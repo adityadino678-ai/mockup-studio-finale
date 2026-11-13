@@ -183,7 +183,13 @@ export async function buildExportArchive(
         // Attached info cards, in strip order, appended AFTER the mockup
         // renders. Locked drafts already carry the card assets inside
         // imageAssetIds; the unlocked fallback computes them here.
-        const explicit = listingMockupIds(session, ownerId);
+        const explicit = listingMockupIds(session, ownerId).map((id) => {
+          // A pair's selection holds TILE ids ("<designId>:<mockupId>"); the
+          // cards attach by the MOCKUP part, so a bare id passes through and
+          // a tile folds back to its mockup.
+          const sep = id.indexOf(":");
+          return sep > 0 ? id.slice(sep + 1) : id;
+        });
         const fallback = orderedIdsForListing(
           session,
           ownerId,

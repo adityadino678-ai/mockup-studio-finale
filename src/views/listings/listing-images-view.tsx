@@ -62,11 +62,11 @@ import {
   buildStudioListings,
   catalogProductName,
   groupStudioListings,
+  listingSelectionIds,
   type StudioListing,
 } from "@/lib/printify/listing-plan";
 import {
   applyGlobalOrder,
-  listingMockupIds,
   listingRenderFor,
   mergeGlobalOrder,
   mergeOwnOrder,
@@ -561,7 +561,10 @@ export function ListingImagesView() {
           return validMembers.has(tileId.slice(0, sep)) && !!mockup && isProductMockup(mockup);
         };
         if (session.listingImages?.[listing.listingId] !== undefined) {
-          return listingMockupIds(session, listing.listingId).filter(tileExists);
+          // A pre-pairing selection holds BARE mockup ids; the expansion
+          // turns them into both members' tiles so the row keeps the user's
+          // include/exclude decisions instead of collapsing to nothing.
+          return listingSelectionIds(session, listing).filter(tileExists);
         }
         if (session.listingImageCleared?.[listing.listingId] === true) return [];
         // Never configured: every member's tile for every mockup, members in
@@ -575,7 +578,11 @@ export function ListingImagesView() {
       }
       const configured = session.listingImages?.[listing.listingId] !== undefined;
       if (configured) {
-        return listingMockupIds(session, listing.listingId).filter((id) => {
+        return orderedIdsForListing(
+          session,
+          listing.listingId,
+          listingSelectionIds(session, listing),
+        ).filter((id) => {
           const mockup = mockupsById.get(id);
           return !!mockup && isProductMockup(mockup);
         });

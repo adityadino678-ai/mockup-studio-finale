@@ -77,6 +77,7 @@ import {
 import {
   buildStudioListings,
   catalogProductName,
+  listingSelectionIds,
   type StudioListing,
 } from "@/lib/printify/listing-plan";
 import {
@@ -727,7 +728,10 @@ export function ListingPreviewView() {
           return validMembers.has(tileId.slice(0, sep)) && !!mockup && isProductMockup(mockup);
         };
         if (session.listingImages?.[listing.listingId] !== undefined) {
-          return listingMockupIds(session, listing.listingId).filter(tileExists);
+          // Same repair as Listing images: a pre-pairing selection holds
+          // BARE mockup ids, expanded here to both members' tiles so the
+          // preview agrees with the strip instead of showing nothing.
+          return listingSelectionIds(session, listing).filter(tileExists);
         }
         if (session.listingImageCleared?.[listing.listingId] === true) return [];
         return listing.memberIds.flatMap((memberId) =>

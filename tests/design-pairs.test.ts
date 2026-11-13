@@ -7,7 +7,7 @@ import {
   withoutDesignPair,
 } from "@/lib/printify/design-colours";
 import { buildStudioPlan, studioPlanProblems } from "@/lib/printify/studio-plan";
-import { buildStudioListings } from "@/lib/printify/listing-plan";
+import { buildStudioListings, listingSelectionIds } from "@/lib/printify/listing-plan";
 import { emptySession } from "@/lib/printify/studio-session";
 import type { CatalogVariant } from "@/lib/printify/types";
 import type { Design, StudioSession } from "@/types/domain";
@@ -80,6 +80,46 @@ describe("planDesignPairColours", () => {
     expect(plan.missing).toEqual([]);
     expect(plan.undecided).toEqual([]);
     expect(plan.usesInkArtwork).toBe(false);
+  });
+});
+
+describe("listingSelectionIds - the pre-pairing selection repair", () => {
+  const pairListing = {
+    listingId: "front",
+    memberIds: ["front", "back"],
+    memberArtworkIds: { front: "asset-front", back: "asset-back" },
+  } as Parameters<typeof listingSelectionIds>[1];
+
+  it("expands a pair's PRE-PAIRING bare mockup ids to both members' tiles", () => {
+    const stored = { listingImages: { front: ["m1", "m2"] } } as never;
+    expect(listingSelectionIds(stored, pairListing)).toEqual([
+      "front:m1",
+      "back:m1",
+      "front:m2",
+      "back:m2",
+    ]);
+  });
+
+  it("keeps proper tile ids and drops tiles naming a non-member design", () => {
+    const stored = {
+      listingImages: { front: ["front:m1", "stranger:m1", "back:m2"] },
+    } as never;
+    expect(listingSelectionIds(stored, pairListing)).toEqual(["front:m1", "back:m2"]);
+  });
+
+  it("leaves an ordinary listing's stored ids untouched", () => {
+    const stored = { listingImages: { solo: ["m1", "m2"] } } as never;
+    expect(
+      listingSelectionIds(stored, {
+        listingId: "solo",
+        memberIds: ["solo"],
+        artworkAssetId: "asset-solo",
+      } as Parameters<typeof listingSelectionIds>[1]),
+    ).toEqual(["m1", "m2"]);
+  });
+
+  it("answers empty for a listing with no stored selection", () => {
+    expect(listingSelectionIds({} as never, pairListing)).toEqual([]);
   });
 });
 
