@@ -804,6 +804,26 @@ Three owner requests from screenshots, each its own commit:
 Gates: lint 0 errors, typecheck 0 errors, 735 unit tests, 67 e2e, build
 clean. NOT pushed and NOT deployed — awaiting owner approval.
 
+## 2026-11-13 — The shipped colour seed: exact palette hexes for every visitor
+
+Owner request: every user should see exact colours for their product type,
+not just users whose shop already holds a template product.
+
+- `colour-seed.ts` ships real name→hex pairs as the learned dictionary's
+  base layer — a brand-new visitor paints exact hexes with no key and no
+  shop. Visitor's own product/override hexes still win; unseeded names fall
+  back honestly (curated guess, labelled approximate).
+- Settings → "Copy learned colours" exports the browser's learned
+  dictionary for the owner to paste into the seed and rebuild; the seed
+  grows every time a real product's hexes are read.
+- The Colors tab's pill/footer now report per-swatch exactness (seed-aware),
+  not the coarse template-product flag.
+- Guard tests: every seed entry parses as a hex; seeded names resolve
+  exact; browser-learned and override win above the seed.
+
+Gates: lint 0 errors, typecheck 0 errors, 741 unit tests, 65 e2e, build
+clean. NOT pushed and NOT deployed — awaiting owner approval.
+
 ## 2026-11-10 — Placement text strip, per-side placements, DESIGN pairs
 
 Owner-approved batch on top of the auto-render work:
