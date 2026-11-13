@@ -736,6 +736,39 @@ localhost before any deploy.
 Gates at each commit: lint 0 errors, typecheck 0 errors, 719 unit tests,
 64 e2e, build clean. NOT pushed and NOT deployed — awaiting owner approval.
 
+## 2026-11-11 — Owner-reported fixes: instant pairing, canvas flicker, quiet strip
+
+Three owner reports after exercising the design-pair build on localhost:
+
+### fix(pairs): ticking "Design pair" on two cards pairs them instantly (f84e6d9)
+- The "Pair front + back" button keyed off the BATCH selection, so a user
+  who ticked the cards' own "Design pair" checkboxes saw a disabled button
+  and a dead click. Now the second tick on an unpaired design pairs the
+  two immediately (older → FRONT, newer → BACK, toast confirms); the
+  button remains as the batch-tick backup, shares one `pairDesigns()`
+  helper, and every click answers with a toast. Both tabs (Designs and
+  Design panel) behave identically. New e2e: `e2e/design-pairs.spec.ts`.
+
+### fix(mockups): the print-area canvas no longer flickers (5fcc631)
+- Every drag move re-rendered the canvas via `setLive`, and Konva's
+  identity-compared props (`dash`, `enabledAnchors`, `boundBoxFunc`)
+  redrew the layers mid-drag. The frame readout is now imperative (refs
+  into empty spans — React-owned children + external textContent crashed
+  reconciliation), the unstable props are memoised, and gestures bracket
+  the tab (`onInteractStart/End`) so the auto-render pass and the
+  debounced auto-save never fire while the pointer is down.
+
+### fix(listings): the image strip stays quiet for small edits (ae3774e)
+- The render signature is order-insensitive, so dragging a tile no longer
+  retriggers a pass, and an automatic pass whose every tile is already
+  covered is a silent no-op — the progress bar appears only for real
+  rendering work.
+
+Gates: lint 0 errors, typecheck 0 errors, 731 unit tests, 66 e2e, build
+clean. Playwright config now runs 4 parallel workers (the serial 1-worker
+config was the suite's slowness). NOT pushed and NOT deployed — awaiting
+owner approval.
+
 ## 2026-11-10 — Placement text strip, per-side placements, DESIGN pairs
 
 Owner-approved batch on top of the auto-render work:
