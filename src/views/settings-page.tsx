@@ -29,6 +29,7 @@ import {
   selectProvider,
   type IntegrationConfig,
 } from "@/lib/client/integrations";
+import { loadStoredLearnedColours } from "@/lib/printify/catalog-client";
 import { providerList, type ModelInfo } from "@/lib/ai/providers";
 import {
   buildZipParts,
@@ -45,6 +46,7 @@ import {
   Check,
   CircleCheck,
   CircleX,
+  Copy,
   Download,
   Eye,
   EyeOff,
@@ -427,6 +429,35 @@ const counts = useLiveQuery(async () => {
       toast.error(message);
     } finally {
       setTesting(null);
+    }
+  };
+
+  /**
+   * Exports the browser's LEARNED colour dictionary (the real Printify hexes
+   * this origin has ever read), so the owner can paste it into
+   * `src/lib/printify/colour-seed.ts` and the next build ships it to every
+   * visitor - the shipped seed is how a brand-new user paints exact colours
+   * with no Printify key and no shop. The browser's own dictionary, WITHOUT
+   * the shipped seed, is what gets exported.
+   */
+  const copyLearnedColours = async () => {
+    const learned = await loadStoredLearnedColours();
+    const entries = Object.entries(learned).sort(([a], [b]) => a.localeCompare(b));
+    if (entries.length === 0) {
+      toast.info(
+        "No learned colours yet — they appear here once a product's real hexes have been read.",
+      );
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(Object.fromEntries(entries), null, 2),
+      );
+      toast.success(
+        `Copied ${entries.length} learned colours — paste them into src/lib/printify/colour-seed.ts and rebuild.`,
+      );
+    } catch {
+      toast.error("The browser blocked the clipboard copy.");
     }
   };
 
@@ -909,6 +940,14 @@ const counts = useLiveQuery(async () => {
                       <RefreshCw className="h-3.5 w-3.5" />
                     )}
                     Test connection
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void copyLearnedColours()}
+                    title="Copy the exact colour hexes this browser has learned from real Printify products, to paste into the app's shipped colour seed"
+                  >
+                    <Copy className="h-3.5 w-3.5" /> Copy learned colours
                   </Button>
                 </div>
                 <ResultLine result={results.printify} testing={testing === "printify"} />

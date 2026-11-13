@@ -824,6 +824,34 @@ Three things were removed on purpose; do not bring them back:
   re-balancing the lists on load. Both decided a colour's design on the user's
   behalf, which is exactly what sent a colour to the wrong artwork.
 
+### Colour hexes and the shipped seed
+
+Printify's catalogue only knows colour NAMES; the true hexes live on a
+product. The palette resolves each name through a locked chain
+(`resolveColour` in `design-colours.ts` / `colors.ts`): the user's override >
+the learned dictionary > the exact template-product hex > the curated table >
+the smart guess — everything after exact is labelled approximate.
+
+**The shipped seed (`src/lib/printify/colour-seed.ts`) is the base layer of
+the learned dictionary** (`loadLearnedColours` merges `COLOUR_SEED` under the
+browser's own dictionary). It is how a brand-new visitor paints REAL hexes
+with no Printify key and no shop: the seed carries name → hex pairs learned
+from real Printify products. The visitor's own product hexes and overrides
+still win; the seed sits above the curated guesses. A guard test
+(`tests/colour-seed.test.ts`) parses every entry, so a bad paste cannot ship.
+
+The seed is owner-maintained: **Settings → "Copy learned colours"** exports
+the browser's stored dictionary (WITHOUT the seed) as JSON — paste the
+entries into `COLOUR_SEED` and rebuild. It grows every time a real product's
+hexes are read anywhere. Never put a Printify key on the server to automate
+this; never fabricate a "real" hex.
+
+The Colors tab's state pill and footer report PER-SWATCH truth
+(`isApprox` over the selected colours): "Exact colours" when every selected
+colour resolves exactly (seed, product, override or learned), otherwise the
+count of approximate colours. The coarse `colourSource` flag alone would
+call a fully-seeded palette approximate.
+
 ### Pairing two uploaded designs as ONE listing
 
 `session.inkPairs` holds the pairs. There is ONE way to pair (owner decision,

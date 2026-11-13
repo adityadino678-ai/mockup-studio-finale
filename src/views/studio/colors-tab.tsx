@@ -226,6 +226,16 @@ export function ColorsTab({
   );
   const plainColors = session.rows.plain?.colors ?? [];
 
+  // --- the palette's honest state --------------------------------------------
+  // The coarse `colourSource` flag says where the panel's hexes CAME FROM,
+  // but the SHIPPED colour seed means a palette can be exact even when no
+  // template product was read. What the user cares about is per colour: is
+  // THIS swatch's hex real. `isApprox` (the resolver's per-swatch verdict)
+  // is the truth, so the pills and banners report counts, not the source.
+  const selectedNames = [...new Set([...plainColors, ...inkColors])];
+  const approxNames = isApprox ? selectedNames.filter((name) => isApprox(name)) : selectedNames;
+  const allSelectedExact = selectedNames.length > 0 && approxNames.length === 0;
+
   // --- which design actually prints each side --------------------------------
   // The arrow in the routing table must name the real design, not "the white
   // one" in the abstract. Names come from the library, the same rows the
@@ -509,14 +519,19 @@ export function ColorsTab({
                 data-colour-status=""
                 className={cn(
                   "inline-flex items-center rounded-full border px-2 py-0.5 text-xs",
-                  catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
+                  allSelectedExact ||
+                    (catalog.colourSource?.source === "product" &&
+                      !catalog.colourSource?.approximate)
                     ? "border-forest/30 bg-surface"
                     : "border-dashed border-ink-muted/40 bg-surface-muted/50",
                 )}
               >
-                {catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
+                {allSelectedExact ||
+                (catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate)
                   ? "Exact colours"
-                  : "Approximate colours"}
+                  : approxNames.length > 0 && selectedNames.length > 0
+                    ? `Approximate — ${approxNames.length} of ${selectedNames.length}`
+                    : "Approximate colours"}
               </span>
             </div>
             <p className="text-xs text-ink-muted">Panels are independent.
@@ -900,7 +915,11 @@ export function ColorsTab({
             <p className="text-xs text-ink-muted">
               {catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
                 ? "Colours use the real hexes from your Printify product."
-                : "Approximate colours — right-click a swatch to set the exact hex."}
+                : allSelectedExact
+                  ? "Colours use exact hexes from the built-in colour seed."
+                  : approxNames.length > 0 && selectedNames.length > 0
+                    ? `${approxNames.length} of ${selectedNames.length} colours are approximate — right-click a swatch to set the exact hex.`
+                    : "Approximate colours — right-click a swatch to set the exact hex."}
             </p>
             <Button size="sm" onClick={onGoToPanel}>
               <Palette className="h-3.5 w-3.5" /> Place the artwork

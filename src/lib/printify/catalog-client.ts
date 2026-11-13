@@ -12,6 +12,7 @@
 
 import { getSetting, setSetting } from "@/lib/db/schema";
 import { authedFetch } from "@/lib/client/integrations";
+import { COLOUR_SEED } from "./colour-seed";
 import type { CatalogBlueprint, CatalogProvider, CatalogVariant } from "./types";
 
 const BLUEPRINTS_KEY = "printifyStudio:blueprints";
@@ -63,8 +64,19 @@ async function readAnyAge<T>(key: string): Promise<T | null> {
   }
 }
 
-/** Learned name->hex dictionary: every real hex ever read persists here. */
+/**
+ * The learned name->hex dictionary, with the SHIPPED seed merged in as its
+ * base layer: the visitor's own learned hexes win, the seed fills the rest,
+ * so every visitor paints real hexes for every colour name the app has ever
+ * learned from a real product - no Printify key and no shop needed.
+ */
 export async function loadLearnedColours(): Promise<Record<string, string>> {
+  const stored = await loadStoredLearnedColours();
+  return { ...COLOUR_SEED, ...stored };
+}
+
+/** The browser's own learned dictionary, WITHOUT the shipped seed. */
+export async function loadStoredLearnedColours(): Promise<Record<string, string>> {
   try {
     const stored = await getSetting<Record<string, string> | null>(LEARNED_KEY, null);
     return stored && typeof stored === "object" ? stored : {};
@@ -76,7 +88,7 @@ export async function loadLearnedColours(): Promise<Record<string, string>> {
 export async function mergeLearnedColours(entries: Record<string, string>): Promise<void> {
   if (Object.keys(entries).length === 0) return;
   try {
-    const current = await loadLearnedColours();
+    const current = await loadStoredLearnedColours();
     const next = { ...current, ...entries };
     await setSetting(LEARNED_KEY, next);
   } catch {
