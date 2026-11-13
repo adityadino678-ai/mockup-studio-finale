@@ -38,7 +38,9 @@ import {
   setDesignPairRole,
   setInkPairRole,
   summariseColourGroups,
+  withDesignPair,
   withInkPair,
+  withoutDesignPair,
   withoutInkPair,
 } from "@/lib/printify/design-colours";
 import {
@@ -263,7 +265,27 @@ export function PlacementTab({ session, update, catalog, hexFor, onGoToColors }:
       });
       return;
     }
-    update({ designPairIds: [...ticks, id] });
+    // Tick ON: the second unpaired tick pairs the two RIGHT NOW - the older
+    // design on the FRONT, the newer on the BACK. Same rule as the Designs
+    // tab, so the two tabs behave identically.
+    const nextTicks = [...ticks, id];
+    const partner = nextTicks.find((x) => x !== id && !designPairForDesign(designPairs, x));
+    if (partner) {
+      const first = designs.find((d) => d.id === partner);
+      const second = designs.find((d) => d.id === id);
+      if (first && second) {
+        const [frontId, backId] =
+          second.createdAt < first.createdAt ? [id, partner] : [partner, id];
+        update({
+          designPairs: withDesignPair(designPairs, frontId, backId),
+          designPairIds: nextTicks,
+          designIds: [...new Set([...session.designIds, partner, id])],
+        });
+        toast.success("Paired front + back — one listing with both designs' images");
+        return;
+      }
+    }
+    update({ designPairIds: nextTicks });
   };
   /** Moves a design-paired design to the other side of its pair. */
   const setSide = (id: string, role: "front" | "back") => {

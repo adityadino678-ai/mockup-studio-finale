@@ -281,7 +281,54 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       });
       return;
     }
-    update({ designPairIds: [...ticks, id] });
+    // Tick ON: when this is the second unpaired tick, the two pair RIGHT NOW -
+    // the older design on the FRONT, the newer on the BACK. No button press
+    // needed; the checkbox itself is the gesture.
+    const nextTicks = [...ticks, id];
+    const partner = nextTicks.find((x) => x !== id && !designPairForDesign(designPairs, x));
+    if (partner) {
+      pairDesigns(partner, id, nextTicks);
+      return;
+    }
+    update({ designPairIds: nextTicks });
+  };
+
+  /**
+   * Pairs two designs as ONE product: the OLDER design prints on the FRONT
+   * print area, the newer on the BACK, both on the plain panel's colours.
+   * Both halves join the batch scope, because a pair IS a listing. Used by the
+   * "Pair front + back" button AND the instant checkbox pairing, so both
+   * gestures behave identically - and a click is never mute.
+   */
+  const pairDesigns = (firstId: string, secondId: string, extraTicks?: string[]) => {
+    if (!firstId || !secondId || firstId === secondId) return;
+    const existing = designPairForDesign(designPairs, firstId);
+    if (
+      existing &&
+      (existing.pair.frontDesignId === secondId || existing.pair.backDesignId === secondId)
+    ) {
+      toast.info("These two designs are already paired.");
+      return;
+    }
+    const first = (designs ?? []).find((d) => d.id === firstId);
+    const second = (designs ?? []).find((d) => d.id === secondId);
+    if (!first || !second) return;
+    // The older design takes the front; the listing order follows it.
+    const [frontId, backId] =
+      second.createdAt < first.createdAt ? [secondId, firstId] : [firstId, secondId];
+    update({
+      designPairs: withDesignPair(designPairs, frontId, backId),
+      designPairIds: [
+        ...new Set([...designPairTicks, ...(extraTicks ?? []), firstId, secondId]),
+      ],
+      designIds: [...new Set([...session.designIds, firstId, secondId])],
+    });
+    toast.success("Paired front + back — one listing with both designs' images");
+  };
+
+  /** The selection-bar button: pairs the two batch-ticked designs. */
+  const pairFrontBack = (firstId: string, secondId: string) => {
+    pairDesigns(firstId, secondId);
   };
 
   /** Moves a design-paired design to the other side of its pair. */
@@ -299,36 +346,6 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       designPairIds: designPairTicks.filter((x) => !members.includes(x)),
     });
     toast.success("Design pair broken — both designs print on their own again");
-  };
-
-  /**
-   * Pairs the two Design-pair-ticked designs as ONE product: the OLDER design
-   * prints on the FRONT print area, the newer on the BACK, both on the plain
-   * panel's colours. Both halves join the batch scope, because a pair IS a
-   * listing.
-   */
-  const pairFrontBack = (firstId: string, secondId: string) => {
-    if (!firstId || !secondId || firstId === secondId) return;
-    const existing = designPairForDesign(designPairs, firstId);
-    if (
-      existing &&
-      (existing.pair.frontDesignId === secondId || existing.pair.backDesignId === secondId)
-    ) {
-      return;
-    }
-    const first = (designs ?? []).find((d) => d.id === firstId);
-    const second = (designs ?? []).find((d) => d.id === secondId);
-    // The older design takes the front; the listing order follows it.
-    const [frontId, backId] =
-      first && second && second.createdAt < first.createdAt
-        ? [secondId, firstId]
-        : [firstId, secondId];
-    update({
-      designPairs: withDesignPair(designPairs, frontId, backId),
-      designPairIds: [...new Set([...designPairTicks, firstId, secondId])],
-      designIds: [...new Set([...session.designIds, firstId, secondId])],
-    });
-    toast.success("Paired front + back — one listing with both designs' images");
   };
 
   /** The partner's name and this design's SIDE, for the card. */
