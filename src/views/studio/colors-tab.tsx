@@ -526,12 +526,14 @@ export function ColorsTab({
                     : "border-dashed border-ink-muted/40 bg-surface-muted/50",
                 )}
               >
-                {allSelectedExact ||
-                (catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate)
-                  ? "Exact colours"
-                  : approxNames.length > 0 && selectedNames.length > 0
-                    ? `Approximate — ${approxNames.length} of ${selectedNames.length}`
-                    : "Approximate colours"}
+                {catalog.colourLoading && !catalog.colourSource
+                  ? "Reading exact colours…"
+                  : allSelectedExact ||
+                    (catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate)
+                    ? "Exact colours"
+                    : approxNames.length > 0 && selectedNames.length > 0
+                      ? `Approximate — ${approxNames.length} of ${selectedNames.length}`
+                      : "Approximate colours"}
               </span>
             </div>
             <p className="text-xs text-ink-muted">Panels are independent.
@@ -913,13 +915,15 @@ export function ColorsTab({
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-4 py-3 shadow-card">
             <p className="text-xs text-ink-muted">
-              {catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
-                ? "Colours use the real hexes from your Printify product."
-                : allSelectedExact
-                  ? "Colours use exact hexes from the built-in colour seed."
-                  : approxNames.length > 0 && selectedNames.length > 0
-                    ? `${approxNames.length} of ${selectedNames.length} colours are approximate — right-click a swatch to set the exact hex.`
-                    : "Approximate colours — right-click a swatch to set the exact hex."}
+              {catalog.colourLoading && !catalog.colourSource
+                ? "Reading this product type's exact colours — the first time can take a few seconds."
+                : catalog.colourSource?.source === "product" && !catalog.colourSource?.approximate
+                  ? "Colours use the real hexes from your Printify product."
+                  : allSelectedExact
+                    ? "Colours use exact hexes from the built-in colour seed."
+                    : approxNames.length > 0 && selectedNames.length > 0
+                      ? `${approxNames.length} of ${selectedNames.length} colours are approximate — right-click a swatch to set the exact hex.`
+                      : "Approximate colours — right-click a swatch to set the exact hex."}
             </p>
             <Button size="sm" onClick={onGoToPanel}>
               <Palette className="h-3.5 w-3.5" /> Place the artwork

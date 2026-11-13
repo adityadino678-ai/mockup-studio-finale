@@ -7,6 +7,13 @@ import {
   type PrintifyBlueprint,
   type PrintifyBlueprintDetail,
 } from "@/lib/server/printify";
+import {
+  buildColourTemplateInput,
+  colourPayloadFromProduct,
+  pickColourTemplateVariant,
+  TEMPLATE_ARTWORK_BASE64,
+  type ColourTemplatePayload,
+} from "@/lib/server/colour-template";
 function sameOriginRequest(request: Request): boolean {
   const site = request.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return false;
@@ -82,6 +89,20 @@ const SHOP_PRODUCT_MAX_PAGES = 10;
 const shopProductMemo = new Map<
   number,
   { at: number; products: import("@/lib/server/printify").PrintifyShopProduct[] }
+>();
+
+/**
+ * Derived colour values from a PROVISIONED throwaway template.
+ *
+ * The VALUES are public catalogue facts (colour name → hex for a blueprint +
+ * provider) — never the seller's private product list — so the isolate may
+ * share them: the second visitor picking the same product type gets exact
+ * hexes with zero extra template creations. Keyed by blueprint:provider.
+ */
+const PROVISIONED_COLOUR_MEMO_TTL_MS = 6 * 60 * 60 * 1000;
+const provisionedColourMemo = new Map<
+  string,
+  { at: number; payload: ColourTemplatePayload }
 >();
 
 /** Cloudflare's `caches.default` is not in the DOM lib's CacheStorage type. */
@@ -256,30 +277,76 @@ export const GET: APIRoute = async ({ url, request }) => {
       const chosen = match ?? approximateMatch;
       const isApproximate = !match && Boolean(approximateMatch);
       if (!chosen) {
-        return json({ configured: true, source: "none", colors: [], sizes: [], variants: [] });
+        // No product for this blueprint + provider anywhere in the shop: the
+        // palette PROVISIONS one. With the visitor's own key it creates a
+        // hidden one-variant draft, reads the product's real colour values,
+        // and deletes the draft in the same request (finally, so a failure
+        // later in the flow still cleans it up). The derived values are
+        // public catalogue facts, so they are memoised per blueprint +
+        // provider - the NEXT visitor picking this product type gets exact
+        // hexes with zero extra creations. Anything that fails here falls
+        // back to the honest "no source" answer; the palette then labels
+        // itself approximate instead of pretending.
+        const memoKey = `${blueprintId}:${Number.isNaN(printProviderId) ? "?" : printProviderId}`;
+        const memo = provisionedColourMemo.get(memoKey);
+        if (memo && Date.now() - memo.at < PROVISIONED_COLOUR_MEMO_TTL_MS) {
+          return json({ ...memo.payload, provisioned: true, templateProductId: undefined });
+        }
+        try {
+          const variants = await client.listVariants(blueprintId, printProviderId);
+          const plan = pickColourTemplateVariant(variants);
+          if (!plan) {
+            return json({
+              configured: true,
+              source: "none",
+              colors: [],
+              sizes: [],
+              variants: [],
+            });
+          }
+          const uploaded = await client.uploadImage(
+            TEMPLATE_ARTWORK_BASE64,
+            "mockup-studio-colour-template.png",
+          );
+          const created = await client.createProduct(
+            buildColourTemplateInput({
+              blueprintId,
+              printProviderId,
+              plan,
+              imageId: uploaded.id,
+            }),
+          );
+          try {
+            const full = await client.getProduct(shopId, created.id);
+            const payload = colourPayloadFromProduct(full, { provisioned: true });
+            provisionedColourMemo.set(memoKey, { at: Date.now(), payload });
+            return json({ configured: true, ...payload, templateProductId: undefined });
+          } finally {
+            // The draft's whole life is this request: whatever happened
+            // above, it is deleted before the request ends. A failed delete
+            // leaves a draft named "Mockup Studio colour template (safe to
+            // delete)" - findable and harmless.
+            await client.deleteProduct(shopId, created.id).catch(() => undefined);
+          }
+        } catch {
+          return json({
+            configured: true,
+            source: "none",
+            colors: [],
+            sizes: [],
+            variants: [],
+          });
+        }
       }
       // The list endpoint may omit variants, so read the product in full.
       // The full detail is fetched only for the match.
       const full = await client.getProduct(shopId, chosen.id).catch(() => chosen);
-      const options = full.options ?? [];
-      const colourOption = options.find((o) => /colou?r/i.test(o.type ?? o.name ?? ""));
-      const sizeOption = options.find((o) => /size/i.test(o.type ?? o.name ?? ""));
       return json({
         configured: true,
-        source: "product",
-        approximate: isApproximate,
-        templateProductId: chosen.id,
-        colors: (colourOption?.values ?? []).map((v) => ({
-          id: v.id,
-          title: v.title,
-          colors: v.colors ?? [],
-        })),
-        sizes: (sizeOption?.values ?? []).map((v) => ({ id: v.id, title: v.title })),
-        variants: (full.variants ?? []).map((v) => ({
-          id: v.id,
-          title: v.title,
-          options: v.options ?? [],
-        })),
+        ...colourPayloadFromProduct(full, {
+          approximate: isApproximate,
+          templateProductId: chosen.id,
+        }),
       });
     }
     if (provider) {

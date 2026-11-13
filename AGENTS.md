@@ -850,7 +850,29 @@ The Colors tab's state pill and footer report PER-SWATCH truth
 (`isApprox` over the selected colours): "Exact colours" when every selected
 colour resolves exactly (seed, product, override or learned), otherwise the
 count of approximate colours. The coarse `colourSource` flag alone would
-call a fully-seeded palette approximate.
+call a fully-seeded palette approximate. While the values are being read
+the tab says "Reading exact colours…".
+
+**The throwaway colour template (no template product? provision one).**
+When a visitor's shop holds NO product for a blueprint + provider, the
+`colors=1` branch of `/api/printify/catalog` PROVISIONS one with the
+VISITOR'S OWN KEY (never a server key): it uploads a small built-in PNG
+(`TEMPLATE_ARTWORK_BASE64` in `src/lib/server/colour-template.ts`),
+creates a hidden ONE-variant draft ("Mockup Studio colour template (safe
+to delete)"), reads the product's real colour/size values, and DELETES the
+draft in the same request — the delete runs in a `finally`, so a failure
+anywhere in the flow still cleans up (a failed delete leaves the
+recognisably named draft). One enabled variant still carries EVERY colour's
+hex in the product's options, and the print-area group names exactly that
+variant, so the partition is complete and Printify cannot silently
+reassign anything. The DERIVED values (colour name → hex — public
+catalogue facts, never the private product list) are memoised in the
+isolate for 6 hours per blueprint:provider, so the next visitor picking
+the same product type gets exact hexes with zero extra template
+creations. Any failure in provisioning falls back to the honest
+`source: "none"` answer and the palette labels itself approximate. Pure
+helpers are pinned in `tests/colour-template.test.ts`; DELETE
+(`client.deleteProduct`) is replay-safe.
 
 ### Pairing two uploaded designs as ONE listing
 

@@ -789,6 +789,22 @@ export function createPrintifyClient(explicitKey?: string) {
         `/shops/${shopId}/products/${encodeURIComponent(productId)}.json`,
       );
     },
+
+    /**
+     * DELETE /shops/{shop_id}/products/{product_id}.json — removes a product.
+     *
+     * Used ONLY by the colour palette's throwaway template: when a visitor
+     * has no product for a blueprint + provider, the app creates a hidden
+     * draft, reads its real colour hexes, and deletes it in the same request
+     * (see the `colors=1` branch of /api/printify/catalog). DELETE is
+     * replay-safe, so the request helper may retry it.
+     */
+    deleteProduct(shopId: number, productId: string): Promise<unknown> {
+      return request<unknown>(
+        `/shops/${shopId}/products/${encodeURIComponent(productId)}.json`,
+        { method: "DELETE" },
+      );
+    },
   };
 }
 
