@@ -59,6 +59,22 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/** The Transformer's grabbable corners - a module const, so its identity is stable. */
+const FRAME_ANCHORS: Array<"top-left" | "top-right" | "bottom-left" | "bottom-right"> = [
+  "top-left",
+  "top-right",
+  "bottom-left",
+  "bottom-right",
+];
+
+/** The frame can never be smaller than a thumb. */
+const boundBoxKeepVisible: NonNullable<
+  React.ComponentProps<typeof Transformer>["boundBoxFunc"]
+> = (_oldBox, newBox) => {
+  if (Math.abs(newBox.width) < 60 || Math.abs(newBox.height) < 60) return _oldBox;
+  return newBox;
+};
+
 /**
  * The crop after a drag.
  *
@@ -116,6 +132,13 @@ interface PrintAreaCanvasProps {
   onCommit?: () => void;
   /** Reports a measured reference line, in photo pixels. */
   onMeasure?: (pixels: number) => void;
+  /**
+   * Gesture brackets for the OWNER of the canvas. The tab uses them to hold
+   * its background auto-save and auto-render while the pointer is down, so
+   * nothing fires mid-drag.
+   */
+  onInteractStart?: () => void;
+  onInteractEnd?: () => void;
 }
 
 function useHtmlImage(url: string | null): HTMLImageElement | null {
@@ -156,6 +179,8 @@ export function PrintAreaCanvas({
   onCropChange,
   onCommit,
   onMeasure,
+  onInteractStart,
+  onInteractEnd,
 }: PrintAreaCanvasProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const stageRef = React.useRef<Konva.Stage | null>(null);
@@ -175,21 +200,41 @@ export function PrintAreaCanvas({
   const [containerSize, setContainerSize] = React.useState({ w: 0, h: 0 });
   /** The frame's chrome: the dashed outline and the handles. */
   const [chromeVisible, setChromeVisible] = React.useState(true);
-  /** The live readout, so a drag does not re-render the whole panel. */
-  const [live, setLive] = React.useState<{
-    x: number;
-    y: number;
-    scale: number;
-    rotation: number;
-  } | null>(null);
+  /**
+   * The live frame readout, held OUT of React state.
+   *
+   * A drag used to `setLive` on every pointer move, which re-rendered the
+   * whole canvas - and every re-render handed Konva fresh array/function
+   * identities (`dash`, `enabledAnchors`, `boundBoxFunc`), so the layers
+   * redrew mid-drag and the stage visibly flickered. The readout's frame
+   * span is now updated imperatively instead; only its committed values
+   * come from props.
+   */
+  const liveRef = React.useRef<{ scale: number; rotation: number } | null>(null);
+  const frameReadoutRef = React.useRef<HTMLSpanElement | null>(null);
+  const frameRotationRef = React.useRef<HTMLSpanElement | null>(null);
 
   const mockupImg = useHtmlImage(mockupUrl);
   const designImg = useHtmlImage(designUrl);
 
   // The latest callbacks, so the Konva handlers stay stable.
-  const handlers = React.useRef({ onAreaChange, onCropChange, onCommit, onMeasure });
+  const handlers = React.useRef({
+    onAreaChange,
+    onCropChange,
+    onCommit,
+    onMeasure,
+    onInteractStart,
+    onInteractEnd,
+  });
   React.useEffect(() => {
-    handlers.current = { onAreaChange, onCropChange, onCommit, onMeasure };
+    handlers.current = {
+      onAreaChange,
+      onCropChange,
+      onCommit,
+      onMeasure,
+      onInteractStart,
+      onInteractEnd,
+    };
   });
 
   React.useEffect(() => {
@@ -224,14 +269,20 @@ export function PrintAreaCanvas({
   const rotateOffset = 30 / displayScale;
   /** The rotate handle's radius, in screen pixels. */
   const rotateRadius = 8 / displayScale;
-  /**
-   * The rotate handle's GRABBABLE size, in screen pixels.
+  /** The rotate handle's GRABBABLE size, in screen pixels.
    *
    * The knob is 16 px across, which is a small target on a trackpad. Konva
    * widens a shape's hit region by `hitStrokeWidth` without changing what is
    * painted, so the knob looks the same and is three times as easy to catch.
    */
   const rotateHitWidth = 30 / displayScale;
+
+  // Konva compares props by identity: a fresh array or function per render
+  // re-applies the attribute and redraws the layer, which is what made the
+  // canvas flicker while anything on the page updated. These are memoised.
+  const frameDash = React.useMemo(() => [6 / displayScale, 4 / displayScale], [displayScale]);
+  const cropDash = React.useMemo(() => [3 / displayScale, 3 / displayScale], [displayScale]);
+  const measurePoints = React.useMemo(() => [0, 0, 0, 0], []);
 
   // The frame, in mockup pixels.
   const framePx = React.useMemo(
@@ -347,21 +398,32 @@ export function PrintAreaCanvas({
     group.getLayer()?.batchDraw();
   }, [framePx, syncRotateHandle]);
 
+  /** Writes the frame readout's bold span imperatively - no React state. */
+  const syncFrameReadout = React.useCallback(
+    (values: { scale: number; rotation: number } | null) => {
+      liveRef.current = values;
+      const el = frameReadoutRef.current;
+      const rotationEl = frameRotationRef.current;
+      if (!values) {
+        if (el) el.textContent = "—";
+        if (rotationEl) rotationEl.textContent = "";
+        return;
+      }
+      const rotation = Math.round(values.rotation);
+      if (el) el.textContent = `${Math.round(values.scale * 100)}%`;
+      if (rotationEl) rotationEl.textContent = rotation ? ` · ${rotation}°` : "";
+    },
+    [],
+  );
+
   // The area changed from outside (a template, a new size): adopt it.
+  // `mockupImg` is a dep because the readout's span exists only once the
+  // photo has loaded - the first run happens before it and writes nothing.
   React.useEffect(() => {
     if (busyRef.current) return;
     syncFrame();
-    setLive(
-      area
-        ? {
-            x: area.frame.x,
-            y: area.frame.y,
-            scale: area.frame.scale,
-            rotation: area.frame.rotation,
-          }
-        : null,
-    );
-  }, [area, syncFrame]);
+    syncFrameReadout(area ? { scale: area.frame.scale, rotation: area.frame.rotation } : null);
+  }, [area, syncFrame, syncFrameReadout, mockupImg]);
 
   /**
    * Keeps the Transformer attached to the frame.
@@ -410,19 +472,32 @@ export function PrintAreaCanvas({
 
   const reportLive = React.useCallback(() => {
     const next = frameFromGroup();
-    if (next) setLive(next);
-  }, [frameFromGroup]);
+    if (next) syncFrameReadout({ scale: next.scale, rotation: next.rotation });
+  }, [frameFromGroup, syncFrameReadout]);
+
+  /** Opens a gesture: the tab holds its auto-save and auto-render until it ends. */
+  const interactStart = React.useCallback(() => {
+    busyRef.current = true;
+    handlers.current.onInteractStart?.();
+  }, []);
+
+  /** Closes a gesture and lets the tab's deferred work run. */
+  const interactEnd = React.useCallback(() => {
+    busyRef.current = false;
+    handlers.current.onInteractEnd?.();
+  }, []);
 
   // --- the frame's gestures --------------------------------------------------
 
   const onFrameDragEnd = () => {
     const next = frameFromGroup();
-    busyRef.current = false;
+    interactEnd();
     if (next && area) {
       handlers.current.onAreaChange({
         ...area,
         frame: { ...area.frame, x: next.x, y: next.y },
       });
+      syncFrameReadout({ scale: next.scale, rotation: next.rotation });
     }
     handlers.current.onCommit?.();
   };
@@ -457,17 +532,18 @@ export function PrintAreaCanvas({
   const onRotateDragEnd = () => {
     const group = groupRef.current;
     if (!group || !area) return;
-    busyRef.current = false;
+    interactEnd();
     handlers.current.onAreaChange({
       ...area,
       frame: { ...area.frame, rotation: group.rotation() },
     });
+    syncFrameReadout({ scale: area.frame.scale, rotation: group.rotation() });
     handlers.current.onCommit?.();
   };
 
   const onFrameTransformEnd = () => {
     const next = frameFromGroup();
-    busyRef.current = false;
+    interactEnd();
     if (next && area) {
       // The Transformer scaled and rotated the GROUP, so the artwork inside
       // came along. The size is baked into the frame and the group is reset,
@@ -476,6 +552,7 @@ export function PrintAreaCanvas({
         ...area,
         frame: { ...area.frame, scale: next.scale, rotation: next.rotation },
       });
+      syncFrameReadout({ scale: next.scale, rotation: next.rotation });
     }
     handlers.current.onCommit?.();
   };
@@ -493,7 +570,7 @@ export function PrintAreaCanvas({
     const pointer = pointerInMockup();
     if (!pointer || !area) return;
     cropDragRef.current = { crop: areaCrop(area), pointer, handle };
-    busyRef.current = true;
+    interactStart();
   };
 
   const cropGestureMove = () => {
@@ -509,7 +586,7 @@ export function PrintAreaCanvas({
 
   const cropGestureEnd = () => {
     cropDragRef.current = null;
-    busyRef.current = false;
+    interactEnd();
     handlers.current.onCommit?.();
   };
 
@@ -535,7 +612,7 @@ export function PrintAreaCanvas({
     if (!line) return;
     line.points([pointer.x, pointer.y, pointer.x, pointer.y]);
     line.visible(true);
-    busyRef.current = true;
+    interactStart();
     event.cancelBubble = true;
   };
 
@@ -555,7 +632,7 @@ export function PrintAreaCanvas({
     const points = line.points();
     line.visible(false);
     const pixels = Math.hypot(points[2] - points[0], points[3] - points[1]);
-    busyRef.current = false;
+    interactEnd();
     if (pixels > 4) handlers.current.onMeasure?.(Math.round(pixels));
   };
 
@@ -645,7 +722,7 @@ export function PrintAreaCanvas({
                   rotation={framePx.rotation}
                   draggable={!measuring && !cropMode}
                   onDragStart={() => {
-                    busyRef.current = true;
+                    interactStart();
                   }}
                   onDragMove={() => {
                     reportLive();
@@ -655,7 +732,7 @@ export function PrintAreaCanvas({
                   }}
                   onDragEnd={onFrameDragEnd}
                   onTransformStart={() => {
-                    busyRef.current = true;
+                    interactStart();
                   }}
                   onTransform={onFrameTransform}
                   onTransformEnd={onFrameTransformEnd}
@@ -681,7 +758,7 @@ export function PrintAreaCanvas({
                     height={framePx.height}
                     stroke="#314d3d"
                     strokeWidth={1.5 / displayScale}
-                    dash={[6 / displayScale, 4 / displayScale]}
+                    dash={frameDash}
                     cornerRadius={2 / displayScale}
                     visible={chromeVisible}
                     listening={false}
@@ -692,7 +769,7 @@ export function PrintAreaCanvas({
 
               <Line
                 ref={measureRef}
-                points={[0, 0, 0, 0]}
+                points={measurePoints}
                 stroke="#e0483c"
                 strokeWidth={2 / displayScale}
                 visible={false}
@@ -708,7 +785,7 @@ export function PrintAreaCanvas({
                 rotateEnabled={false}
                 keepRatio
                 flipEnabled={false}
-                enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right"]}
+                enabledAnchors={FRAME_ANCHORS}
                 borderStroke="#314d3d"
                 borderStrokeWidth={1 / displayScale}
                 anchorStroke="#314d3d"
@@ -718,11 +795,7 @@ export function PrintAreaCanvas({
                 rotateAnchorOffset={24 / displayScale}
                 ignoreStroke
                 shouldOverdrawWholeArea
-                boundBoxFunc={(oldBox, newBox) => {
-                  // The frame can never be smaller than a thumb.
-                  if (Math.abs(newBox.width) < 60 || Math.abs(newBox.height) < 60) return oldBox;
-                  return newBox;
-                }}
+                boundBoxFunc={boundBoxKeepVisible}
               />
             </Layer>
 
@@ -744,7 +817,7 @@ export function PrintAreaCanvas({
                   fill={cropMode ? "rgba(49,77,61,0.05)" : "transparent"}
                   stroke="#314d3d"
                   strokeWidth={(cropMode ? 1.5 : 1) / displayScale}
-                  dash={cropMode ? undefined : [3 / displayScale, 3 / displayScale]}
+                  dash={cropMode ? undefined : cropDash}
                   visible={cropMode || (chromeVisible && !isFullCrop(crop))}
                   listening={cropMode}
                   draggable={cropMode}
@@ -796,7 +869,7 @@ export function PrintAreaCanvas({
                 visible={chromeVisible && !cropMode}
                 draggable={!measuring}
                 onDragStart={() => {
-                  busyRef.current = true;
+                  interactStart();
                 }}
                 onDragMove={onRotateDrag}
                 onDragEnd={onRotateDragEnd}
@@ -806,14 +879,18 @@ export function PrintAreaCanvas({
         </div>
       </div>
 
-      {/* The live readout. It lives here, so a drag only re-renders the
-          canvas and not the whole panel. */}
+      {/* The readout. The frame's bold span is updated imperatively during a
+          drag (no React state), so a gesture re-renders nothing. */}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-muted">
-        {live && placement ? (
+        {placement ? (
           <>
             <span>
-              Frame <b className="text-ink">{Math.round(live.scale * 100)}%</b> of the photo
-              {live.rotation ? ` · ${Math.round(live.rotation)}°` : ""}
+              Frame{" "}
+              {/* Both spans are EMPTY in JSX and written imperatively: React
+                  owns elements with no tracked children, so the drag's live
+                  text can never fight reconciliation. */}
+              <b className="text-ink" ref={frameReadoutRef} /> of the photo
+              <span ref={frameRotationRef} />
             </span>
             <span>
               Design <b className="text-ink">{Math.round(placement.scale * 100)}%</b> of the print

@@ -425,14 +425,55 @@ export function PrintAreasTab({
    * backfills every mockup that has no render at the CURRENT fingerprint.
    * Anything already rendered is skipped, so a repeat trigger costs a
    * fingerprint computation, not a re-render.
+   *
+   * The pass is also held while the user is working on the canvas: a gesture
+   * (drag / resize / rotate / crop / measure) sets `interactingRef`, and the
+   * pass fires only after the pointer comes up. Without this, a background
+   * pass would save renders and session writes MID-DRAG - re-rendering the
+   * stage under the pointer and rendering at positions the user is about to
+   * change.
    */
-  React.useEffect(() => {
-    const handle = setTimeout(() => {
+  const interactingRef = React.useRef(false);
+  const autoRenderTimerRef = React.useRef<number | null>(null);
+  const autoRenderPendingRef = React.useRef(false);
+  const [interactTick, setInteractTick] = React.useState(0);
+
+  const onInteractStart = React.useCallback(() => {
+    interactingRef.current = true;
+  }, []);
+
+  const onInteractEnd = React.useCallback(() => {
+    interactingRef.current = false;
+    // A nudge in state re-arms both the auto-save and the auto-render
+    // timers the gesture suppressed, from the FINAL committed values.
+    setInteractTick((tick) => tick + 1);
+  }, []);
+
+  const armAutoRender = React.useCallback(() => {
+    if (autoRenderTimerRef.current !== null) {
+      window.clearTimeout(autoRenderTimerRef.current);
+    }
+    autoRenderTimerRef.current = window.setTimeout(() => {
+      autoRenderTimerRef.current = null;
+      if (interactingRef.current) {
+        autoRenderPendingRef.current = true;
+        return;
+      }
       void autoRenderAllRef.current(designId);
     }, 600);
-    return () => clearTimeout(handle);
+  }, [designId]);
+
+  React.useEffect(() => {
+    armAutoRender();
+    return () => {
+      if (autoRenderTimerRef.current !== null) {
+        window.clearTimeout(autoRenderTimerRef.current);
+        autoRenderTimerRef.current = null;
+      }
+    };
   }, [
-    designId,
+    armAutoRender,
+    interactTick,
     tabDesigns.length,
     designMeta.assetId,
     placement?.scale,
@@ -582,9 +623,14 @@ export function PrintAreasTab({
 
   // Auto-save the draft. It is debounced (a drag writes once) and uses the
   // chosen scope: every mockup of this type by default, so one save per
-  // design is enough before moving to the next tab.
+  // design is enough before moving to the next tab. The save is also held
+  // while the user is gesturing on the canvas - a mid-drag write would land
+  // on every same-type mockup at a frame the pointer is still moving, and
+  // its render pass would re-render the stage under the pointer. When the
+  // pointer comes up, `interactTick` re-arms this effect.
   React.useEffect(() => {
     if (!dirty || !mockup || !area) return;
+    if (interactingRef.current) return;
     // Only a draft the user actually made on THIS tab may be saved. On the
     // commit where the tab changed, `area` is still the previous tab's draft,
     // so arming a timeout here would write it to the wrong design.
@@ -610,7 +656,7 @@ export function PrintAreasTab({
       clearTimeout(handle);
       if (autoSaveTimer.current === handle) autoSaveTimer.current = null;
     };
-  }, [dirty, area, mockup, areaScope, persistArea, designId]);
+  }, [dirty, area, mockup, areaScope, persistArea, designId, interactTick]);
 
   // A full navigation can unmount the panel before the debounce fires. Kick
   // the pending write so leaving the page does not discard the last drag.
@@ -1112,6 +1158,8 @@ export function PrintAreasTab({
                   setMeasuring(false);
                   _setReferenceOpen(true);
                 }}
+                onInteractStart={onInteractStart}
+                onInteractEnd={onInteractEnd}
               />
             ) : (
               <Card className="p-8 text-center text-sm text-ink-muted">
@@ -1228,6 +1276,8 @@ function MockupStage({
   onAreaChange,
   onCropChange,
   onMeasure,
+  onInteractStart,
+  onInteractEnd,
 }: {
   mockup: Mockup;
   area: MockupPrintArea | null;
@@ -1238,6 +1288,8 @@ function MockupStage({
   onAreaChange: (area: MockupPrintArea) => void;
   onCropChange: (crop: AreaCrop | undefined) => void;
   onMeasure: (pixels: number) => void;
+  onInteractStart: () => void;
+  onInteractEnd: () => void;
 }) {
   const [mockupUrl, setMockupUrl] = React.useState<string | null>(null);
   const [designUrl, setDesignUrl] = React.useState<string | null>(null);
@@ -1326,6 +1378,8 @@ function MockupStage({
           onAreaChange={onAreaChange}
           onCropChange={onCropChange}
           onMeasure={onMeasure}
+          onInteractStart={onInteractStart}
+          onInteractEnd={onInteractEnd}
         />
       </React.Suspense>
     </PrintAreaCanvasBoundary>
