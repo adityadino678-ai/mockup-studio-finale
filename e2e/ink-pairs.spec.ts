@@ -179,12 +179,14 @@ test("two designs can be paired as one listing, with a black-ink and a white-ink
   await expect(page.getByText("No ink variants (2)")).toBeVisible();
   await expect(page.locator("[data-ink-pair-role]")).toHaveCount(0);
 
-  // The batch checkboxes still pair a specific two - both halves are already
-  // in the scope, so the bar's button is the path that stays open.
+  // The batch checkboxes still pair a specific two: re-ticking both ink
+  // checkboxes offers the ink row's own pairing button, which is the
+  // selection bar's old "Pair for one listing" - removed on the owner's
+  // instruction, because the checkboxes carry the pairing gestures.
   await page.getByRole("checkbox", { name: "Ink variants for design-a" }).click();
   await page.getByRole("checkbox", { name: "Ink variants for design-b" }).click();
   await expect(page.getByText("Has ink variants (2)")).toBeVisible();
-  await page.getByRole("button", { name: /Pair for one listing/ }).click();
+  await page.getByRole("button", { name: /Pair these two as one listing/ }).click();
   await expect(page.locator("[data-ink-pair-role]")).toHaveCount(2);
 });
 

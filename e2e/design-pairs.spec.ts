@@ -8,7 +8,8 @@ import path from "node:path";
  *
  * The defining gesture is INSTANT: ticking the "Design pair" checkbox on a
  * second design pairs the two right then - no button press needed. The
- * selection bar's "Pair front + back" stays as the backup for batch ticks.
+ * selection bar's pair buttons were removed on the owner's instruction: the
+ * checkboxes carry the pairing gestures entirely.
  */
 
 const fixture = (name: string) => path.join(process.cwd(), "e2e", "fixtures", name);
@@ -66,28 +67,4 @@ test("ticking Design pair on two cards pairs them instantly, front + back", asyn
   await expect(page.locator("[data-design-pair-role]")).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: "Design pair for design-a" })).not.toBeChecked();
   await expect(page.getByRole("checkbox", { name: "Design pair for design-b" })).not.toBeChecked();
-});
-
-test("the Pair front + back button pairs two batch-ticked designs", async ({ page }) => {
-  await page.goto("/printify-studio");
-  await expect(page.getByRole("link", { name: "Printify Studio" })).toBeVisible({
-    timeout: 30_000,
-  });
-
-  await page.setInputFiles("input[type=file]", [fixture("design-a.png"), fixture("design-b.png")]);
-  await expect(page.getByText("No ink variants (2)")).toBeVisible({ timeout: 30_000 });
-
-  // The backup path: tick both designs for the batch and press the button.
-  await page.getByRole("checkbox", { name: "Select design-a" }).click();
-  await page.getByRole("checkbox", { name: "Select design-b" }).click();
-  await page.getByRole("button", { name: /Pair front \+ back/ }).click();
-
-  await expect(page.locator("[data-design-pair-role]")).toHaveCount(2);
-  await expect(page.getByRole("checkbox", { name: "design-a prints on the front" })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "design-b prints on the back" })).toBeChecked();
-
-  // A pair IS a listing: both halves are in the batch scope, so a reload
-  // keeps both cards' ticks and the button answers if pressed again.
-  await page.getByRole("button", { name: /Pair front \+ back/ }).click();
-  await expect(page.locator("[data-design-pair-role]")).toHaveCount(2);
 });

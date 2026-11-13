@@ -46,7 +46,7 @@ import { Input } from "@/components/ui/input";
 import { hexForColourName } from "@/lib/printify/colors";
 import { remapListingState, ROWS } from "@/lib/printify/studio-session";
 import type { Design, StudioRowId, StudioSession } from "@/types/domain";
-import { Loader2, Link2, Search, Trash2, Wand2 } from "lucide-react";
+import { Loader2, Search, Trash2, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DesignRow {
@@ -202,12 +202,6 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
     toast.success("Paired as one listing");
   };
 
-  /** The two ticked designs, from the batch checkboxes. */
-  const pairSelected = () => {
-    if (selected.length !== 2) return;
-    pairTwo(selected[0], selected[1]);
-  };
-
   /** Moves a paired design to the other half of its pair. */
   const setRole = (id: string, role: "black" | "white") => {
     const before = pairForDesign(inkPairs, id);
@@ -296,9 +290,9 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
   /**
    * Pairs two designs as ONE product: the OLDER design prints on the FRONT
    * print area, the newer on the BACK, both on the plain panel's colours.
-   * Both halves join the batch scope, because a pair IS a listing. Used by the
-   * "Pair front + back" button AND the instant checkbox pairing, so both
-   * gestures behave identically - and a click is never mute.
+   * Both halves join the batch scope, because a pair IS a listing. Used by
+   * the instant checkbox pairing - the checkbox itself is the gesture, and
+   * a click is never mute.
    */
   const pairDesigns = (firstId: string, secondId: string, extraTicks?: string[]) => {
     if (!firstId || !secondId || firstId === secondId) return;
@@ -324,11 +318,6 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
       designIds: [...new Set([...session.designIds, firstId, secondId])],
     });
     toast.success("Paired front + back — one listing with both designs' images");
-  };
-
-  /** The selection-bar button: pairs the two batch-ticked designs. */
-  const pairFrontBack = (firstId: string, secondId: string) => {
-    pairDesigns(firstId, secondId);
   };
 
   /** Moves a design-paired design to the other side of its pair. */
@@ -746,32 +735,6 @@ export function DesignsTab({ session, update, swatchesForRow }: DesignsTabProps)
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => removeBackgrounds()} disabled={!!busy}>
               <Wand2 className="h-3.5 w-3.5" /> Remove background
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={pairSelected}
-              disabled={selected.length !== 2}
-              title={
-                selected.length === 2
-                  ? "Print these two designs on one listing: the first is the black-ink half"
-                  : "Tick exactly two designs to pair them"
-              }
-            >
-              <Link2 className="h-3.5 w-3.5" /> Pair for one listing
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => pairFrontBack(selected[0], selected[1])}
-              disabled={selected.length !== 2}
-              title={
-                selected.length === 2
-                  ? "One product with both designs: the older design prints on the FRONT print area, the newer on the BACK, both on the 'No ink variants' colours"
-                  : "Tick exactly two designs to pair them front + back"
-              }
-            >
-              <Link2 className="h-3.5 w-3.5" /> Pair front + back
             </Button>
             <Button size="sm" variant="outline" onClick={toggleAll}>
               {selected.length === (designs ?? []).length ? "Clear" : "Select all"}

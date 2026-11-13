@@ -826,16 +826,20 @@ Three things were removed on purpose; do not bring them back:
 
 ### Pairing two uploaded designs as ONE listing
 
-`session.inkPairs` holds the pairs. There are TWO ways to pair, and they share
-one function:
+`session.inkPairs` holds the pairs. There is ONE way to pair (owner decision,
+2026-11-11 — the selection bar's pair buttons were deleted; the checkboxes
+carry the pairing gestures):
 
 - the **ink row** offers **"Pair these two as one listing"** as soon as exactly
   two ink-ticked designs are unpaired - the user's own gesture (tick "Ink
-  variants" on both) and the one that is visible without touching the batch
-  checkboxes; or
-- tick exactly two designs and press **"Pair for one listing"** in the
-  selection bar. That bar is hidden until something is selected, which is why
-  the row button exists.
+  variants" on both), and the one visible without touching the batch
+  checkboxes.
+
+**"Ink variants" and "Design pair" are mutually exclusive on a card.** A
+design ticked or paired for ink shows no "Design pair" checkbox, and a design
+ticked or paired for a design pair shows no "Ink variants" checkbox - the rule
+lives in `design-card.tsx`, which both tabs draw, so one design can never sit
+in both mechanisms at once.
 
 The first design becomes the **black-ink** half and owns the listing (title,
 price, placement), the other the **white-ink** half. Pairing also adds both

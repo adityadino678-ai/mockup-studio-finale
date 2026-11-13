@@ -256,7 +256,7 @@ export function DesignGallery({
             </span>
           ) : (
             <span className="text-xs text-ink-muted">
-              Pick two with the card checkboxes, then press &ldquo;Pair for one listing&rdquo;.
+              Tick exactly two designs&apos; &ldquo;Ink variants&rdquo; boxes to pair them.
             </span>
           )}
         </div>

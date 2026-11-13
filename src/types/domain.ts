@@ -618,8 +618,8 @@ export interface StudioSession {
   /**
    * The designs the user ticked "Design pair" on.
    *
-   * The tick is the user's own gesture, exactly like `inkPairIds`: ticking
-   * exactly two designs offers "Pair front + back", which writes the pair
+   * The tick is the user's own gesture, exactly like `inkPairIds`: the second
+   * unpaired tick pairs the two designs right away, which writes the pair
    * below. Nothing here is inferred.
    */
   designPairIds: string[];
