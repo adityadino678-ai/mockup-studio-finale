@@ -1191,6 +1191,14 @@ export function ListingImagesView() {
       return;
     }
 
+    // A quiet pre-check: an automatic pass whose every tile is already covered
+    // (fresh session render or adoptable pixels) would do nothing but spin the
+    // progress bar, so it never starts. Reorderings, include/exclude clicks and
+    // other small edits keep the strip silent; only real work lights the bar.
+    if (auto && targets.every((target) => Boolean(currentEntry(target.image)?.assetId))) {
+      return;
+    }
+
     // Make the default selection explicit before the long part starts, so the
     // drafts written at the end describe exactly the tiles on screen.
     persistEffectiveSelection();
@@ -1342,6 +1350,10 @@ export function ListingImagesView() {
    * it shows and whether they are current. The background pass is triggered
    * by this signature changing — a new batch, an included tile with no render,
    * a render going stale — and is silent, so a covered strip stays quiet.
+   *
+   * The tokens are SORTED before joining: the signature says what is on the
+   * strip, not in which order, so dragging a tile to reorder a row (or a row's
+   * own-order edit) never retriggers a pass. Only pixels and coverage matter.
    */
   const renderSignature = React.useMemo(() => {
     return listings
@@ -1353,6 +1365,7 @@ export function ListingImagesView() {
             }`,
         ),
       )
+      .sort()
       .join("|");
     // currentEntry is a stable lookup; selectionFor already carries its inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
