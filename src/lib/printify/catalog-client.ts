@@ -289,7 +289,11 @@ export async function fetchColourSource(
 ): Promise<ColourSource> {
   if (!force) {
     const cached = await readFresh<ColourSource>(coloursKey(blueprintId, providerId), COLOURS_TTL);
-    if (cached) return cached;
+    // Only a POSITIVE source may be served fresh: a cached "no colours"
+    // answer (e.g. from before the key was pasted, or before the throwaway
+    // template existed) would be trusted for seven days and the exact
+    // lookup would never run again - the owner's blank palette.
+    if (cached && cached.source === "product" && cached.colors.length > 0) return cached;
   }
   return deduped(`colours:${blueprintId}:${providerId}`, async () => {
     const res = await authedFetch(
@@ -305,8 +309,11 @@ export async function fetchColourSource(
       sizes: Array.isArray(data.sizes) ? data.sizes : [],
       variants: Array.isArray(data.variants) ? data.variants : [],
     };
-    await writeCache(coloursKey(blueprintId, providerId), source);
+    // Same rule on the write side: a "no colours" answer is NOT a fact worth
+    // caching - the next visit must retry the lookup (a template product may
+    // have appeared, or the key was just pasted). Only real hexes cache.
     if (source.source === "product" && source.colors.length > 0) {
+      await writeCache(coloursKey(blueprintId, providerId), source);
       // Background harvest: one product teaches many blueprints.
       void harvestLearnedFromSource(source).catch(() => undefined);
     }

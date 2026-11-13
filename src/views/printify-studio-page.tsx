@@ -301,6 +301,17 @@ export function PrintifyStudioPage() {
         const source = await fetchColourSource(blueprintId, printProviderId);
         if (!cancelled) {
           setCatalog((c) => ({ ...c, colourSource: source, colourLoading: false, colourError: undefined }));
+          // A "no colours" answer is a FAILED lookup (the throwaway template
+          // could not be provisioned, or the key cannot create products) -
+          // never silence it: the palette would sit approximate with no
+          // explanation and no retry.
+          if (source.colors.length === 0) {
+            setCatalog((c) => ({
+              ...c,
+              colourError:
+                "Could not read this product type's exact colours — the palette is approximate. Retry, or right-click a swatch to set the exact hex.",
+            }));
+          }
           if (source.colors.length > 0) {
             const nextLearned = await loadLearnedColours();
             setLearned(nextLearned);
