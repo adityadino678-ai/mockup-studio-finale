@@ -57,7 +57,13 @@ export interface DesignCardProps {
    * guesses a pairing on the user's behalf.
    */
   inkPair?: boolean;
-  /** Ticks / unticks "has ink variants". Omit to hide the checkbox. */
+  /**
+   * Ticks / unticks "has ink variants". Omit to hide the checkbox.
+   *
+   * MUTUALLY EXCLUSIVE with "Design pair": a design ticked or paired for a
+   * design pair shows no ink checkbox, so one design can never sit in both
+   * mechanisms at once (owner decision).
+   */
   onToggleInkPair?: () => void;
   /**
    * The pair this design belongs to, when the user paired two designs.
@@ -74,7 +80,13 @@ export interface DesignCardProps {
   onUnpair?: () => void;
   /** True when the user ticked this design for a "Design pair" (front + back). */
   designPair?: boolean;
-  /** Ticks / unticks "Design pair". Omit to hide the checkbox. */
+  /**
+   * Ticks / unticks "Design pair". Omit to hide the checkbox.
+   *
+   * MUTUALLY EXCLUSIVE with "Ink variants": a design ticked or paired for ink
+   * shows no design-pair checkbox, so one design can never sit in both
+   * mechanisms at once (owner decision).
+   */
   onToggleDesignPair?: () => void;
   /**
    * The DESIGN pair this design belongs to: the older design prints on the
@@ -290,7 +302,10 @@ export function DesignCard({
         {shown && shown.length > 0 && (
           <ColorSwatchRow swatches={shown} className="pt-0.5" />
         )}
-        {onToggleInkPair && (
+        {onToggleInkPair && !designPair && !designPairInfo && (
+          // MUTUALLY EXCLUSIVE with "Design pair" (owner decision): a design
+          // ticked or paired for a design pair has no ink checkbox, so one
+          // design can never sit in both mechanisms at once.
           <div className="flex items-center gap-1.5 pt-0.5">
             <Checkbox
               id={`ink-pair-${design.id}`}
@@ -368,7 +383,10 @@ export function DesignCard({
           </div>
         )}
 
-        {onToggleDesignPair && (
+        {onToggleDesignPair && !inkPair && !pairInfo && (
+          // MUTUALLY EXCLUSIVE with "Ink variants" (owner decision): an
+          // ink-ticked or ink-paired design has no design-pair checkbox, so
+          // one design can never sit in both mechanisms at once.
           <div className="flex items-center gap-1.5 pt-0.5">
             <Checkbox
               id={`design-pair-${design.id}`}
