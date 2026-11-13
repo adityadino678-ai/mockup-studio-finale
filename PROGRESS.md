@@ -824,6 +824,26 @@ not just users whose shop already holds a template product.
 Gates: lint 0 errors, typecheck 0 errors, 741 unit tests, 65 e2e, build
 clean. NOT pushed and NOT deployed — awaiting owner approval.
 
+## 2026-11-13 — Exact colours for every keyed user: the throwaway template
+
+Owner requirement: a new user with their own key gets an exact palette for
+ANY product type + provider; without a key, product selection stays blocked
+(already enforced).
+
+- `colour-template.ts` + the `colors=1` branch: no template product in the
+  visitor's shop → PROVISION one with the visitor's key (upload built-in
+  PNG → create a hidden one-variant draft → read real colour values →
+  DELETE in the same request, finally-guarded). Derived name→hex facts
+  memoised in the isolate 6 h per blueprint:provider — the next visitor
+  gets exact hexes with zero extra creations. Any failure falls back to the
+  honest approximate answer.
+- Colors tab says "Reading exact colours…" during the first read.
+- Unit-tested pure helpers incl. the valid-PNG guard and the
+  complete-partition invariant.
+
+Gates: lint 0 errors, typecheck 0 errors, 747 unit tests, 65 e2e, build
+clean. NOT pushed and NOT deployed — awaiting owner approval.
+
 ## 2026-11-10 — Placement text strip, per-side placements, DESIGN pairs
 
 Owner-approved batch on top of the auto-render work:
