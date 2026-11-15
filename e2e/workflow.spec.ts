@@ -2161,16 +2161,32 @@ test.describe("core workflow", () => {
     await expect(page.getByText(/Updated in Printify — still unpublished/)).toBeVisible({
       timeout: 30_000,
     });
-    // The linked product was UPDATED before its images were uploaded, with
-    // the listing's current copy and price - no second product was created.
-    expect(updateBodies).toHaveLength(1);
-    expect(updateBodies[0]).toMatchObject({
-      productId: "prod-1",
+    // BOTH linked products were UPDATED before their images were uploaded,
+    // each with its listing's current copy and price - no second product was
+    // created. Updating the whole batch is deliberate: the upload route checks
+    // the product's CURRENT title, so a listing whose copy changed since its
+    // product was created would otherwise 409-skip here and never reach
+    // Printify (the bug that made batch Sends look like "the extension did
+    // nothing").
+    expect(updateBodies).toHaveLength(2);
+    const updateFor = (productId: string) =>
+      updateBodies.find((body) => body.productId === productId);
+    expect(updateFor("prod-1")).toMatchObject({
       description: "A soft, everyday tee.",
       price: 1999,
     });
-    expect(updateBodies[0].title).toContain("design-a");
-    expect(productCalls).toEqual(["update:prod-1", "upload:prod-1", "upload:prod-2"]);
+    expect(updateFor("prod-1")!.title).toContain("design-a");
+    expect(updateFor("prod-2")).toMatchObject({
+      description: "A soft, everyday tee.",
+      price: 1999,
+    });
+    expect(updateFor("prod-2")!.title).toContain("design-b");
+    expect(productCalls).toEqual([
+      "update:prod-1",
+      "upload:prod-1",
+      "update:prod-2",
+      "upload:prod-2",
+    ]);
     // ONE press covered BOTH designs: both products were uploaded and both
     // were in the single apply payload, even though only design-a's tab was
     // open. Publish is still untouched.

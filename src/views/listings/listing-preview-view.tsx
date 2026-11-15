@@ -1296,7 +1296,7 @@ export function ListingPreviewView() {
       );
     } catch {
       toast.message(
-        `Created ${productId}. The local product list could not be updated, so Listing images may still ask you to create it.`,
+        `Saved ${productId}. The local product list could not be updated, so a later Send may ask you to create the product again.`,
       );
     }
   };
@@ -1573,6 +1573,11 @@ export function ListingPreviewView() {
             shopId ?? "resolved by Printify"
           } — copy and price only; print areas and artwork were not touched.`,
         });
+        // The stored entry must track the product's CURRENT title: the batch
+        // loop below uploads the other listings against their product's live
+        // title, and an entry frozen at creation time would 409 this listing
+        // on every later run where it is not the active one.
+        await rememberProduct(listing, productTitle, productId, shopId);
       }
 
       /*
@@ -1682,14 +1687,32 @@ export function ListingPreviewView() {
           continue;
         }
         try {
+          // Update this listing's copy BEFORE its upload, exactly like the
+          // active listing above. The upload route checks the product's
+          // CURRENT title against the title being sent, so uploading against
+          // the title stored at creation time 409-skipped every listing whose
+          // copy had changed since - which silently dropped most of the batch
+          // and left their products without the new images.
+          const otherCopy = copyFor(other);
+          const otherUpdated = await updateListingProduct({
+            productId: linkedOther.productId,
+            shopId: linkedOther.shopId,
+            copy: otherCopy,
+          });
+          const otherShopId = otherUpdated.shopId ?? linkedOther.shopId;
+          const otherTitle =
+            otherUpdated.title ?? otherCopy.title ?? linkedOther.title;
           const otherUploaded = await uploadListingImages({
             listing: other,
             images: otherImages,
             productId: linkedOther.productId,
-            shopId: linkedOther.shopId,
-            expectedTitle: linkedOther.title,
+            shopId: otherShopId,
+            expectedTitle: otherTitle,
           });
           included.add(linkedOther.productId);
+          // The stored entry tracks the product's live title and shop, so a
+          // later run cannot 409 this listing again on a stale record.
+          await rememberProduct(other, otherTitle, linkedOther.productId, otherUploaded.shopId);
           const otherSignature = signatureFor(other, linkedOther.productId);
           const otherSignatureImages = signatureImagesFor(other);
           if (otherSignature && otherSignatureImages) {
@@ -1701,7 +1724,7 @@ export function ListingPreviewView() {
           prepared.push({
             shopId: otherUploaded.shopId,
             productId: linkedOther.productId,
-            productTitle: otherUploaded.title ?? linkedOther.title ?? other.designName,
+            productTitle: otherUploaded.title ?? otherTitle,
             uploads: otherUploaded.uploads,
           });
         } catch (error) {
