@@ -15,26 +15,18 @@ const description =
 
   <h2>The honest status</h2>
   <ul>
-    <li>ListBulkly does not take payments today.</li>
-    <li>No subscription is sold, and no card is collected.</li>
-    <li>Pricing on the public page is marked PLACEHOLDER, not an offer.</li>
-    <li>Billing (Razorpay) stays off until a custom domain, a verified business identity and a real price exist.</li>
+    <li>Free plan: 5 listings a month, no card, no charge ever.</li>
+    <li>Paid plans (Starter $10 / Pro $20 / Business $30 a month) are billed monthly through Razorpay, in your currency at the day's exchange rate.</li>
+    <li>On deployments where billing is not yet live, no payment can be taken and prices are estimates, not an offer.</li>
   </ul>
 
-  <h2>When billing launches</h2>
-  <p>The following will be published on this page <em>before</em> the first charge:</p>
+  <h2>Refunds</h2>
   <ul>
-    <li>the plan name, price, currency and billing period;</li>
-    <li>what happens on cancellation and at the end of a paid period;</li>
-    <li>the refund window and how to request one;</li>
-    <li>how a failed or duplicate payment is corrected;</li>
-    <li>the legal entity and the tax details printed on the receipt.</li>
+    <li>A plan runs for the 31 days you paid for. Because the full workflow is usable free, a started month is generally non-refundable; we refund in full when a payment was duplicated or made in error, and when a technical fault on our side stopped you creating listings for most of the month.</li>
+    <li>Request one by email: <a href="mailto:listbulkly@gmail.com">listbulkly@gmail.com</a> with "billing" in the subject. We answer with the outcome and, for approved refunds, process it back through Razorpay to the original payment method.</li>
+    <li>Failed, stuck or duplicate payments are corrected at source: the plan is granted only after a verified, captured payment, and a webhook backstop grants it if your browser closed before the confirmation came back.</li>
+    <li>Cancelling stops the next renewal; the plan you paid for keeps working until its month ends.</li>
   </ul>
-  <p>
-    Until those points are filled in, treat every price on this site as a
-    <strong>PLACEHOLDER</strong> and do not send money to any account claiming to
-    sell ListBulkly.
-  </p>
 
   <h2>Provider charges are separate</h2>
   <p>

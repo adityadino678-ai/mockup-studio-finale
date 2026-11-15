@@ -5,6 +5,9 @@ import { createPrintifyClient, normalizeShopId, PrintifyError } from "@/lib/serv
 import { clampPlacement } from "@/lib/printify/fit";
 import { expandArtworkGroups } from "@/lib/printify/print-areas";
 import { validateBody } from "@/lib/security/validation";
+import { authClients } from "@/lib/auth/server";
+import { requireAuth } from "@/lib/auth/middleware";
+import { readUsage, recordProductCreated } from "@/lib/billing/server";
 
 interface UpdateProductBody {
   /** Explicit user confirmation is required before anything changes remotely. */
@@ -147,13 +150,56 @@ function sameOriginRequest(request: Request): boolean {
   }
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   if (!sameOriginRequest(request)) {
     return json({ error: "Cross-site requests are not allowed on this endpoint." }, 403);
   }
   const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
   if (contentType !== "application/json") {
     return json({ error: "Content-Type must be application/json" }, 415);
+  }
+
+  // --- plan & quota ---------------------------------------------------------
+  // Creating a Printify product is the one thing the plans meter: 5 in the
+  // free tier, more on the paid plans. The count lives server-side, keyed by
+  // the signed-in account, so it is not editable in the browser. When the
+  // deployment has no auth (local dev), the quota is skipped entirely.
+  const { admin, configured: authConfigured } = authClients(locals);
+  let usage: { plan: "free" | "starter" | "pro" | "business"; cap: number; used: number; planExpiresAt?: string | null } = { plan: "free", cap: 5, used: 0 };
+  let userId: string | null = null;
+  if (authConfigured) {
+    const token =
+      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+      request.headers.get("x-access-token") ??
+      "";
+    if (!token.trim()) {
+      return json(
+        {
+          error:
+            "Sign in to create listings — the free plan includes 5 listings a month. Open the app's landing page and use Sign up / Log in.",
+          code: "auth-required",
+          upgradeUrl: "/",
+        },
+        401,
+      );
+    }
+    const auth = await requireAuth(request, locals);
+    if (auth instanceof Response) return auth;
+    userId = auth.userId;
+    usage = await readUsage(admin, userId);
+    if (usage.used >= usage.cap) {
+      return json(
+        {
+          error: `You have used ${usage.used} of your ${usage.cap} listings this month on the ${usage.plan} plan. Upgrade on the Pricing page to keep creating.`,
+          code: "listing-cap",
+          plan: usage.plan,
+          cap: usage.cap,
+          used: usage.used,
+          upgradeUrl: "/pricing",
+        },
+        402,
+      );
+    }
   }
 
   const validation = validateBody("POST /api/printify/products", await request.json());
@@ -475,6 +521,17 @@ export const POST: APIRoute = async ({ request }) => {
       printAreaGroups: merged,
       shopId,
     });
+
+    // Quota: the product exists, so the month's count goes up. Done AFTER the
+    // create so a failed create never consumes quota; the count is
+    // best-effort from here (a database hiccup logs nothing and denies less).
+    if (userId) {
+      try {
+        await recordProductCreated(admin, userId);
+      } catch {
+        // The product was created — never fail the response over the counter.
+      }
+    }
 
     // The uploaded image ids are echoed back so the client can VERIFY that
     // every enabled variant really carries the artwork it was meant to. A

@@ -13,6 +13,7 @@
 // cached here too so the picker is instant on reload.
 
 import { getSetting, setSetting } from "@/lib/db/schema";
+import { getAuthToken } from "@/lib/auth/session";
 import {
   DEFAULT_PROVIDER_ID,
   baseUrlFor,
@@ -206,8 +207,10 @@ export function integrationHeaders(config: IntegrationConfig): Record<string, st
 }
 
 /**
- * `fetch` that automatically attaches any saved integration keys. Use this for
- * every `/api/**` call that talks to Printify or an AI provider.
+ * `fetch` that automatically attaches any saved integration keys AND the
+ * signed-in auth token. The token is what lets the server meter the listing
+ * quota against the account; signed-out visitors simply send no header and
+ * the tools stay login-free.
  */
 export async function authedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const config = await loadIntegrations();
@@ -215,6 +218,8 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
   for (const [key, value] of Object.entries(integrationHeaders(config))) {
     headers.set(key, value);
   }
+  const token = getAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   return fetch(input, { ...init, headers });
 }
 

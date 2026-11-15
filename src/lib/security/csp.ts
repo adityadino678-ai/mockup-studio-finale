@@ -9,6 +9,11 @@
 //   - self (same-origin API endpoints)
 //   - api.printify.com (Printify REST API)
 //   - *.supabase.co + wss://*.supabase.co (realtime / edge functions)
+//   - api.razorpay.com (Razorpay checkout's own calls from inside its iframe)
+//
+// frame-src exists for Razorpay Checkout: the payment modal is an iframe
+// hosted on api.razorpay.com, and without the directive it falls back to
+// default-src 'self' and the modal never opens.
 //
 // `base-uri 'self'` and `frame-ancestors 'none'` are defence in depth.
 //
@@ -20,7 +25,10 @@ const ALLOWED_CONNECT_SRC = [
   "https://api.printify.com",
   "https://*.supabase.co",
   "wss://*.supabase.co",
+  "https://api.razorpay.com",
 ].join(" ");
+
+const ALLOWED_FRAME_SRC = ["https://api.razorpay.com", "https://checkout.razorpay.com"].join(" ");
 
 /** Generate a per-request nonce (base64url, no padding). */
 export function makeNonce(): string {
@@ -49,6 +57,7 @@ export function cspHeader(nonce: string): string {
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`, // Tailwind inline styles + Google Fonts CSS
     `img-src 'self' data: blob: https:`,
     `connect-src ${ALLOWED_CONNECT_SRC}`,
+    `frame-src ${ALLOWED_FRAME_SRC}`,
     `font-src 'self' https://fonts.gstatic.com`,
     `object-src 'none'`,
     `base-uri 'self'`,

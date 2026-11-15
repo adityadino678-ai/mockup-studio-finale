@@ -131,6 +131,34 @@ const [authError, setAuthError] = React.useState<string | null>(null);
 const [authMode, setAuthMode] = React.useState<"signin" | "signup">("signin");
 const [supabaseConfigured, setSupabaseConfigured] = React.useState<boolean | null>(null);
 
+  // ---- Plan & listing usage (server-side quota) ----
+  interface BillingStatus {
+    signedIn: boolean;
+    authConfigured: boolean;
+    plan: string;
+    cap: number;
+    used: number;
+    remaining: number;
+    planExpiresAt: string | null;
+    razorpay: { configured: boolean };
+  }
+  const [billing, setBilling] = React.useState<BillingStatus | null>(null);
+
+  const refreshBilling = React.useCallback(async () => {
+    try {
+      const res = await authedFetch("/api/billing/status");
+      if (!res.ok) return;
+      const data = (await res.json()) as BillingStatus;
+      if (data.signedIn) setBilling(data);
+    } catch {
+      // Status is informational; a failed read just hides the card's numbers.
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void refreshBilling();
+  }, [authUser, refreshBilling]);
+
 const checkSupabase = async () => {
   try {
     const { authStatus, getSession } = await import("@/lib/auth/session");
@@ -819,6 +847,54 @@ const counts = useLiveQuery(async () => {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
+            <Badge variant="outline" className="uppercase tracking-wide">{billing ? billing.plan : "plan"}</Badge>
+            Plan &amp; listing usage
+          </CardTitle>
+          <CardDescription>
+            A listing is one Printify product created through ListBulkly. The count resets on the 1st (UTC).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {billing ? (
+            <>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-ink-muted">This month</span>
+                <span className="text-ink">
+                  <strong>{billing.used}</strong> of {billing.cap} listings
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={cn("h-full rounded-full", billing.used >= billing.cap ? "bg-danger" : "bg-forest")}
+                  style={{ width: `${Math.min(100, (billing.used / Math.max(1, billing.cap)) * 100)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-ink-muted">
+                  {billing.planExpiresAt && billing.plan !== "free"
+                    ? `Paid plan renews/ends ${new Date(billing.planExpiresAt).toLocaleDateString()}`
+                    : billing.razorpay.configured
+                      ? "Free plan — upgrade any time."
+                      : "Free plan — paid upgrades go live soon."}
+                </span>
+                <a href="/pricing" className="text-sm text-forest underline">
+                  {billing.plan === "free" ? "Upgrade" : "Change plan"}
+                </a>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-ink-muted">
+              {authUser
+                ? "Reading your plan…"
+                : "Sign in to see your plan. The free plan includes 5 listings a month."}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
             <KeyRound className="h-4 w-4 text-forest" /> API connections
           </CardTitle>
           <CardDescription>Keys stay in this browser.</CardDescription>
@@ -854,14 +930,14 @@ const counts = useLiveQuery(async () => {
                   />
                   <p className="text-xs text-ink-muted">
                     {"Create one at "}<a
-                      href="https://developers.printify.com/"
+                      href="https://printify.com/app/account/api-settings"
                       target="_blank"
                       rel="noreferrer"
                       className="text-forest underline"
                     >
-                      developers.printify.com
+                      printify.com → account → API settings
                     </a>
-                    {"."}
+                    {" — press “Personal access tokens”, name the token, and paste it here."}
                   </p>
                 </div>
 

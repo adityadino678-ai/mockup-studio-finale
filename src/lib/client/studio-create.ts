@@ -224,7 +224,12 @@ export async function createStudioProduct(
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      return failedResult(item, data?.error ?? `HTTP ${response.status}`, { title });
+      return failedResult(item, data?.error ?? `HTTP ${response.status}`, {
+        title,
+        ...(data?.code === "listing-cap" || data?.code === "auth-required"
+          ? { errorCode: data.code as "listing-cap" | "auth-required" }
+          : {}),
+      });
     }
     if (!data || typeof data !== "object") {
       // A 2xx with no readable body: the product may exist, but nothing can be
@@ -309,8 +314,9 @@ export async function createStudioProduct(
 
 /**
  * Creates a batch. Each item is isolated: one bad artwork does not stop the
- * remaining listings, which is what the old single `try` around the whole loop
- * did.
+ * remaining listings — EXCEPT a quota or sign-in stop, where every following
+ * item would fail the same way, so the rest are marked skipped with the
+ * reason instead of hammering the endpoint.
  */
 export async function createStudioProducts(
   context: StudioCreateContext,
@@ -320,13 +326,32 @@ export async function createStudioProducts(
   const results: StudioProductResult[] = [];
   const created: StudioProductResult[] = [];
   let failed = 0;
+  let stopCode: "listing-cap" | "auth-required" | null = null;
+  let stopMessage = "";
 
   for (const item of items) {
+    if (stopCode) {
+      const skipped: StudioProductResult = {
+        designId: item.designId,
+        title: item.designName,
+        designName: item.designName,
+        status: "skipped",
+        error: stopMessage,
+        createdAt: Date.now(),
+      };
+      results.push(skipped);
+      await hooks.onResult?.(skipped);
+      continue;
+    }
     hooks.onProgress?.(item);
     const result = await createStudioProduct(context, item);
     results.push(result);
     if (result.status === "created") created.push(result);
     if (result.status === "failed") failed++;
+    if (result.errorCode) {
+      stopCode = result.errorCode;
+      stopMessage = result.error ?? "The run was stopped.";
+    }
     await hooks.onResult?.(result);
   }
 

@@ -14,8 +14,8 @@ import { expect, test } from "@playwright/test";
 
 const LEGAL = [
   ["/privacy", "Privacy", "PLACEHOLDER"],
-  ["/terms", "Terms", "PLACEHOLDER"],
-  ["/refunds", "Refunds", "PLACEHOLDER"],
+  ["/terms", "Terms", "billing"],
+  ["/refunds", "Refunds", "Razorpay"],
   ["/cookies", "Cookies", "Draft"],
   ["/contact", "Contact", "not published yet"],
 ] as const;

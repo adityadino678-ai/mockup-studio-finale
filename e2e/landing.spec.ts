@@ -40,8 +40,8 @@ test.describe("the root landing page", () => {
 
     await page.locator("nav a[href='#pricing']").click();
     await expect(page).toHaveURL(/#pricing$/);
-    await expect(page.locator("#pricing")).toContainText("Pro monthly");
-    await expect(page.locator("#pricing")).toContainText("Pro yearly");
+    await expect(page.locator("#pricing")).toContainText("Starter · $10/mo");
+    await expect(page.locator("#pricing")).toContainText("Business · $30/mo");
 
     const dialog = page.locator("#auth");
     await page.locator("nav a[data-auth='up']").click();
@@ -93,12 +93,26 @@ test.describe("the root landing page", () => {
     await page.goto("/");
     for (const [label, mode] of [
       ["Get those hours back", "up"],
-      ["Go Pro", "up"],
-      ["Go Pro, yearly", "up"],
     ] as const) {
       const link = page.getByRole("link", { name: label, exact: true });
       await expect(link).toHaveAttribute("href", "#");
       await expect(link).toHaveAttribute("data-auth", mode);
+    }
+    // Every "Start free" CTA opens the dialog.
+    const startFree = page.getByRole("link", { name: "Start free", exact: true });
+    await expect(startFree).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
+      await expect(startFree.nth(i)).toHaveAttribute("data-auth", "up");
+    }
+
+    // The paid plans point at the pricing page, not the dialog.
+    for (const [label, href] of [
+      ["Choose Starter", "/pricing"],
+      ["Choose Pro", "/pricing"],
+      ["Choose Business", "/pricing"],
+    ] as const) {
+      const link = page.getByRole("link", { name: label, exact: true });
+      await expect(link).toHaveAttribute("href", href);
     }
 
     for (const [label, href] of [
@@ -138,15 +152,16 @@ test.describe("the root landing page", () => {
     await expect(page.locator("#t3")).toHaveText("LONG SLOGAN EXC");
   });
 
-  test("pricing is explicitly a placeholder and the page states the no-auto-publish rule", async ({
+  test("pricing shows the real tiers and the page states the no-auto-publish rule", async ({
     page,
   }) => {
     await page.goto("/");
 
-    await expect(page.locator("#pricing")).toContainText("PLACEHOLDER");
-    await expect(page.locator("#pricing")).toContainText(
-      "Prices and limits are placeholders. Set them in your plans config before launch.",
-    );
+    await expect(page.locator("#pricing")).toContainText("5 listings a month");
+    await expect(page.locator("#pricing")).toContainText("Starter · $10/mo");
+    await expect(page.locator("#pricing")).toContainText("Pro · $20/mo");
+    await expect(page.locator("#pricing")).toContainText("Business · $30/mo");
+    await expect(page.locator("#pricing")).toContainText("that day's exchange rate");
     await expect(page.locator("#trust")).toContainText("Nothing goes live by itself");
     await expect(page.locator("#trust")).toContainText("Send stops at an unpublished draft");
 

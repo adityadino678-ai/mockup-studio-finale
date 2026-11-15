@@ -25,6 +25,8 @@ export const serverEnv = {
   resendFrom: () => getSecret("RESEND_FROM"),
   razorpayKeyId: () => getSecret("RAZORPAY_KEY_ID"),
   razorpayKeySecret: () => getSecret("RAZORPAY_KEY_SECRET"),
+  /** The webhook signing secret, set in the Razorpay dashboard and here. */
+  razorpayWebhookSecret: () => getSecret("RAZORPAY_WEBHOOK_SECRET"),
   // Supabase Auth/sync. The service-role key is optional; auth needs only the
   // project URL plus the anon key.
   supabaseUrl: () => getSecret("SUPABASE_URL"),

@@ -112,7 +112,10 @@ const upload = (mockupId, src = `https://cdn.printify.com/${mockupId}.png`) => (
 async function testMerge() {
   console.log("merge: new images first, existing kept, not_linked first");
   /* Printify answers `selected_mockups` as an object keyed by mockup id and a
-     group list; this is the shape the bookmarklet normalises. */
+     group list; this is the shape the bookmarklet normalises.
+     Protocol 2 replaces by default; the merge is the explicit replace:false
+     path, so this test opts into it. */
+  const mergePayload = { source: "mockup-studio", version: 1, replace: false };
   const layout = {
     groups: [
       { group_key: "other", label: "Other", variant_ids: [11, 12], mockup_ids: ["old-1"] },
@@ -134,9 +137,7 @@ async function testMerge() {
     return jsonResponse({ success: true });
   });
   makeEnvironment({ fetchImpl });
-  const results = await applyMockups({
-    source: "mockup-studio",
-    version: 1,
+  const results = await applyMockups({ ...mergePayload,
     products: [
       {
         shopId: 5,

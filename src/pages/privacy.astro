@@ -69,6 +69,19 @@ const description =
     <li><strong>Razorpay</strong> — payments, when billing is switched on. Payment details are entered with Razorpay; we never receive full card numbers.</li>
     <li><strong>Cloudflare</strong> — hosting, CDN and Worker runtime for this site.</li>
   </ul>
+
+  <h2>The companion browser extension</h2>
+  <p>
+    The "Mockup Studio Printify Bridge" extension runs in <strong>your</strong>
+    browser and keeps the same rules:
+  </p>
+  <ul>
+    <li>It never sees, stores or transmits a Printify password or the app's Printify API key, and it asks for no storage permission — nothing it sees is saved after the run.</li>
+    <li>When you press the one-click apply button, the image list (product ids, mockup ids, image URLs, file names, titles) is sent only to <code>printify.com</code>, only in your own signed-in session, and is not kept after that run.</li>
+    <li>When you ask the agent for Etsy research and no Etsy API key is configured, it opens the public Etsy search page in a background tab in your own browser and reads the listing titles and prices that page already showed you. The query and the read cards go to the app page, not to any server of the extension's own, and nothing is kept after the run.</li>
+    <li>It has no analytics, no advertising, no tracking, no third parties and no server of its own, and it runs no remotely hosted code.</li>
+  </ul>
+
   <p>
     Printify and Etsy are independent companies. ListBulkly is not affiliated with
     or endorsed by either of them, and their terms apply to the accounts you connect.

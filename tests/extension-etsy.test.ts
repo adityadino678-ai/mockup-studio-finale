@@ -186,7 +186,8 @@ describe("extension files", () => {
     };
     expect(manifest.host_permissions).toContain("https://*.etsy.com/*");
     expect(manifest.host_permissions).toContain("https://etsy.com/*");
-    expect(manifest.version).toBe("1.2.1");
+    // Bumped for the first store submission (real ListBulkly icons).
+    expect(manifest.version).toBe("1.2.2");
   });
 
   it("announces protocol 2 and the Etsy capability", () => {

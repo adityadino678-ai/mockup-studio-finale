@@ -1232,15 +1232,20 @@ position pickers here:
   `listbulkly.com` is PURCHASED (Nov 2026) and attached to the Worker via
   `wrangler.jsonc` routes (`custom_domain: true`, apex + www; the zone's
   nameservers are already Cloudflare's). `PUBLIC_SITE_URL=https://listbulkly.com`
-  is set in `.env` (build-time, gitignored) so canonical + og:url emit. Still
-  open: production mail — Resend needs the domain verified (SPF/DKIM/DMARC
-  records) behind an adapter, and Supabase Auth should switch to that custom
-  SMTP + set its Site URL to `https://listbulkly.com`. Razorpay is not in live
-  mode. The companion extension is a beta unpacked prototype, not a store
-  build. Printify is **not** a config blocker: it is bring-your-own-key, and
-  the send/publish path is unproven only because it has not been run with a
-  real key and a real printify.com session (see the mockup selection note
-  below) — not because a server secret is missing.
+  is set in `.env` (build-time, gitignored) so canonical + og:url emit. **Email:
+  DONE in Resend** (Nov 2026) — the sending domain is verified (DKIM/SPF/CNAME
+  records live on the Cloudflare zone; a test email to listbulkly@gmail.com was
+  delivered), and the Worker holds `RESEND_API_KEY` (a `sending_access` key
+  scoped to the domain) + `RESEND_FROM=ListBulkly <noreply@listbulkly.com>`.
+  Remaining: point Supabase Auth's custom SMTP at Resend
+  (`smtp.resend.com`, user `resend`, the same API key as password) and set its
+  Site URL to `https://listbulkly.com` — dashboard steps, the Supabase MCP has
+  no auth-config tool. Razorpay is not in live mode. The companion extension is
+  a beta unpacked prototype, not a store build. Printify is **not** a config
+  blocker: it is bring-your-own-key, and the send/publish path is unproven only
+  because it has not been run with a real key and a real printify.com session
+  (see the mockup selection note below) — not because a server secret is
+  missing.
 - **Supabase sign-up is instant in production, email-confirmation in `astro
   dev`.** The deployed Worker already carries `SUPABASE_SERVICE_ROLE`
   (`npx wrangler secret list`), so production `/api/auth/status` reports

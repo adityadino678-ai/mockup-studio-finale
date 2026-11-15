@@ -45,9 +45,15 @@ describe("landing page content rules", () => {
     expect(landing).toContain('data-auth="in"');
   });
 
-  it("labels unfinished pricing as PLACEHOLDER and keeps the visible close-out note", () => {
-    expect(landing).toContain("PLACEHOLDER");
-    expect(landing).toContain("Prices and limits are placeholders");
+  it("shows the real plan tiers and the exchange-rate billing note", () => {
+    expect(landing).toContain("5 listings a month");
+    expect(landing).toContain("Starter · $10/mo");
+    expect(landing).toContain("Pro · $20/mo");
+    expect(landing).toContain("Business · $30/mo");
+    expect(landing).toContain("that day's exchange rate");
+    // The placeholder pricing must never come back in visible text (the one
+    // remaining PLACEHOLDER is an edit-me comment for the maintainer).
+    expect(landing.replace(/<!--[\s\S]*?-->/g, "")).not.toContain("PLACEHOLDER");
   });
 
   it("states the no-auto-publish rule and Printify-only relationship", () => {

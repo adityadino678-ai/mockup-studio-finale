@@ -759,6 +759,12 @@ export interface StudioProductResult {
   shopId?: number;
   status: "created" | "failed" | "skipped";
   error?: string;
+  /**
+   * Set only when the failure is a QUOTA or sign-in stop — the server's
+   * listing-cap/auth-required codes. The batch loop stops there, because
+   * every following item would fail the same way.
+   */
+  errorCode?: "listing-cap" | "auth-required";
   /** The Printify image ids uploaded for this product's artwork groups. */
   imageIds?: string[];
   createdAt: number;
