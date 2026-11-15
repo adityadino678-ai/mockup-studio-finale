@@ -34,7 +34,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { toast } from "sonner";
 import { Reorder, useDragControls } from "framer-motion";
 import { zip, type Zippable } from "fflate";
-import { db, getSetting } from "@/lib/db/schema";
+import { db, getSetting, setSetting } from "@/lib/db/schema";
 import { getAssetBlob, logActivity } from "@/lib/db/repo";
 import { authedFetch } from "@/lib/client/integrations";
 import { mockupImageForUpload } from "@/lib/client/mockup-upload";
@@ -129,6 +129,7 @@ import {
   Loader2,
   Send,
   Sparkles,
+  Unlink,
 } from "lucide-react";
 
 interface SelectedImage {
@@ -1848,6 +1849,43 @@ export function ListingImagesView() {
   const listingNumber = (listing: StudioListing): number =>
     listings.findIndex((entry) => entry.listingId === listing.listingId) + 1;
 
+  /**
+   * Removes a listing's stored Printify product link.
+   *
+   * Send refuses to touch a product it cannot find: Printify answers "no
+   * product in any shop this key can reach" when the product was deleted
+   * upstream or the key now belongs to a different account. The stored link
+   * is the stale part, so unlinking is the recovery: the row returns to
+   * "Create product", and the next creation records a link the key can reach.
+   * Nothing on Printify is touched - if the product still exists under a
+   * different account, unlinking simply stops pointing at it.
+   */
+  const unlinkProduct = async (listing: StudioListing) => {
+    if (sending || rendering) return;
+    try {
+      const stored = await getSetting<StudioProductResult[]>(RESULTS_KEY, []);
+      const list = Array.isArray(stored) ? stored : [];
+      await setSetting(
+        RESULTS_KEY,
+        list.filter((entry) => entry.designId !== listing.listingId),
+      );
+      // The product draft table feeds the artifact rail and the Export
+      // Center with the same link; rows for this listing are removed with it.
+      await db.productDrafts.where("designId").equals(listing.listingId).delete();
+      await logActivity(
+        "design.update",
+        `Unlinked the Printify product for "${listing.designName}"`,
+      );
+      toast.success(
+        `Unlinked "${listing.designName}" from its Printify product. Create the product again in the Studio, then Send.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not unlink the Printify product",
+      );
+    }
+  };
+
   const renderListingRow = (listing: StudioListing) => {
     const selected = selectionFor(listing);
     const cards = infoCardsFor(listing);
@@ -1908,14 +1946,25 @@ export function ListingImagesView() {
             <div className="flex flex-wrap items-center gap-2">
               {ownOrderOn && <Badge variant="outline">Own order</Badge>}
               {result?.remoteProductId ? (
-                <a
-                  href={`https://printify.com/app/products/${result.remoteProductId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-2 py-1 text-xs text-forest hover:bg-surface-muted"
-                >
-                  <ExternalLink className="h-3 w-3" /> Product
-                </a>
+                <>
+                  <a
+                    href={`https://printify.com/app/products/${result.remoteProductId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-2 py-1 text-xs text-forest hover:bg-surface-muted"
+                  >
+                    <ExternalLink className="h-3 w-3" /> Product
+                  </a>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void unlinkProduct(listing)}
+                    disabled={rendering || sending}
+                    title="Remove the stored product link, so the listing can be linked to a fresh product. Use this when Printify cannot find the product."
+                  >
+                    <Unlink className="h-3 w-3" /> Unlink
+                  </Button>
+                </>
               ) : (
                 <Button size="sm" variant="ghost" asChild>
                   <Link href="/printify-studio">Create product</Link>

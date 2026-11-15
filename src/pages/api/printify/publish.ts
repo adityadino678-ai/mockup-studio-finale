@@ -118,7 +118,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!owned) {
       return json(
         {
-          error: `Printify has no product ${body.productId} in any shop this key can reach, so there is nothing to publish. It may have been deleted, or it belongs to a different Printify account.`,
+          error: `Printify has no product ${body.productId} in any shop this key can reach, so there is nothing to publish. It may have been deleted, or your API key now belongs to a different Printify account. If the product is gone, use "Unlink product" on the listing, then create the product again.`,
           productId: body.productId,
           shopId: preferredShopId,
         },

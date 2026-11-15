@@ -145,6 +145,7 @@ import {
   Loader2,
   Rocket,
   Sparkles,
+  Unlink,
 } from "lucide-react";
 
 /** Printify's own limit on enabled variants per product. */
@@ -1941,6 +1942,36 @@ export function ListingPreviewView() {
     );
   };
 
+  /**
+   * Removes the listing's stored Printify product link.
+   *
+   * The same recovery as Listing images' Unlink: when Printify cannot find the
+   * linked product in any shop the key reaches, the stored link is the stale
+   * part. Unlinking returns the row to "Not created yet", and the next Send
+   * (or a Studio create) records a link the key can reach. Nothing on
+   * Printify is touched.
+   */
+  const unlinkProduct = async (listingId: string, designName: string) => {
+    if (publishing || inFlight.current) return;
+    try {
+      const stored = await getSetting<StudioProductResult[]>(RESULTS_KEY, []);
+      const list = Array.isArray(stored) ? stored : [];
+      await setSetting(
+        RESULTS_KEY,
+        list.filter((entry) => entry.designId !== listingId),
+      );
+      await db.productDrafts.where("designId").equals(listingId).delete();
+      await logActivity("design.update", `Unlinked the Printify product for "${designName}"`);
+      toast.success(
+        `Unlinked "${designName}" from its Printify product. Create the product again in the Studio, then Send.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not unlink the Printify product",
+      );
+    }
+  };
+
   // --- render ---------------------------------------------------------------
   const listing = activeListing;
   const listingCopy = listing ? copyFor(listing) : null;
@@ -2364,14 +2395,27 @@ export function ListingPreviewView() {
                       <dt className="text-ink-muted">Printify product</dt>
                       <dd className="text-ink">
                         {linkedProduct ? (
-                          <button
-                            type="button"
-                            onClick={() => openPrintifyProduct(linkedProduct.productId)}
-                            className="inline-flex items-center gap-1 font-mono text-xs text-forest hover:underline"
-                          >
-                            {linkedProduct.productId}
-                            <ExternalLink className="h-3 w-3" />
-                          </button>
+                          <span className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openPrintifyProduct(linkedProduct.productId)}
+                              className="inline-flex items-center gap-1 font-mono text-xs text-forest hover:underline"
+                            >
+                              {linkedProduct.productId}
+                              <ExternalLink className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void unlinkProduct(listing.listingId, listing.designName)
+                              }
+                              disabled={publishing || inFlight.current}
+                              title="Remove the stored product link, so the listing can be linked to a fresh product. Use this when Printify cannot find the product."
+                              className="inline-flex items-center gap-1 rounded-md border border-border-subtle px-1.5 py-0.5 text-xs text-ink-muted hover:bg-surface-muted hover:text-ink"
+                            >
+                              <Unlink className="h-3 w-3" /> Unlink
+                            </button>
+                          </span>
                         ) : (
                           <span className="text-ink-muted">Not created yet</span>
                         )}

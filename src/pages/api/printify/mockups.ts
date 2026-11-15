@@ -166,6 +166,19 @@ export const POST: APIRoute = async ({ request }) => {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(productId)) {
     return json({ error: "The Printify product id is not valid" }, 400);
   }
+  // Printify product ids are 24 lowercase hex characters (observed live by the
+  // Printify spike). An id outside that shape cannot exist in any shop, so
+  // resolving it would only answer the vaguer 404 below. Name the stale link
+  // instead: that is the one thing the user can act on.
+  if (!/^[0-9a-f]{24}$/.test(productId)) {
+    return json(
+      {
+        error: `The stored Printify product link "${productId}" is not a valid Printify product id, so the upload cannot continue. Use "Unlink product" on the listing, then create the product again.`,
+        productId,
+      },
+      400,
+    );
+  }
   if (!Array.isArray(body.images) || body.images.length === 0) {
     return json({ error: "Select at least one rendered listing image" }, 400);
   }
@@ -217,7 +230,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (!owned) {
       return json(
         {
-          error: `Printify has no product ${productId} in any shop this key can reach. It may have been deleted, or it belongs to a different Printify account.`,
+          error: `Printify has no product ${productId} in any shop this key can reach. It may have been deleted, or your API key now belongs to a different Printify account. If the product is gone, use "Unlink product" on the listing, then create the product again.`,
           productId,
           shopId: preferredShopId,
         },
