@@ -186,7 +186,7 @@ describe("extension files", () => {
     };
     expect(manifest.host_permissions).toContain("https://*.etsy.com/*");
     expect(manifest.host_permissions).toContain("https://etsy.com/*");
-    expect(manifest.version).toBe("1.2.0");
+    expect(manifest.version).toBe("1.2.1");
   });
 
   it("announces protocol 2 and the Etsy capability", () => {

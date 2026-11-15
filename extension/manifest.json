@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Mockup Studio Printify Bridge",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Applies the mockup images Mockup Studio prepared to a Printify product, and reads public Etsy search results, inside your own signed-in browser.",
   "minimum_chrome_version": "102",
   "permissions": ["tabs", "scripting", "activeTab"],
@@ -10,6 +10,8 @@
     "https://*.printify.com/*",
     "https://etsy.com/*",
     "https://*.etsy.com/*",
+    "https://listbulkly.com/*",
+    "https://www.listbulkly.com/*",
     "https://mockup-studio.adityadino678.workers.dev/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -20,6 +22,8 @@
   "content_scripts": [
     {
       "matches": [
+        "https://listbulkly.com/*",
+        "https://www.listbulkly.com/*",
         "https://mockup-studio.adityadino678.workers.dev/*",
         "http://localhost/*",
         "http://127.0.0.1/*"

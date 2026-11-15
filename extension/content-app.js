@@ -41,6 +41,8 @@
 
   function originAllowed() {
     if (location.origin === "https://mockup-studio.adityadino678.workers.dev") return true;
+    if (location.origin === "https://listbulkly.com") return true;
+    if (location.origin === "https://www.listbulkly.com") return true;
     if (location.protocol !== "http:") return false;
     var host = location.hostname;
     return host === "localhost" || host === "127.0.0.1";
