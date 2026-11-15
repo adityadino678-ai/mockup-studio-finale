@@ -5,7 +5,11 @@ How this app is built, deployed, and verified. For architecture reasoning see
 
 ## Live
 
-**https://mockup-studio.adityadino678.workers.dev**
+**https://listbulkly.com** (custom domain, attached Nov 2026)
+
+`https://www.listbulkly.com` serves the same site; the canonical origin is the
+apex. The old workers.dev address
+(`https://mockup-studio.adityadino678.workers.dev`) keeps working as a fallback.
 
 Public. No login required, and every visitor gets their own empty workspace,
 stored in their own browser. An account is optional and exists for signing in
@@ -20,6 +24,7 @@ only — no workspace data leaves the browser to the server.
 | workers.dev subdomain | `adityadino678` |
 | Worker | `mockup-studio` |
 | Worker URL | `mockup-studio.adityadino678.workers.dev` |
+| Custom domain | `listbulkly.com` (apex + www, zone on this account, NS `princess`/`patryk.ns.cloudflare.com`) |
 
 The Worker shares an account with an older project (`shy-morning-46e6`) and three
 Pages projects (`voiceshift`, `voiceshift2`, `voiceshift3`). Do not disturb them.
@@ -164,8 +169,10 @@ Supported names: `PRINTIFY_API_KEY`, `ETSY_API_KEY`, `ETSY_ACCESS_TOKEN`,
 `RESEND_FROM`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `PUBLIC_SITE_URL`.
 
 `PUBLIC_SITE_URL` is not a secret: it is the real public origin, and it is the
-only switch that emits canonical / `og:url` tags. Leave it unset until a custom
-domain exists; a `*.workers.dev` value is rejected. `RESEND_*`,
+only switch that emits canonical / `og:url` tags. It is set to
+`https://listbulkly.com` in `.env` (build-time, gitignored) since the domain was
+purchased in Nov 2026 — deploys built on this machine pick it up
+automatically. A `*.workers.dev` value is rejected. `RESEND_*`,
 `RAZORPAY_*` and the Supabase values are optional and are reported, never
 guessed, by `GET /api/integrations/readiness` (read-only: it never sends mail,
 never charges and never returns a secret value).

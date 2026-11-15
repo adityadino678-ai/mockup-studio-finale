@@ -46,7 +46,7 @@ state (the account screens hydrate from `/api/auth/status` client-side).
 
 | What | Where |
 |---|---|
-| **Live site** | https://mockup-studio.adityadino678.workers.dev |
+| **Live site** | https://listbulkly.com (custom domain, attached 2026-11) · workers.dev fallback: https://mockup-studio.adityadino678.workers.dev |
 | GitHub | https://github.com/adityadino678-ai/mockup-studio-finale (public, branch `main`) |
 | Local folder | `C:\Users\hp\OneDrive\Documents\ANTIGRAVITY PROJECTS\mockup studio finale\mockup-studio-finale` |
 | Source ZIP | `C:\Users\hp\Projects\Mockup Studio 2.0\mockup-studio-finale-source.zip` |
@@ -1228,14 +1228,19 @@ position pickers here:
 
 ## Known gaps
 
-- **Current launch blockers (as of this branch).** There is no custom domain, so
-  production mail (Resend behind an adapter; Supabase sends its own
-  verification/reset mail) and canonical URLs still depend on a purchased domain.
-  Razorpay is not in live mode. The companion extension is a beta unpacked
-  prototype, not a store build. Printify is **not** a config blocker: it is
-  bring-your-own-key, and the send/publish path is unproven only because it has
-  not been run with a real key and a real printify.com session (see the mockup
-  selection note below) — not because a server secret is missing.
+- **Current launch blockers (as of this branch).** The custom domain
+  `listbulkly.com` is PURCHASED (Nov 2026) and attached to the Worker via
+  `wrangler.jsonc` routes (`custom_domain: true`, apex + www; the zone's
+  nameservers are already Cloudflare's). `PUBLIC_SITE_URL=https://listbulkly.com`
+  is set in `.env` (build-time, gitignored) so canonical + og:url emit. Still
+  open: production mail — Resend needs the domain verified (SPF/DKIM/DMARC
+  records) behind an adapter, and Supabase Auth should switch to that custom
+  SMTP + set its Site URL to `https://listbulkly.com`. Razorpay is not in live
+  mode. The companion extension is a beta unpacked prototype, not a store
+  build. Printify is **not** a config blocker: it is bring-your-own-key, and
+  the send/publish path is unproven only because it has not been run with a
+  real key and a real printify.com session (see the mockup selection note
+  below) — not because a server secret is missing.
 - **Supabase sign-up is instant in production, email-confirmation in `astro
   dev`.** The deployed Worker already carries `SUPABASE_SERVICE_ROLE`
   (`npx wrangler secret list`), so production `/api/auth/status` reports

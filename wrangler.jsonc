@@ -4,6 +4,19 @@
   "main": "./dist/_worker.js/index.js",
   "compatibility_date": "2026-10-16",
   "compatibility_flags": ["nodejs_compat"],
+  // Keep the workers.dev address serving too. It is the documented fallback
+  // (production e2e runs use it as BASE_URL) and the canonical tags now point
+  // search engines at listbulkly.com, so it cannot compete with the real domain.
+  "workers_dev": true,
+  // The production domains. `custom_domain: true` makes wrangler attach them to
+  // this Worker on deploy: Cloudflare creates the DNS record and the edge
+  // certificate for each, so the apex and www both serve the site. The zone
+  // (listbulkly.com) already lives on this Cloudflare account — its
+  // nameservers are princess/patryk.ns.cloudflare.com.
+  "routes": [
+    { "pattern": "listbulkly.com", "custom_domain": true },
+    { "pattern": "www.listbulkly.com", "custom_domain": true }
+  ],
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist"
