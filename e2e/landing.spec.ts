@@ -161,7 +161,7 @@ test.describe("the root landing page", () => {
     await expect(page.locator("#pricing")).toContainText("Starter · $10/mo");
     await expect(page.locator("#pricing")).toContainText("Pro · $20/mo");
     await expect(page.locator("#pricing")).toContainText("Business · $30/mo");
-    await expect(page.locator("#pricing")).toContainText("that day's exchange rate");
+    await expect(page.locator("#pricing")).not.toContainText("exchange rate");
     await expect(page.locator("#trust")).toContainText("Nothing goes live by itself");
     await expect(page.locator("#trust")).toContainText("Send stops at an unpublished draft");
 

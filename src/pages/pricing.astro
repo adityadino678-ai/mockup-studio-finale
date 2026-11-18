@@ -16,7 +16,7 @@ import SketchLayout from "@/layouts/SketchLayout.astro";
 import { SketchNav } from "@/components/sketch/nav";
 import { SketchFooter } from "@/components/sketch/footer";
 import { BillingButton } from "@/components/billing/billing-button";
-import { PLANS, FALLBACK_USD_INR, type PlanDef } from "@/lib/billing/plans";
+import { PLANS, type PlanDef } from "@/lib/billing/plans";
 
 const title = "Pricing — ListBulkly";
 const description =
@@ -35,8 +35,6 @@ const footerLinks = [
   { href: "/cookies", label: "Cookies" },
   { href: "/contact", label: "Contact" },
 ];
-
-const inr = (usd: number) => Math.round((usd * FALLBACK_USD_INR) / 10) * 10;
 
 const features: Record<string, string[]> = {
   free: [
@@ -74,9 +72,9 @@ const features: Record<string, string[]> = {
     <h1 class="sk-part-title">Pick your volume</h1>
     <p class="sk-note">
       A listing is one Printify product created through ListBulkly. Every plan uses
-      the whole workflow — designs, mockups, placement, copy, exports. Prices are in
-      dollars and billed monthly in your currency at <strong>that day's exchange
-      rate</strong>, so the amount in rupees moves with the market.
+      the whole workflow — designs, mockups, placement, copy, exports. Prices are
+      in dollars, billed monthly; the checkout shows the exact amount in your
+      currency before you confirm.
     </p>
 
     <div class="sk-stack">
@@ -102,7 +100,6 @@ const features: Record<string, string[]> = {
                 <BillingButton
                   planId={plan.id}
                   label={`Choose ${plan.label}`}
-                  amountNote={`≈ ₹${inr(plan.usd).toLocaleString("en-IN")} at today's rate · per month`}
                   client:load
                 />
               )}
@@ -126,9 +123,8 @@ const features: Record<string, string[]> = {
         <summary>I pay in rupees — what will it cost?</summary>
         <p>
           The dollar price is the base ($10 / $20 / $30 a month). At checkout the
-          amount is converted at that day's dollar-to-rupee exchange rate, so you pay
-          the honest market rate — no fixed, stale rupee price. The page's "≈ ₹" line
-          is an estimate; the checkout window shows the exact amount before you pay.
+          exact amount is shown in your currency before you confirm — no surprises,
+          and nothing is charged until you approve it.
         </p>
       </details>
       <details class="sk-faq">

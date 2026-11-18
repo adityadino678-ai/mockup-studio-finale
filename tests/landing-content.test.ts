@@ -45,12 +45,16 @@ describe("landing page content rules", () => {
     expect(landing).toContain('data-auth="in"');
   });
 
-  it("shows the real plan tiers and the exchange-rate billing note", () => {
+  it("shows the real plan tiers without exchange-rate amounts", () => {
     expect(landing).toContain("5 listings a month");
     expect(landing).toContain("Starter · $10/mo");
     expect(landing).toContain("Pro · $20/mo");
     expect(landing).toContain("Business · $30/mo");
-    expect(landing).toContain("that day's exchange rate");
+    // The pre-checkout pages never promise a live-rate amount (owner decision,
+    // 2026-11-18): only the checkout window shows the exact local amount.
+    expect(landing).not.toContain("exchange rate");
+    expect(landing).not.toContain("at today's rate");
+    expect(landing).not.toMatch(/≈\s*₹/u);
     // The placeholder pricing must never come back in visible text (the one
     // remaining PLACEHOLDER is an edit-me comment for the maintainer).
     expect(landing.replace(/<!--[\s\S]*?-->/g, "")).not.toContain("PLACEHOLDER");

@@ -48,16 +48,12 @@ function loadCheckout(): Promise<boolean> {
 export function BillingButton({
   planId,
   label,
-  amountNote,
 }: {
   planId: "starter" | "pro" | "business";
   label: string;
-  /** The today's-rate line, server-rendered; refreshed after a live status. */
-  amountNote: string;
 }) {
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
-  const [note, setNote] = React.useState(amountNote);
 
   const onClick = async () => {
     if (busy) return;
@@ -66,14 +62,6 @@ export function BillingButton({
     try {
       const res = await authedFetch("/api/billing/status");
       const status = (await res.json()) as BillingStatus;
-      const live = status.plans?.find((p) => p.id === planId);
-      if (live) {
-        setNote(
-          live.inr
-            ? `≈ ₹${live.inr.toLocaleString("en-IN")} at today's rate`
-            : `$${live.usd}/month`,
-        );
-      }
       if (!status.signedIn) {
         // The landing page's dialog is the only sign-up surface.
         window.location.assign("/?auth=up");
@@ -138,7 +126,6 @@ export function BillingButton({
       <button type="button" onClick={onClick} disabled={busy} className="sk-btn">
         {busy ? "Opening checkout…" : label}
       </button>
-      <span className="billing-button__note">{note}</span>
       {message ? <p className="billing-button__message">{message}</p> : null}
     </div>
   );
