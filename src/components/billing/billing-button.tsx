@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { authedFetch } from "@/lib/client/integrations";
 
 /**
  * The "Choose <plan>" button under each paid plan on /pricing.
@@ -63,7 +64,7 @@ export function BillingButton({
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/billing/status");
+      const res = await authedFetch("/api/billing/status");
       const status = (await res.json()) as BillingStatus;
       const live = status.plans?.find((p) => p.id === planId);
       if (live) {
@@ -82,7 +83,7 @@ export function BillingButton({
         setMessage("Payments go live soon — the plan prices are final, checkout opens shortly.");
         return;
       }
-      const orderRes = await fetch("/api/billing/checkout", {
+      const orderRes = await authedFetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan: planId }),
@@ -111,7 +112,7 @@ export function BillingButton({
           razorpay_payment_id: string;
           razorpay_signature: string;
         }) => {
-          const verifyRes = await fetch("/api/billing/verify", {
+          const verifyRes = await authedFetch("/api/billing/verify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(result),
