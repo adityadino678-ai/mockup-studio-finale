@@ -39,7 +39,7 @@ describe("computeLaunchReadiness", () => {
     expect(byId["site-url"]).toContain("no custom domain yet");
     expect(byId.auth).toContain("SUPABASE_URL");
     expect(byId.email).toContain("until a verified domain exists");
-    expect(byId.billing).toContain("PLACEHOLDER");
+    expect(byId.billing).toContain("payments go live soon");
     expect(byId.extension).toBe(
       "Beta prototype: unpacked install, protocol 2 required, store listing not published.",
     );

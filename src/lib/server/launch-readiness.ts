@@ -121,8 +121,8 @@ export function computeLaunchReadiness(input: LaunchReadinessInput): LaunchReadi
     label: "Billing",
     ready: billingReady,
     detail: billingReady
-      ? "Both Razorpay keys are set, but live mode stays off and pricing is PLACEHOLDER until real launch data exists."
-      : "Billing needs both Razorpay keys. Live mode stays off and pricing is PLACEHOLDER until real launch data exists.",
+      ? "Both Razorpay keys are set and the real plans are on /pricing: Free 5 / Starter 150 / Pro 250 / Business 400 listings a month. Checkout converts the dollar price at the live exchange rate and the webhook grants the plan."
+      : "Billing needs both Razorpay keys. Without them checkout honestly reports that payments go live soon.",
   };
 
   const items: ReadinessItem[] = [

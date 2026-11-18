@@ -28,7 +28,7 @@ export function SketchFooter({
             key={link.label}
             className="sk-footer__soon"
             aria-disabled="true"
-            title="PLACEHOLDER — this page has not been published yet"
+            title="This page has not been published yet"
           >
             {link.label}
             <small>soon</small>

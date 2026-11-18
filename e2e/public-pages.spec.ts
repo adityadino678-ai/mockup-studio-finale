@@ -13,11 +13,11 @@ import { expect, test } from "@playwright/test";
  */
 
 const LEGAL = [
-  ["/privacy", "Privacy", "PLACEHOLDER"],
+  ["/privacy", "Privacy", "sole proprietor"],
   ["/terms", "Terms", "billing"],
   ["/refunds", "Refunds", "Razorpay"],
   ["/cookies", "Cookies", "Draft"],
-  ["/contact", "Contact", "not published yet"],
+  ["/contact", "Contact", "listbulkly@gmail.com"],
 ] as const;
 
 test.describe("public legal pages", () => {
